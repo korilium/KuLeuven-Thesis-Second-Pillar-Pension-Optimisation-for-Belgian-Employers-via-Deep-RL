@@ -4,8 +4,7 @@ import requests
 import xml.etree.ElementTree as ET
 import pandas as pd
 from io import BytesIO
-import date 
-
+from datetime import date
 
 
 
@@ -37,8 +36,8 @@ def extractDataYieldNBB(startPeriod: str = "1993-03", endPeriod: str = date.toda
         for obs in series.findall("generic:Obs", NS):
             records.append({
                 **meta,
-                "DATE":  obs.find("generic:ObsDimension", NS).attrib["value"],
-                "YIELD": obs.find("generic:ObsValue",     NS).attrib["value"],
+                "DATE":  obs.find("generic:ObsDimension", NS).attrib["value"], # type: ignore
+                "YIELD": obs.find("generic:ObsValue",     NS).attrib["value"], # type: ignore
             })
 
     # ── Build DataFrame ───────────────────────────────────────────────────────
@@ -54,7 +53,7 @@ def extractDataYieldNBB(startPeriod: str = "1993-03", endPeriod: str = date.toda
 
 df = extractDataYieldNBB(startPeriod="2000-01")
 
-df
+
 
 
 

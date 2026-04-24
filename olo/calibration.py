@@ -11,55 +11,110 @@ dfYield = extractDataYieldNBB(startPeriod="2000-01")
 df10Y = dfYield[dfYield["IROLOBE2_MATUR"] == "10Y"].copy().reset_index(drop=True)
 
 
+def calibrateVasicek(df10Y: pd.DataFrame):
 
-#preperation for calibration of Vasicek model 
-r = df10Y["YIELD"].values/100 # % -> decimal (0.01 = 1%)
+    """
+    Calibrate Vasicek parameters from a 10Y OLO yield time series using OLS.
 
-dt = 1/12 # Monthly timestep (1 year = 12 months)
+    Vasicek SDE:       dr = κ(θ - r)dt + σ dW
+    Discretised OLS:   Δr = a + b·r(t) + ε
 
-r_t = r[:-1] # t = 0, 1, ..., T-1
+    Mapping:
+        κ = -b / Δt
+        θ = -a / b
+        σ = std(ε) / √Δt
+    Returns
+    -------
+    dict with parameters, diagnostics, and arrays needed for plotting
+    """
 
-r_t1 = r[1:]  # t = 1, 2, ..., T
+    #preperation for calibration of Vasicek model 
+    r = df10Y["YIELD"].values / 100 # type: ignore # % -> decimal (0.01 = 1%)
 
-dr = r_t1 - r_t # dr = r(t+1) - r(t) = κ(θ - r(t))dt + σ√(dt)ε
+    dt = 1/12 # Monthly timestep (1 year = 12 months)
 
-# OLS regression to estimate κ and θ 
+    r_t = r[:-1] # t = 0, 1, ..., T-1
 
-X      = np.column_stack([np.ones(len(r_t)), r_t])
-coeffs = np.linalg.lstsq(X, dr, rcond=None)[0]
-a, b   = coeffs
+    r_t1 = r[1:]  # t = 1, 2, ..., T
 
-eps = dr - (a + b * r_t) # Residuals from the regression
-sigma_eps = np.std(eps, ddof=2)
+    dr = r_t1 - r_t # dr = r(t+1) - r(t) = κ(θ - r(t))dt + σ√(dt)ε
 
+    # OLS regression to estimate κ and θ 
 
-# recover Vasicek parameters from OLS coefficients
-kappa = -b / dt   # mean reversion speed κ = -b / dt
-theta = -a / b     # long-term mean θ = -a / b
+    X      = np.column_stack([np.ones(len(r_t)), r_t])
+    coeffs = np.linalg.lstsq(X, dr, rcond=None)[0]
+    a, b   = coeffs
 
-sigma = sigma_eps / np.sqrt(dt) # volatility σ = std(ε) / sqrt(dt)
-r0 = r[-1] # initial short rate (first observed yield)
-
-#diagnostics 
-n = len(r_t)
-var_b = sigma_eps**2 * np.linalg.inv(X.T @ X)[1, 1]
-t_b   = b / np.sqrt(var_b)
-p_b   = 2 * t_dist.sf(np.abs(t_b), df=n - 2)
-r2    = 1 - np.var(eps) / np.var(dr)
-
-
-#print summary of calibration results
-print(f"Estimated Vasicek parameters:")
-print(f"  κ (mean reversion speed): {kappa:.4f}")
-print(f"  θ (long-term mean): {theta:.4f}")
-print(f"  σ (volatility): {sigma:.4f}")
-print(f"  r0 (initial short rate): {r0:.4f}")
-print("\nDiagnostics:")
-print(f"  t-statistic for b: {t_b:.4f}")
-print(f"  p-value for b: {p_b:.4f}")
-print(f"  R-squared: {r2:.4f}") 
+    eps = dr - (a + b * r_t) # Residuals from the regression
+    sigma_eps = np.std(eps, ddof=2)
 
 
+    # recover Vasicek parameters from OLS coefficients
+    kappa = -b / dt   # mean reversion speed κ = -b / dt
+    theta = -a / b     # long-term mean θ = -a / b
+
+    sigma = sigma_eps / np.sqrt(dt) # volatility σ = std(ε) / sqrt(dt)
+    r0 = r[-1] # initial short rate (first observed yield)
+
+    #diagnostics 
+    n = len(r_t)
+    var_b = sigma_eps**2 * np.linalg.inv(X.T @ X)[1, 1]
+    t_b   = b / np.sqrt(var_b)
+    p_b   = 2 * t_dist.sf(np.abs(t_b), df=n - 2)
+    r2    = 1 - np.var(eps) / np.var(dr)
+
+
+    #print summary of calibration results
+    print(f"Estimated Vasicek parameters:")
+    print(f"  κ (mean reversion speed): {kappa:.4f}")
+    print(f"  θ (long-term mean): {theta:.4f}")
+    print(f"  σ (volatility): {sigma:.4f}")
+    print(f"  r0 (initial short rate): {r0:.4f}")
+    print("\nDiagnostics:")
+    print(f"  t-statistic for b: {t_b:.4f}")
+    print(f"  p-value for b: {p_b:.4f}")
+    print(f"  R-squared: {r2:.4f}") 
+
+    return {
+        # ── Parameters ────────────────────────────────────────────────────
+        "kappa": kappa,
+        "theta": theta,
+        "sigma": sigma,
+        "r0":    r0,
+        # ── Diagnostics ───────────────────────────────────────────────────
+        "diagnostics": {
+            "n_obs":           n,
+            "R2":              r2,
+            "t_stat_b":        t_b,
+            "p_val_b":         p_b,
+            "half_life_years": np.log(2) / kappa,
+        },
+        # ── Arrays for plotting ───────────────────────────────────────────
+        "arrays": {
+            "r":         r,
+            "r_t":       r_t,
+            "dr":        dr,
+            "dt":        dt,
+            "eps":       eps,
+        },
+    }
+
+
+
+results = calibrateVasicek(df10Y)
+
+
+
+#unpack results for plotting
+kappa     = results["kappa"]
+sigma    = results["sigma"]
+theta     = results["theta"]
+r         = results["arrays"]["r"]
+r_t       = results["arrays"]["r_t"]
+dr        = results["arrays"]["dr"]
+eps       = results["arrays"]["eps"]
+dt        = results["arrays"]["dt"]
+r0       = results["r0"]
 
 
 # ── 4. Validation plots ───────────────────────────────────────────────────
