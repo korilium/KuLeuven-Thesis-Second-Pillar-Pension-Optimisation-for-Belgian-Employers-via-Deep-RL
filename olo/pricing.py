@@ -1,260 +1,150 @@
-
-
+import os
 import numpy as np
 import matplotlib.pyplot as plt
-import os
+from olo.calibration import nss_yield, nss_forward    # already in your module
 
 
-def vasicekBondPrice(
-    r:     np.ndarray,
-    kappa: float,
-    theta: float,
-    sigma: float,
-    tau:   float,
-) -> np.ndarray:
-    
+# ══════════════════════════════════════════════════════════════════════════
+# Vasicek ZCB price  (unchanged — constant-θ closed form)
+# ══════════════════════════════════════════════════════════════════════════
+
+def vasicekBondPrice(r, kappa, theta, sigma, tau):
     """
-    Vasicek zero-coupon bond price P(t, t+τ).
-    Derived from:
-        P(t,T) = E[exp(-∫ₜᵀ r(s)ds)]     definition
-               = exp(-M + V²/2)            moment generating function
-               = A(τ) · exp(-B(τ) · r(t)) closed form
-    Parameters
-    ----------
-    r     : current short rate(s) — scalar or np.ndarray (decimal)
-    kappa : mean-reversion speed  κ
-    theta : long-run mean         θ (decimal)
-    sigma : volatility            σ
-    tau   : time to maturity in years (τ = T - t)
-    Returns
-    -------
-    P : bond price — same shape as r
-        Interpretation: value today of €1 received in τ years
+    Vasicek zero-coupon bond price P(t, t+τ) = A(τ)·exp(-B(τ)·r(t)).
+    Constant long-run mean θ → a single model-implied curve (does NOT fit market).
     """
-    # ── B(τ) = (1 - e^(-κτ)) / κ ─────────────────────────────────────────
-    # Comes from integrating E[r(s)] = θ + (r(t)-θ)e^(-κ(s-t)) over [t,T]
     B = (1 - np.exp(-kappa * tau)) / kappa
-    # ── log A(τ) = (θ - σ²/2κ²)(B(τ) - τ) - σ²B(τ)²/4κ ─────────────────
-    # Comes from V²/2 - θτ + θB(τ) after substituting M and V²
     log_A = (theta - sigma**2 / (2 * kappa**2)) * (B - tau) \
             - (sigma**2 * B**2) / (4 * kappa)
-    # ── P(t,T) = A(τ) · exp(-B(τ) · r(t)) ───────────────────────────────
     return np.exp(log_A - B * r)
 
-def hullWhiteBondPrice(
-    r:     np.ndarray,
-    t:     float,          # ← NEW: current time (years since t=0)
-    kappa: float,
-                           # ← REMOVED: theta (no longer needed)
-    sigma: float,
-    tau:   float,
-    curve: dict,           # ← NEW: NSS curve dict from bootstrapForwardCurve()
-) -> np.ndarray:
+
+# ══════════════════════════════════════════════════════════════════════════
+# Hull-White ZCB price  (analytic NSS — valid at ANY t, T, including T > 30Y)
+# ══════════════════════════════════════════════════════════════════════════
+
+def _Pmarket(T, params):
+    """Analytic market discount factor P^M(0,T) = exp(-Y_NSS(0,T)·T), any T ≥ 0."""
+    T = np.asarray(T, dtype=float)
+    safe = np.maximum(T, 1e-12)
+    return np.where(T < 1e-12, 1.0, np.exp(-nss_yield(safe, *params) * safe))
+
+
+def hullWhiteBondPrice(r, t, kappa, sigma, tau, curve):
+    """
+    Hull-White zero-coupon bond price P(t, t+τ) given the short rate r(t).
+
+        P(t,T) = [P^M(0,T)/P^M(0,t)]
+                 · exp( B·f(0,t) − σ²/(4κ)·B²·(1−e^{−2κt}) − B·r(t) )
+        B = (1 − e^{−κτ}) / κ,   τ = T − t
+
+    The B·r term is IDENTICAL to Vasicek; only log A differs, anchoring the
+    price to today's NSS curve so the model is arbitrage-free.
+
+    IMPORTANT — this version evaluates the NSS curve ANALYTICALLY from
+    curve["params"], not by interpolating curve["t_grid"]. That matters:
+
+      • Exact at t = 0 (reproduces the market curve to machine precision when
+        r = f(0,0); the grid-interp version was ~6 bps off).
+      • Valid for T > 30Y. The WAP rate needs the 10Y OLO at future dates out
+        to a 40Y horizon (so T up to 50Y); interpolating a 30Y grid clamps
+        P beyond 30Y and produces 180–360 bps errors / negative yields.
+
+    Parameters
+    ----------
+    r     : short rate(s) r(t) — scalar or array over paths (decimal)
+    t     : current time (years since t=0)
+    kappa : mean-reversion speed κ (from Vasicek calibration)
+    sigma : volatility σ           (from Vasicek calibration)
+    tau   : time to maturity τ = T − t (years)
+    curve : NSS curve dict; must contain "params" = [b0,b1,b2,b3,τ1,τ2]
+
+    Returns
+    -------
+    P : bond price, same shape as r — value at t of €1 paid at t+τ.
+        At t = 0 with r = f(0,0) = β0+β1, returns P^M(0,τ) exactly.
+    """
+    params = curve["params"]
     T = t + tau
-    # ── Interpolate market values from NSS curve ──────────────────────────
-    P_market_t = 1.0 if t < 1e-10 else np.interp(t, curve["t_grid"], curve["P"])
-    P_market_T = np.interp(T, curve["t_grid"], curve["P"])
-    f_t        = np.interp(max(t, curve["t_grid"][0]), curve["t_grid"], curve["f"])
-    # ── B(τ) = (1 - e^(-κτ)) / κ  ← IDENTICAL to Vasicek ────────────────
+    P_t = _Pmarket(t, params)
+    P_T = _Pmarket(T, params)
+    f_t = nss_forward(np.maximum(t, 0.0), *params)            # exact f(0,t), incl. t=0
     B = (1 - np.exp(-kappa * tau)) / kappa
-    # ── log A(t,T) — this is the only part that changes ───────────────────
-    # Vasicek:    log A = (θ - σ²/2κ²)(B - τ) - σ²B²/4κ
-    # Hull-White: log A = log[P^M(0,T)/P^M(0,t)] + B·f(0,t) - σ²/(4κ)·B²·(1-e^{-2κt})
     log_A = (
-        np.log(P_market_T / P_market_t)                          # no-arb anchor
-        + B * f_t                                                 # forward slope correction
-        - (sigma**2 / (4 * kappa)) * B**2 * (1 - np.exp(-2 * kappa * t))  # variance adj.
+        np.log(P_T / P_t)
+        + B * f_t
+        - (sigma**2 / (4 * kappa)) * B**2 * (1 - np.exp(-2 * kappa * t))
     )
-    # ── P(t,T) = exp(log A - B·r(t)) ← IDENTICAL to Vasicek ─────────────
     return np.exp(log_A - B * r)
 
-def computeCumulativeDiscountFactors(
+
+# ══════════════════════════════════════════════════════════════════════════
+# Future yield reconstruction  →  this is the bridge to the WAP rate
+# ══════════════════════════════════════════════════════════════════════════
+
+def reconstructFutureYield(
     paths: np.ndarray,
+    kappa: float,
+    sigma: float,
+    curve: dict,
+    tau:   float = 10.0,
     dt:    float = 1/12,
 ) -> np.ndarray:
     """
-    Cumulative discount factor D(0,t) for each path.
-    Definition:
-        D(0,t) = exp(-∫₀ᵗ r(s) ds)
-               ≈ exp(-Σₛ r(s)·dt)     Riemann sum approximation
-    This is what goes directly into the APV:
-        APV = Σₜ cash_flow(t) · D(0,t)
-    Parameters
-    ----------
-    paths : simulated rate paths shape (n_steps+1, n_paths)
-    dt    : timestep (1/12 for monthly)
+    Reconstruct the model-implied τ-year yield Y(t, t+τ) at every (time, path),
+    from the simulated short rate via the Hull-White bond price:
+
+        Y(t, t+τ) = − ln P(t, t+τ; r(t)) / τ
+
+    With tau=10 this is the future 10Y OLO that drives the WAP fixing — the
+    same quantity, per path, that you then 24-month-average and run through
+    computeWAPRate. This is what makes the guarantee and the reserve correlated
+    through the common OLO driver.
+
     Returns
     -------
-    D : shape (n_steps+1, n_paths)
-        D[0, :] = 1.0    no discounting at t=0
-        D[t, :] = present value of €1 at time t
+    Y : np.ndarray, same shape as paths — the τ-year yield (decimal) on each path.
     """
-    D        = np.ones_like(paths)
+    n_steps, n_paths = paths.shape
+    Y = np.empty_like(paths)
+    for i in range(n_steps):
+        P = hullWhiteBondPrice(paths[i, :], t=i * dt, kappa=kappa,
+                               sigma=sigma, tau=tau, curve=curve)
+        Y[i, :] = -np.log(P) / tau
+    return Y
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Cumulative discount factors  (for path-wise APV discounting)
+# ══════════════════════════════════════════════════════════════════════════
+
+def computeCumulativeDiscountFactors(paths, dt=1/12):
+    """
+    D(0,t) = exp(-∫₀ᵗ r ds) ≈ exp(-Σ r·dt)  per path  → feeds APV = Σ CF·D.
+
+    Note: the Riemann sum carries a small discretisation bias (E[D] sits a few
+    bps above the analytic P^M(0,t) at monthly dt). Fine for APV; if you ever
+    need bias-free discounting use the analytic P^M(0,t) instead.
+    """
+    D = np.ones_like(paths)
     D[1:, :] = np.exp(-np.cumsum(paths[:-1, :] * dt, axis=0))
     return D
 
-def plotBondPricing(
-    paths:   np.ndarray,
-    D:       np.ndarray,
-    results: dict,
-    curve:   dict,          # ← ADD this parameter
-    dt:      float = 1/12,
-):
-    os.makedirs("tests", exist_ok=True)
-    kappa = results["kappa"]
-    theta = results["theta"]
-    sigma = results["sigma"]
-    r0    = results["r0"]
-    n_steps = paths.shape[0]
-    t_axis  = np.arange(n_steps) * dt
-    maturities = np.linspace(0.1, 30, 200)
-    # ── Panel 1: BOTH yield curves ────────────────────────────────────────
-    yield_curve_vasicek = np.array([
-        -np.log(vasicekBondPrice(theta, kappa, theta, sigma, tau)) / tau
-        for tau in maturities
-    ]) * 100
-    yield_curve_hw = np.array([                                  # ← ADD
-        -np.log(hullWhiteBondPrice(r0, t=0, kappa=kappa,
-                                   sigma=sigma, tau=tau,
-                                   curve=curve)) / tau
-        for tau in maturities
-    ]) * 100
-    # ── Panel 2: BOTH 1Y bond prices ─────────────────────────────────────
-    P_1y_vasicek = vasicekBondPrice(paths, kappa, theta, sigma, tau=1.0)
-    P_1y_hw = np.array([                                         # ← ADD
-        hullWhiteBondPrice(paths[i, :], t=i*dt, kappa=kappa,
-                           sigma=sigma, tau=1.0, curve=curve)
-        for i in range(n_steps)
-    ])
-    # percentiles for both
-    p05_V, p50_V, p95_V = [np.percentile(P_1y_vasicek, q, axis=1) for q in [5,50,95]]
-    p05_H, p50_H, p95_H = [np.percentile(P_1y_hw,      q, axis=1) for q in [5,50,95]]
-    # ── Panel 3: discount factor (unchanged) ──────────────────────────────
-    p05_D, p50_D, p95_D = [np.percentile(D, q, axis=1) for q in [5,50,95]]
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-    fig.suptitle("Vasicek vs Hull-White — Bond Pricing & Discount Factors",
-                 fontsize=13, fontweight="bold")
-    # Panel 1 — yield curves
-    ax1 = axes[0]
-    ax1.plot(curve["t_grid"], curve["Y"] * 100,                  # ← ADD market
-             color="steelblue", linewidth=2.5, label="OLO market")
-    ax1.plot(maturities, yield_curve_vasicek,
-             color="red", linewidth=1.8, linestyle="--",
-             label=f"Vasicek  θ={theta*100:.2f}%")
-    ax1.plot(maturities, yield_curve_hw,                         # ← ADD HW
-             color="darkorange", linewidth=1.8, linestyle=":",
-             label="Hull-White (r₀, t=0)")
-    ax1.set_title("Yield Curve: Market vs Vasicek vs Hull-White")
-    ax1.set_xlabel("Maturity τ (years)")
-    ax1.set_ylabel("Yield (%)")
-    ax1.legend(fontsize=9)
-    ax1.grid(True, alpha=0.3)
-    # Panel 2 — 1Y bond price
-    ax2 = axes[1]
-    ax2.fill_between(t_axis, p05_V, p95_V, alpha=0.15, color="red")
-    ax2.plot(t_axis, p50_V, color="red", linewidth=1.8,
-             linestyle="--", label="Vasicek median")
-    ax2.fill_between(t_axis, p05_H, p95_H, alpha=0.15, color="darkorange")  # ← ADD
-    ax2.plot(t_axis, p50_H, color="darkorange", linewidth=1.8,              # ← ADD
-             linestyle=":", label="Hull-White median")
-    ax2.set_title("1Y Bond Price P(r(t), 1Y) over Time")
-    ax2.set_xlabel("Years")
-    ax2.set_ylabel("Bond Price (€)")
-    ax2.legend(fontsize=9)
-    ax2.grid(True, alpha=0.3)
-    # Panel 3 — discount factors (unchanged)
-    ax3 = axes[2]
-    ax3.fill_between(t_axis, p05_D, p95_D, alpha=0.2, color="steelblue", label="5–95th pct")
-    ax3.plot(t_axis, p50_D, color="steelblue", linewidth=2, label="Median D(0,t)")
-    ax3.set_title("Cumulative Discount Factor D(0,t)")
-    ax3.set_xlabel("Years")
-    ax3.set_ylabel("D(0,t)")
-    ax3.legend(fontsize=9)
-    ax3.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig("tests/vasicek_vs_hw_bond_pricing.png", dpi=150, bbox_inches="tight")
-    plt.show()
-    
-    
-# ── Standalone yield curve comparison — add HW line ───────────────────────
 
-def vasicekYield(r, kappa, theta, sigma, tau):
-    B     = (1 - np.exp(-kappa * tau)) / kappa
-    log_A = (theta - sigma**2 / (2*kappa**2)) * (B - tau) \
-            - (sigma**2 * B**2) / (4 * kappa)
-    P     = np.exp(log_A - B * r)
-    return -np.log(P) / tau * 100
-
-
-
-from olo.calibration import calibrateVasicek
-from olo.data.extract import extractDataYieldNBB
-
-##############
-#read in data#
-##############
-
-dfYield = extractDataYieldNBB(startPeriod="2000-01")
-
-
-
-#############
-# dataManip #
-#############
-
-df10Y = dfYield[dfYield["IROLOBE2_MATUR"] == "10Y"].copy().reset_index(drop=True)
-
-
-lastDate = dfYield["DATE"].max()
-dfCurrentYield = (
-    dfYield[dfYield["DATE"] == lastDate]
-    .copy()
-    .assign(MAT_NUM=lambda df: df["IROLOBE2_MATUR"].str.replace("Y", "").astype(int))
-    .sort_values("MAT_NUM")
-    .reset_index(drop=True)
-)
-
-yields = dfCurrentYield["YIELD"].values
-maturities = dfCurrentYield["MAT_NUM"].values
-
-#calibrate 
-
-results = calibrateVasicek(df10Y)
-
-
-kappa = results["kappa"]
-theta = results["theta"]
-sigma = results["sigma"]
-r0    = results["r0"]
-
-yields_at_r0    = [vasicekYield(r0,    kappa, theta, sigma, tau) for tau in maturities]
-yields_at_theta = [vasicekYield(theta, kappa, theta, sigma, tau) for tau in maturities]
-yields_hw = [                                                    # ← ADD
-    -np.log(hullWhiteBondPrice(r0, t=0, kappa=kappa,
-                               sigma=sigma, tau=tau,
-                               curve=curve)) / tau * 100
-    for tau in maturities
-    
-]
-fig, ax = plt.subplots(figsize=(10, 6))
-ax.plot(actual_maturities, actual_yields,
-        color="steelblue", linewidth=2.5, marker="o", markersize=4,
-        label="Actual Belgian OLO (Apr 24 2026)")
-ax.plot(maturities, yields_at_r0,
-        color="red", linewidth=2, linestyle="--",
-        label=f"Vasicek at r₀ = {r0*100:.2f}%")
-ax.plot(maturities, yields_at_theta,
-        color="darkred", linewidth=1.5, linestyle=":",
-        label=f"Vasicek at θ = {theta*100:.2f}%")
-ax.plot(maturities, yields_hw,                                   # ← ADD
-        color="darkorange", linewidth=2, linestyle="-.",
-        label="Hull-White at r₀ (t=0)")
-ax.set_title("Belgian OLO Yield Curve — Actual vs Vasicek vs Hull-White",
-             fontsize=13, fontweight="bold")
-ax.set_xlabel("Maturity (years)")
-ax.set_ylabel("Yield (%)")
-ax.legend(fontsize=9)
-ax.grid(True, alpha=0.3)
-plt.tight_layout()
-plt.savefig("tests/yield_curve_comparison.png", dpi=150, bbox_inches="tight")
-plt.show()
+# ── Runner notes (fixes for the script you had) ───────────────────────────
+# Three bugs in the previous runner:
+#   1. `curve` was never built — call bootstrapForwardCurve first.
+#   2. `actual_maturities` / `actual_yields` were undefined — use maturities/yields.
+#   3. the t=0 Hull-White curve was drawn at the Vasicek r0 (the 10Y level); it
+#      must be drawn at the instantaneous short rate f(0,0)=β0+β1, at which point
+#      it overlays the OLO market curve EXACTLY (that's the no-arbitrage property).
+#
+# from olo.calibration import bootstrapForwardCurve, calibrateVasicek
+# results = calibrateVasicek(df10Y)
+# curve   = bootstrapForwardCurve(maturities, yields)     # provides "params"
+# k, s    = results["kappa"], results["sigma"]
+# f00     = curve["params"][0] + curve["params"][1]       # f(0,0) = β0+β1
+#
+# yields_hw = [-np.log(hullWhiteBondPrice(f00, t=0, kappa=k, sigma=s,
+#                                         tau=tau, curve=curve)) / tau * 100
+#              for tau in maturities]          # ← overlays the OLO market line
