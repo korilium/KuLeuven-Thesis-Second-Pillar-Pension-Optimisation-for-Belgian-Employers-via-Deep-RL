@@ -101,13 +101,16 @@ def run_episode(choose_action, plan):
 # Monte Carlo control
 # ---------------------------------------------------------------------------
  
-def mc_control(plan, n_episodes=100000, seed=0, epsStart =1.0, epsEnd =0.05):
+def mc_control(plan, n_episodes=100000, seed=0, epsStart =1.0, epsEnd =0.05, decay_frac=0.5):
     rng = np.random.default_rng(seed)
     Q = np.zeros((T, 2))            # value estimates
     reward_trace = np.empty(n_episodes)
+    
+    decay_episodes = max(1, int(decay_frac * n_episodes))
  
     for ep in range(n_episodes):
-        eps = epsStart + (epsEnd - epsStart) * ep / n_episodes
+        frac = min(ep / decay_episodes, 1.0)      # reach epsEnd at 50k, then hold
+        eps = epsStart + (epsEnd - epsStart) * frac
  
         def choose_action(t):
             if rng.random() < eps:
