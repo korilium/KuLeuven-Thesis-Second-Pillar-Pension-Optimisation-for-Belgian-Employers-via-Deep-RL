@@ -51,10 +51,10 @@ contributions — both need Monte Carlo averaging at the stochastic rung.
 # ---------------------------------------------------------------------------
 T = 45          # career length in years
 G = 0.0175      # frozen WAP guarantee rate
-MU = 0.03       # tarrif on mathematical reserve 
-KAPPA = 1.5       # employer-cost weight (> 1, else the shortfall cancels) sensitivy 
+MU = 0.01       # tarrif on mathematical reserve 
+KAPPA = 0.5       # employer-cost weight (> 1, else the shortfall cancels) sensitivy 
 S0 = 1.0        #starting salary
-W = 0.02        # deterministic salary growth 
+W = 0.025        # deterministic salary growth 
 DISC= 0.01
 SIGMA = 0.05   # credited-return volatility at zero
 N_EVAL = 2000 
@@ -134,7 +134,7 @@ def run_episode(choose_action, plan, shocks=None):
 # Monte Carlo control
 # ---------------------------------------------------------------------------
  
-def mc_control(plan, n_episodes=200000, seed=0, epsStart =1.0, epsEnd =0.05, decay_frac=0.25, burn_in=30000, n0=50):
+def mc_control(plan, n_episodes=500000, seed=0, epsStart =1.0, epsEnd =0.05, decay_frac=0.25, burn_in=30000, n0=500):
     rng = np.random.default_rng(seed)
     reward_trace = np.empty(n_episodes)
     
@@ -405,9 +405,29 @@ if __name__ == "__main__":
         result = mc_control(plan=plan)
 
         # 3. per-plan validation before trusting metrics
-        gaps, ses = numeric_gap(plan, batch)
-        RESOLUTION = 0.01     # agent's resolving power at this eps / episode budget
-        floor = np.maximum(2 * ses, RESOLUTION if SIGMA == 0.0 else 0.0)
+        if batch is None:
+            gaps, ses = numeric_gap(plan, batch)          # deterministic: exact, RES floor
+            RES = 0.01
+        else:
+            # decision-relevant gaps at sigma > 0: flip each year of the
+            # BENCH policy on the shared batch (CRN-paired). gap-vs-none is
+            # invalid here — the max() terminal breaks linearity, so the
+            # marginal depends on the rest of the policy.
+            base_vals = run_batch(bench_policy, plan, batch)
+            gaps, ses = np.empty(T), np.empty(T)
+            for k in range(T):
+                pol_k = bench_policy.copy(); pol_k[k] ^= 1
+                diffs = run_batch(pol_k, plan, batch) - base_vals
+                s = 1 - 2 * bench_policy[k]   # sign so positive = contribute better
+                gaps[k] = s * diffs.mean()
+                ses[k] = s * 0 + diffs.std(ddof=1) / np.sqrt(len(diffs))
+            # agent resolution: return noise / sqrt(non-greedy hold samples)
+            sigma_G = np.std(result["reward_trace"][-50000:])
+            n_hold = 500000 - int(0.25 * 500000) - 30000   # n_episodes - decay - burn_in
+            n_ng = 0.5 * 0.05 * n_hold      
+            RES = 3.0 * sigma_G / np.sqrt(n_ng)
+
+        floor = np.maximum(2 * ses, RES)
         decided = np.abs(gaps) > floor
         match = np.array_equal(result["policy"][decided], bench_policy[decided])
         print(f"policy matches benchmark on {decided.sum()}/{T} decided years: {match}")
