@@ -52,7 +52,7 @@ contributions — both need Monte Carlo averaging at the stochastic rung.
 T = 45          # career length in years
 G = 0.0175      # frozen WAP guarantee rate
 MU = 0.03       # tarrif on mathematical reserve 
-KAPPA = 0.5       # employer-cost weight (> 1, else the shortfall cancels) sensitivy 
+KAPPA = 2       # employer-cost weight (> 1, else the shortfall cancels) sensitivy 
 S0 = 1.0        #starting salary
 W = 0.02        # deterministic salary growth 
 DISC= MU
