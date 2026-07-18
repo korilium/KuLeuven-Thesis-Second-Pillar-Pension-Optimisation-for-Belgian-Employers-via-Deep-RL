@@ -1,0 +1,25 @@
+config: neg_control_det  {'G': 0.0175, 'MU': 0.03, 'DISC': 0.03, 'KAPPA': 0.5, 'SIGMA': 0.0}
+train:  {'n_episodes': 200000, 'decay_frac': 0.25, 'burn_in': 30000, 'n0': 50, 'epsEnd': 0.05}
+
+=== fixed plan ===
+benchmark: gap policy (linearity certified), value 1.003401
+agent resolution RES = 0.01000
+policy matches benchmark on 45/45 decided years: True
+
+=== step plan ===
+benchmark: gap policy (linearity certified), value 0.998237
+agent resolution RES = 0.01000
+policy matches benchmark on 45/45 decided years: True
+
+=== age plan ===
+benchmark: gap policy (linearity certified), value 0.941097
+agent resolution RES = 0.01000
+policy matches benchmark on 45/45 decided years: True
+
+[central-path (zero-shock) economics of benchmark policies]
+plan        pv_contrib     pv_payout    efficiency      duration   replacement
+fixed           2.0068        2.0068        1.0000       21.1057        2.6119
+step            1.9965        1.9965        1.0000       23.7048        2.5984
+age             1.8822        1.8822        1.0000       24.6390        2.4497
+
+CONFIG RESULT: PASS

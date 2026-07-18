@@ -1,0 +1,29 @@
+config: rung1_stoch  {'G': 0.0175, 'MU': 0.03, 'DISC': 0.01, 'KAPPA': 1.5, 'SIGMA': 0.05, 'epsEnd': 0.01}
+train:  {'n_episodes': 1000000, 'decay_frac': 0.25, 'burn_in': 60000, 'n0': 500}
+
+=== fixed plan ===
+benchmark: local search on SAA (2000 paths), value 0.779065 (certificate: 2-flip optimality on the batch)
+shortfall: P(>0) = 0.0640, E[sf | >0] = 0.3235
+agent resolution RES = 0.01912
+policy matches benchmark on 29/45 decided years: True
+
+=== step plan ===
+benchmark: local search on SAA (2000 paths), value 0.632332 (certificate: 2-flip optimality on the batch)
+shortfall: P(>0) = 0.0645, E[sf | >0] = 0.2763
+agent resolution RES = 0.01544
+policy matches benchmark on 31/45 decided years: False
+  mismatch at decided years: [17], gaps there: [0.01645149]
+
+=== age plan ===
+benchmark: local search on SAA (2000 paths), value 0.537694 (certificate: 2-flip optimality on the batch)
+shortfall: P(>0) = 0.0660, E[sf | >0] = 0.2597
+agent resolution RES = 0.01470
+policy matches benchmark on 31/45 decided years: True
+
+[central-path (zero-shock) economics of benchmark policies]
+plan        pv_contrib     pv_payout    efficiency      duration   replacement
+fixed           1.5716        2.9946        1.9055       13.3245        1.5846
+step            1.3362        2.5196        1.8857       13.8645        1.3333
+age             1.2339        2.2865        1.8531       14.7028        1.2099
+
+CONFIG RESULT: FAIL

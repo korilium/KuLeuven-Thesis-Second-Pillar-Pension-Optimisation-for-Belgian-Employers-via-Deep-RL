@@ -1,0 +1,33 @@
+config: stress_G_stoch  {'G': 0.03, 'MU': 0.03, 'DISC': 0.01, 'KAPPA': 1.5, 'SIGMA': 0.05}
+train:  {'n_episodes': 1000000, 'decay_frac': 0.25, 'burn_in': 60000, 'n0': 500, 'epsEnd': 0.01}
+
+=== fixed plan ===
+benchmark: local search on SAA (2000 paths), value 0.667426 (certificate: 2-flip optimality on the batch)
+shortfall: P(>0) = 0.4630, E[sf | >0] = 0.7852
+agent resolution RES = 0.01427
+policy matches benchmark on 31/45 decided years: False
+  mismatch at decided years: [ 2  7 10 11 13 16 32], gaps there: [ 0.04744577  0.03709087  0.03116471  0.02893688  0.0248638   0.0182687
+ -0.01631679]
+
+=== step plan ===
+benchmark: local search on SAA (2000 paths), value 0.539578 (certificate: 2-flip optimality on the batch)
+shortfall: P(>0) = 0.4625, E[sf | >0] = 0.6513
+agent resolution RES = 0.01649
+policy matches benchmark on 28/45 decided years: False
+  mismatch at decided years: [ 6  7 32 38 42 44], gaps there: [ 0.03141373  0.02968247 -0.01934329 -0.03993442 -0.05547337 -0.06370548]
+
+=== age plan ===
+benchmark: local search on SAA (2000 paths), value 0.454905 (certificate: 2-flip optimality on the batch)
+shortfall: P(>0) = 0.4670, E[sf | >0] = 0.5771
+agent resolution RES = 0.00908
+policy matches benchmark on 37/45 decided years: False
+  mismatch at decided years: [ 1  2  4  5  6  8 13 16 17 18 20], gaps there: [0.02992534 0.02853698 0.0261165  0.02486988 0.02359155 0.02106427
+ 0.01987165 0.01458101 0.01290786 0.01129302 0.00997387]
+
+[central-path (zero-shock) economics of benchmark policies]
+plan        pv_contrib     pv_payout    efficiency      duration   replacement
+fixed           1.4994        2.8869        1.9254       12.7623        1.5276
+step            1.2619        2.4088        1.9089       13.2089        1.2746
+age             1.1617        2.1788        1.8755       14.0629        1.1529
+
+CONFIG RESULT: FAIL

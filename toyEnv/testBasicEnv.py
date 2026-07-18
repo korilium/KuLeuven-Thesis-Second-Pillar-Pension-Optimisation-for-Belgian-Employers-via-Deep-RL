@@ -41,7 +41,7 @@ CONFIGS = {
 # training budget per regime (deterministic converges much faster)
 TRAIN = {
     0.0:  dict(n_episodes=200000, decay_frac=0.25, burn_in=30000, n0=50),
-    0.05: dict(n_episodes=500000, decay_frac=0.25, burn_in=30000, n0=500),
+    0.05: dict(n_episodes=1000000, decay_frac=0.25, burn_in=60000, n0=500),
 }
 
 

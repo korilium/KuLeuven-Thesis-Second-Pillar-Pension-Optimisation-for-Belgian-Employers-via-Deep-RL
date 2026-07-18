@@ -134,7 +134,7 @@ def run_episode(choose_action, plan, shocks=None):
 # Monte Carlo control
 # ---------------------------------------------------------------------------
  
-def mc_control(plan, n_episodes=500000, seed=0, epsStart =1.0, epsEnd =0.05, decay_frac=0.25, burn_in=30000, n0=500):
+def mc_control(plan, n_episodes=1_000_000, seed=0, epsStart =1.0, epsEnd =0.05, decay_frac=0.25, burn_in=30000, n0=500):
     rng = np.random.default_rng(seed)
     reward_trace = np.empty(n_episodes)
     
@@ -422,8 +422,8 @@ if __name__ == "__main__":
                 gaps[k] = s * diffs.mean()
                 ses[k] = s * 0 + diffs.std(ddof=1) / np.sqrt(len(diffs))
             # agent resolution: return noise / sqrt(non-greedy hold samples)
-            sigma_G = np.std(result["reward_trace"][-50000:])
-            n_hold = 500000 - int(0.25 * 500000) - 30000   # n_episodes - decay - burn_in
+            sigma_G = np.std(result["reward_trace"][-100000:])
+            n_hold = 1_000_000 - int(0.25 * 1_000_000) - 60000   # n_episodes - decay - burn_in
             n_ng = 0.5 * 0.05 * n_hold      
             RES = 3.0 * sigma_G / np.sqrt(n_ng)
 
