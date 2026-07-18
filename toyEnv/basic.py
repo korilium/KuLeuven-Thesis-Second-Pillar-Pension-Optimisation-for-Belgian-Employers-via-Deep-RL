@@ -103,14 +103,23 @@ def run_episode(choose_action, plan):
  
 def mc_control(plan, n_episodes=100000, seed=0, epsStart =1.0, epsEnd =0.05, decay_frac=0.5):
     rng = np.random.default_rng(seed)
-    Q = np.zeros((T, 2))            # value estimates
     reward_trace = np.empty(n_episodes)
     
     decay_episodes = max(1, int(decay_frac * n_episodes))
  
+    Q = np.zeros((T, 2))            # value estimates
+    N = np.zeros((T, 2))            # hold-phase visit counts
+
     for ep in range(n_episodes):
-        frac = min(ep / decay_episodes, 1.0)      # reach epsEnd at 50k, then hold
+        frac = min(ep / decay_episodes, 1.0)
         eps = epsStart + (epsEnd - epsStart) * frac
+
+        # Decay phase: policy still changing -> constant alpha tracks the
+        # moving target. Hold phase: eps frozen, returns stationary -> 1/n
+        # sample average, error -> 0, no noise floor, no chattering.
+        # N restart at the boundary keeps high-eps samples out of the average.
+        if ep == decay_episodes:
+            N[:] = 0
  
         def choose_action(t):
             if rng.random() < eps:
@@ -123,7 +132,11 @@ def mc_control(plan, n_episodes=100000, seed=0, epsStart =1.0, epsEnd =0.05, dec
         # Every-visit MC update: the terminal reward is the return at every t.
         for t in range(T):
             a = actions[t]
-            Q[t, a] += ALPHA * (returns[t] - Q[t, a]) #apply weight decay 
+            if frac < 1.0:
+                Q[t, a] += ALPHA * (returns[t] - Q[t, a])        # track
+            else:
+                N[t, a] += 1
+                Q[t, a] += (returns[t] - Q[t, a]) / N[t, a]      # estimate
     
     return {
         "plan": plan,
