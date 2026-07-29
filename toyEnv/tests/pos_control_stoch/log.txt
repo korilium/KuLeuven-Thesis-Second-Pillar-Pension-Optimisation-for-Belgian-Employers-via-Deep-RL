@@ -1,0 +1,28 @@
+config: neg_control_stoch  {'G': 0.0175, 'MU': 0.01, 'DISC': 0.02, 'LAMBDA': 0.75, 'SIGMA': 0.05}
+train:  {'n_episodes': 1000000, 'decay_frac': 0.25, 'burn_in': 60000, 'n0': 500}
+
+=== fixed plan ===
+benchmark: local search on SAA (2000 paths), value 1.107757 (certificate: 2-flip optimality on the batch)
+shortfall: P(>0) = 0.7865, E[sf | >0] = 1.0613
+agent resolution RES = 0.00374
+policy matches benchmark on 45/45 decided years: True
+
+=== step plan ===
+benchmark: local search on SAA (2000 paths), value 1.149583 (certificate: 2-flip optimality on the batch)
+shortfall: P(>0) = 0.7740, E[sf | >0] = 0.9953
+agent resolution RES = 0.00357
+policy matches benchmark on 45/45 decided years: True
+
+=== age plan ===
+benchmark: local search on SAA (2000 paths), value 1.099136 (certificate: 2-flip optimality on the batch)
+shortfall: P(>0) = 0.7660, E[sf | >0] = 0.9290
+agent resolution RES = 0.00336
+policy matches benchmark on 45/45 decided years: True
+
+[central-path (zero-shock) economics of benchmark policies]
+plan        pv_contrib     pv_payout    efficiency      duration   replacement
+fixed           2.4993        2.3656        0.9465       22.7909        1.9632
+step            2.5522        2.4314        0.9527       25.3987        2.0178
+age             2.4274        2.3172        0.9546       26.2243        1.9230
+
+CONFIG RESULT: PASS

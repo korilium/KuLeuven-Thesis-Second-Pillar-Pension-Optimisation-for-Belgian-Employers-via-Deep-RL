@@ -24,15 +24,16 @@ import basicEnv as env
 # ---------------------------------------------------------------------------
 CONFIGS = {
     # deterministic rungs (frozen)
-    "neg_control_det":   dict(G=0.0175, MU=0.03, DISC=0.03, KAPPA=0.5, SIGMA=0.0),
-    "pos_control_det":   dict(G=0.0175, MU=0.03, DISC=0.01, KAPPA=1.5, SIGMA=0.0),
+    "neg_control_det":   dict(G=0.0175, MU=0.03, DISC=0.02, LAMBDA=0.25, SIGMA=0.0),
+    "pos_control_det":   dict(G=0.0175, MU=0.03, DISC=0.02, LAMBDA=0.75, SIGMA=0.0),
     # stochastic rung 1
-    "neg_control_stoch": dict(G=0.0175, MU=0.01, DISC=0.01, KAPPA=1.0, SIGMA=0.05),
-    #   ^ KAPPA=1: shortfall cancels PATH-WISE -> objective linear in c even
+    "pos_control_stoch": dict(G=0.0175, MU=0.01, DISC=0.02, LAMBDA=0.75, SIGMA=0.05),
+    "neg_control_stoch": dict(G=0.0175, MU=0.01, DISC=0.02, LAMBDA=0.25, SIGMA=0.05),
+    #   ^ LAMBDA=1: shortfall cancels PATH-WISE -> objective linear in c even
     #     under noise; validates stochastic machinery on a known-simple economy
-    "rung1_stoch":       dict(G=0.0175, MU=0.03, DISC=0.01, KAPPA=1.5, SIGMA=0.05),
+    "rung1_stoch":       dict(G=0.01, MU=0.03, DISC=0.02, LAMBDA=0.75, SIGMA=0.05),
     #   ^ live-option configuration: THE rung-1 certificate
-    "stress_G_stoch":    dict(G=0.0300, MU=0.03, DISC=0.01, KAPPA=1.5, SIGMA=0.05),
+    "stress_G_stoch":    dict(G=0.0300, MU=0.01, DISC=0.02, LAMBDA=0.75, SIGMA=0.05),
     #   ^ ln(1.03) ~ MU: drift advantage gone, shortfall ~at-the-money.
     #     Prediction: sparser benchmark policy than rung1_stoch; shortfall
     #     P(>0) in the tens of percent vs single digits at rung1.

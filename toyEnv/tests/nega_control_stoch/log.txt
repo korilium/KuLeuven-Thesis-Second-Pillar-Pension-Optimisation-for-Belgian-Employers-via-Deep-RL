@@ -1,0 +1,28 @@
+config: pos_control_stoch  {'G': 0.0175, 'MU': 0.01, 'DISC': 0.02, 'LAMBDA': 0.25, 'SIGMA': 0.05}
+train:  {'n_episodes': 1000000, 'decay_frac': 0.25, 'burn_in': 60000, 'n0': 500}
+
+=== fixed plan ===
+benchmark: local search on SAA (2000 paths), value 0.000000 (certificate: 2-flip optimality on the batch)
+shortfall: P(>0) = 0.0000, E[sf | >0] = 0.0000
+agent resolution RES = 0.00084
+policy matches benchmark on 45/45 decided years: True
+
+=== step plan ===
+benchmark: local search on SAA (2000 paths), value 0.000000 (certificate: 2-flip optimality on the batch)
+shortfall: P(>0) = 0.0000, E[sf | >0] = 0.0000
+agent resolution RES = 0.00085
+policy matches benchmark on 45/45 decided years: True
+
+=== age plan ===
+benchmark: local search on SAA (2000 paths), value 0.000000 (certificate: 2-flip optimality on the batch)
+shortfall: P(>0) = 0.0000, E[sf | >0] = 0.0000
+agent resolution RES = 0.00082
+policy matches benchmark on 45/45 decided years: True
+
+[central-path (zero-shock) economics of benchmark policies]
+plan        pv_contrib     pv_payout    efficiency      duration   replacement
+fixed           0.0000        0.0000           nan           nan        0.0000
+step            0.0000        0.0000           nan           nan        0.0000
+age             0.0000        0.0000           nan           nan        0.0000
+
+CONFIG RESULT: PASS

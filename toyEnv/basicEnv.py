@@ -13,14 +13,15 @@ Environment
 - Premium is salary-linked: c_t = C_RATE * S_t, with S_t = S0 * (1+W)^t.
 - Deterministic aggregate recursions (vintage-exact) under a frozen guarantee:
       R <- (R + c) * exp(MU)       reserve credited at the tariff MU
-      L <- (L + c) * (1 + G)       WAP liability leg at the guarantee rate
+      L <- (L + c) * exp(G)        WAP liability leg at the guarantee rate
 - Rewards are emitted when cash flows occur, already discounted to t=0
   at rate DISC (one numeraire, owned by the environment):
-      per year:  -KAPPA * c_t * exp(-DISC * t)
-      terminal:  (max(R,L) - KAPPA * max(L-R, 0)) * exp(-DISC * T)
-  KAPPA is the employer-cost weight; KAPPA = 1 makes the shortfall a pure
-  transfer that cancels from the joint objective.
-  Current simplification: DISC = MU (timing-neutral economy).
+  per year:  -(1 - LAMBDA) * c_t * exp(-DISC * t)                        
+  # employer cost leg
+  terminal:  (LAMBDA*max(R,L) - (1-LAMBDA)*max(L-R,0)) * exp(-DISC * T)  
+  # λ·payout − (1−λ)·WAP put
+  LAMBDA in [0,1] is the EMPLOYEE weight in V = λ·V_employee + (1−λ)·V_employer:
+  λ = 1 → pure employee (terminal payout only); λ = 0 → pure employer (contributions + WAP put cost).
 
 Agent
 -----
@@ -52,7 +53,7 @@ contributions — both need Monte Carlo averaging at the stochastic rung.
 T = 45          # career length in years
 G = 0.0175      # frozen WAP guarantee rate
 MU = 0.01       # tarrif on mathematical reserve 
-KAPPA = 0.5       # employer-cost weight (> 1, else the shortfall cancels) sensitivy 
+LAMBDA = 0.5    # employee weight in [0,1] (κ negotiation dial); λ·payout − (1−λ)·(contrib + put)
 S0 = 1.0        #starting salary
 W = 0.025        # deterministic salary growth 
 DISC= 0.01
@@ -82,13 +83,13 @@ def run_batch(policy, plan, shocks):
     values = np.zeros(n)
     for t in range(T):
         c = plan(t, S) * policy[t]
-        values -= KAPPA * c * np.exp(-DISC * t)
+        values -= (1.0 - LAMBDA) * c * np.exp(-DISC * t)
         R = (R + c) * np.exp(MU + SIGMA * shocks[:, t])   # (n,) vector op
-        L = (L + c) * (1.0 + G)
+        L = (L + c) * np.exp(G)
         S *= (1.0 + W)
     payout = np.maximum(R, L)
     shortfall = np.maximum(L - R, 0.0)
-    values += (payout - KAPPA * shortfall) * np.exp(-DISC * T)
+    values += (LAMBDA * payout - (1.0 - LAMBDA)* shortfall) * np.exp(-DISC * T)
     return values
 
 
@@ -119,14 +120,14 @@ def run_episode(choose_action, plan, shocks=None):
         a = choose_action(t)
         actions[t] = a
         c = plan(t, S) * a 
-        rewards[t] = -KAPPA * c * np.exp(-DISC * t) 
+        rewards[t] = -(1.0 - LAMBDA) * c * np.exp(-DISC * t) 
         z= 0.0 if shocks is None else shocks[t]
         R = (R + c) * np.exp(MU + SIGMA * z)
-        L = (L + c) * (1.0 + G)
+        L = (L + c) * np.exp(G)
         S *= (1.0+ W)
     payout = max(R, L)
     shortfall = max(L - R, 0.0)
-    rewards[-1] += (payout - KAPPA * shortfall)*np.exp(-DISC*T) 
+    rewards[-1] += (LAMBDA * payout - (1.0 - LAMBDA) * shortfall) * np.exp(-DISC * T)
     return actions, rewards
 
 
@@ -315,7 +316,7 @@ def evaluate_policy(policy, plan):
         pv_contrib += d
         t_weighted += t * d
         R = (R + c) * np.exp(MU)
-        L = (L + c) * (1.0 + G)
+        L = (L + c) * np.exp(G)
         S *= (1.0 + W)
     payout = max(R, L)
     pv_payout = payout * np.exp(-DISC * T)
