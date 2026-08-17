@@ -159,6 +159,54 @@ def solve(F_grid=None, l_grid=None, n_quad=15):
     return dict(F_grid=F_grid, l_grid=l_grid, V=V, policy=policy, reach_max=reach_max)
 
 
+def evaluate_open_loop(schedule, plan, F_grid=None, n_quad=15):
+    """Policy EVALUATION (not optimization) of a fixed open-loop fill schedule
+    a_t in [0,1], c_t = a_t * plan(t, S_t), by backward induction over (t, F).
+
+    Legitimate in (t, F): along a FIXED schedule the contribution does not
+    depend on F, so the liability path L_t is deterministic (L has no shock),
+    hence rho_t = S_t/L_t is a deterministic function of t -- no rho state.
+    (State-feedback OPTIMIZATION over this action is NOT (t,F)-closed; it needs
+    rho -- that is rung 2b.)
+
+    Returns E[G_0], directly comparable to run_batch(schedule). Independent of
+    run_batch by construction: forward SAA there, backward quadrature here.
+    """
+    if F_grid is None:
+        F_grid = make_F_grid(F_max=4.0, n=401)
+    z, omega = gauss_hermite(n_quad)
+
+    # forward deterministic pass: c_t, L_t, ell_t=c_t/L_t, flows (all shock-free)
+    S, L = S0, 0.0
+    c = np.empty(T); ell = np.full(T, np.inf); flow = np.empty(T)
+    for t in range(T):
+        c[t] = schedule[t] * plan(t, S)
+        flow[t] = -(1.0 - LAMBDA) * c[t] * np.exp(-DISC * t)
+        if L > 0.0:
+            ell[t] = c[t] / L
+        L = (L + c[t]) * np.exp(G)
+        S *= (1.0 + W)
+    L_final = L                                   # L_45
+    t0 = int(np.argmax(c > 0.0))                  # first funded year (L=0 before it)
+
+    # terminal per unit L, WITHOUT discount -- discount is applied once in V
+    g = LAMBDA * np.maximum(F_grid, 1.0) - (1.0 - LAMBDA) * np.maximum(1.0 - F_grid, 0.0)
+
+    # backward pass: U_t(F) = E[ g(F_45) | F_t = F ], propagated with finite ell
+    U = g                                         # U_45
+    for t in range(T - 1, t0, -1):                # t = 44 .. t0+1 (ell finite)
+        Fp = F_next(F_grid[:, None], ell[t], z[None, :])          # (NF, Nq)
+        U = (np.interp(Fp.ravel(), F_grid, U).reshape(len(F_grid), len(z))
+             * omega[None, :]).sum(axis=1)
+    # bootstrap off L=0 at the first funded year: F_{t0+1} = exp(MU - G + SIGMA z)
+    F_boot = np.exp(MU - G + SIGMA * z)
+    E_g = float((np.interp(F_boot, F_grid, U) * omega).sum())
+
+    V = float(flow.sum()) + L_final * np.exp(-DISC * T) * E_g
+    return dict(value=V, flows=float(flow.sum()),
+                E_g=E_g, L_final=float(L_final), t0=t0)
+
+
 if __name__ == "__main__":
     check_against_env()
     out = solve()
