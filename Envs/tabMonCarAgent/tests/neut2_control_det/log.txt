@@ -1,0 +1,25 @@
+config: neut2_control_det  {'G': 0.02, 'MU': 0.02, 'DISC': 0.02, 'LAMBDA': 0.5, 'SIGMA': 0.0}
+train:  {'n_episodes': 200000, 'decay_frac': 0.25, 'burn_in': 30000, 'n0': 50}
+
+=== fixed plan ===
+benchmark: gap policy (linearity certified), value 0.000000
+agent resolution RES = 0.01000
+policy matches benchmark on 0/45 decided years: True
+
+=== step plan ===
+benchmark: gap policy (linearity certified), value 0.000000
+agent resolution RES = 0.01000
+policy matches benchmark on 0/45 decided years: True
+
+=== age plan ===
+benchmark: gap policy (linearity certified), value 0.000000
+agent resolution RES = 0.01000
+policy matches benchmark on 0/45 decided years: True
+
+[central-path (zero-shock) economics of benchmark policies]
+plan        pv_contrib     pv_payout    efficiency      duration   replacement
+fixed           0.0603        0.0603        1.0000       40.0000        0.0501
+step            0.0000        0.0000           nan           nan        0.0000
+age             0.0000        0.0000           nan           nan        0.0000
+
+CONFIG RESULT: PASS
