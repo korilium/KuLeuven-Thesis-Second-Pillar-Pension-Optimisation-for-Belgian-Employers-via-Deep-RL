@@ -71,21 +71,39 @@ def paidup_service(Fg, rg, n_quad=9):
     return Phi
 
 
-def solve_retention(hazard=tenure_hazard, Fg=None, rg=None, ag=None, n_quad=5):
+def solve_retention(hazard=tenure_hazard, Fg=None, rg=None, ag=None, n_quad=5, betas=None):
+    """Backward induction for the committed (churn-aware) objective.
+
+    `betas`: optional list of softmax temperatures. The objective, the value
+    function V and the hard-optimal `policy` are identical whether or not it is
+    given -- each beta only adds a SIGNAL READOUT of the same Q-values the
+    argmax already computes:
+        a_soft(t,F,rho) = sum_a a * softmax(Q(t,F,rho,a) / beta),
+    i.e. the contribution responds smoothly to how much value the state-action
+    actually carries, instead of snapping to the argmax corner. beta -> 0
+    recovers the hard policy; larger beta blends near-tied actions. This is a
+    presentation/extraction layer, NOT a change of objective: rolling a_soft
+    forward is deliberately sub-optimal and the value gap to `policy` is the
+    price of that smoothness.
+    """
     if Fg is None: Fg = dp.make_F_grid(n=145)
     if rg is None: rg = dp.make_rho_grid(n=61)
     if ag is None: ag = dp.make_a_grid(n=31)
     zR, zL, wq = dp.gauss_hermite_2d(n_quad)
     lrg = np.log(rg); NF, NR, Q = len(Fg), len(rg), len(wq)
     Phi = paidup_service(Fg, rg)
+    ag = np.asarray(ag, float)
+    betas = list(betas) if betas else []
 
     V = np.empty((dp.T + 1, NF, NR)); V[dp.T] = dp.terminal(Fg, rg)
     policy = np.empty((dp.T, NF, NR))
+    soft = {b: np.empty((dp.T, NF, NR)) for b in betas}
     for t in range(dp.T - 1, -1, -1):
         h = float(hazard(t))
         Vb = (1.0 - h) * V[t + 1] + h * Phi[t + 1]
         best = np.full((NF, NR), -np.inf); abest = np.zeros((NF, NR))
-        for a in ag:
+        Qstack = np.empty((len(ag), NF, NR)) if betas else None
+        for i, a in enumerate(ag):
             l = a * dp.GAMMA * rg
             Fp = dp.F_next(Fg[:, None, None], l[None, :, None],
                            zR[None, None, :], zL[None, None, :])
@@ -95,6 +113,13 @@ def solve_retention(hazard=tenure_hazard, Fg=None, rg=None, ag=None, n_quad=5):
             cont = (vi * wq[None, None, :]).sum(axis=2)
             flow = -(1.0 - dp.LAMBDA) * a * dp.GAMMA * (1.0 + dp.W) ** (-(dp.T - t)) * np.exp(-dp.DISC_ER * t)
             Qv = flow + cont
+            if betas: Qstack[i] = Qv
             upd = Qv > best; best = np.where(upd, Qv, best); abest = np.where(upd, a, abest)
         V[t] = best; policy[t] = abest
-    return dict(Fg=Fg, rg=rg, ag=ag, V=V, policy=policy)
+        for b in betas:
+            w = np.exp((Qstack - Qstack.max(axis=0, keepdims=True)) / b)
+            w /= w.sum(axis=0, keepdims=True)
+            soft[b][t] = (w * ag[:, None, None]).sum(axis=0)
+    out = dict(Fg=Fg, rg=rg, ag=ag, V=V, policy=policy)
+    if betas: out["policy_soft"] = soft
+    return out
