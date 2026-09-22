@@ -64,6 +64,44 @@ def make_rho_grid(lo=0.3, hi=35.0, n=81):
 def make_a_grid(n=41):
     return np.linspace(0.0, 1.0, n)
 
+def grids(nF=145, nR=61, na=31):
+    return make_F_grid(n=nF), make_rho_grid(n=nR), make_a_grid(n=na)
+
+
+# --- churn: Belgian tenure hazard -----------------------------------------
+def tenure_hazard(t, h0=0.12, hinf=0.025, tau=7.0):
+    """Belgian tenure hazard: ~12%/yr early -> ~2.5%/yr long-tenure floor, giving
+    ~45% staying 10+ years and ~15% a full career (avg tenure ~11y, ~50% at 10+y;
+    Goulart & Oesch 2024, OECD/Eurostat)."""
+    return hinf + (h0 - hinf) * np.exp(-t / tau)
+
+
+def survival(hazard):
+    p = np.ones(T + 1)
+    for t in range(T):
+        p[t + 1] = p[t] * (1.0 - hazard(t))
+    return p
+
+
+# --- policies and plan-entry states ---------------------------------------
+def const_policy(a, n_years, nF, nR):
+    return np.full((n_years, nF, nR), float(a))
+
+
+def new_plan_init(n, rng, rho_lo=15.0, rho_hi=34.0, F_sd=0.08):
+    """Fresh plans: F0 ~ 1, high rho (liability small relative to salary)."""
+    F0 = np.clip(rng.normal(1.0, F_sd, n), 0.5, 1.5)
+    rho0 = np.exp(rng.uniform(np.log(rho_lo), np.log(rho_hi), n))
+    return F0, np.ones(n), rho0
+
+
+def sample_entry(rng, n, F_mu=1.0, F_sd=0.15, F_clip=(0.4, 2.5), rho_lo=3.0, rho_hi=30.0):
+    """Placeholder plan-entry distribution (NOT calibrated -- swap for DB2P
+    aggregate stats when available). L0=1; the model is scale-free."""
+    F0 = np.clip(rng.normal(F_mu, F_sd, n), *F_clip)
+    rho0 = np.exp(rng.uniform(np.log(rho_lo), np.log(rho_hi), n))
+    return F0, np.ones(n), rho0
+
 
 # --- bilinear interpolation over (F, log rho) -----------------------------
 def bilinear(Fg, lrg, V, Fq, lrq):
@@ -129,3 +167,73 @@ def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=15)
             A = np.clip(plan_rule(t, Fg[:, None], rg[None, :]) * np.ones((NF, NR)), 0.0, 1.0)
             V[t] = bellman_field_a(t, A, V[t + 1]); policy[t] = A
     return dict(Fg=Fg, rg=rg, ag=ag, V=V, policy=policy)
+
+
+# --- forward evaluation of a policy (the committed scoring model) ---------
+def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
+            seed=7, hazard=tenure_hazard, track=False):
+    """Canonical forward Monte-Carlo of a reduced policy a*(t,F,rho) under the
+    committed model: Belgian churn (immediate-vesting, paid-up leavers), a split
+    discount (employee at DISC_EMP, employer at DISC_ER), and the service-pro-rated
+    adequacy target
+        target_tau = RR_LEGAL + (tau/T)*(RR_TARGET - RR_LEGAL),
+    so a full-career stayer is judged against RR_TARGET and a leaver with tau years
+    of service against a proportionally lower bar.
+
+    R0/L0/S0 may be scalars (a single anchor state) or arrays (a cohort / sampled
+    entry distribution); S0 defaults to the top of the rho-grid. `band=(lo,hi)`
+    clips the applied action to a contribution band (banded-DCA); None means the
+    unconstrained [0,1] rule.
+    """
+    lrg = np.log(rg)
+    rng = np.random.default_rng(seed)
+    n = n_paths
+    R = np.full(n, 1.0) * np.asarray(R0); L = np.full(n, 1.0) * np.asarray(L0)
+    S = np.full(n, 1.0) * np.asarray(S0 if S0 is not None else rg[-1])
+    ST = S * (1.0 + W) ** T
+    lo, hi = (0.0, 1.0) if band is None else band
+    present = np.ones(n, bool); leave_t = np.full(n, T, float)
+    cost = np.zeros(n); a_sum = np.zeros(n)
+    a_by_t = np.full(T, np.nan); rho_med = np.zeros(T)
+    frac = np.zeros(T); c_by = np.zeros(T)
+    for t in range(T):
+        F = R / L; rho = S / L
+        a = np.clip(bilinear(Fg, lrg, policy[t], F, np.log(rho)), lo, hi)
+        a = np.where(present, a, 0.0)
+        frac[t] = present.mean()
+        c_by[t] = (a[present] * GAMMA).mean() * 100 if present.any() else 0.0
+        if track:
+            a_by_t[t] = a[present].mean() if present.any() else np.nan
+            rho_med[t] = np.median(rho[present]) if present.any() else np.nan
+        a_sum += a
+        c = a * GAMMA * S
+        cost += np.where(present, (c / ST) * np.exp(-DISC_ER * t), 0.0)
+        zR = rng.standard_normal(n); zL = rng.standard_normal(n)
+        R = np.where(present, (R + c) * np.exp(MU + SIGMA_R * zR), R * np.exp(MU + SIGMA_R * zR))
+        L = np.where(present, (L + c) * np.exp(G + SIGMA_L * zL), L)
+        S = S * (1.0 + W)
+        lv = present & (rng.random(n) < hazard(t))
+        leave_t = np.where(lv, t + 1, leave_t); present = present & ~lv
+    payout = np.maximum(R, L); short = np.maximum(L - R, 0.0)
+    cost += (short / ST) * np.exp(-DISC_ER * T)
+    RR2 = payout / (ANNUITY * ST)
+    svc = np.minimum(leave_t / T, 1.0)
+    target = RR_LEGAL + svc * (RR_TARGET - RR_LEGAL)
+    benefit_paths = np.exp(-DISC_EMP * T) * ANNUITY * u((RR_LEGAL + RR2) / target)
+    stay = leave_t >= T
+    RRtot = RR_LEGAL + RR2
+    out = dict(
+        benefit=float(benefit_paths.mean()), cost=float(cost.mean()),
+        joint=float(LAMBDA * benefit_paths.mean() - (1 - LAMBDA) * cost.mean()),
+        mean_a=float((a_sum / T).mean()), c_by=c_by, frac=frac,
+        avg=float((c_by * frac).sum() / frac.sum()) if frac.sum() > 0 else np.nan,
+        RR=RR2, RR_tot=RRtot, tot=float(np.median(RRtot)), stay=stay,
+        sty=float(np.median(RRtot[stay])) if stay.any() else np.nan,
+        lea=float(np.median(RRtot[~stay])) if (~stay).any() else np.nan,
+    )
+    if track:
+        out.update(a_by_t=a_by_t, rho_med=rho_med)
+    return out
+
+
+

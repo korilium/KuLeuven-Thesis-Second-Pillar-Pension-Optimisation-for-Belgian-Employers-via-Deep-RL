@@ -20,18 +20,10 @@ import numpy as np
 import DynPro as dp
 
 
-def tenure_hazard(t, h0=0.12, hinf=0.025, tau=7.0):
-    """Belgian tenure hazard: ~12%/yr early -> ~2.5%/yr long-tenure floor, giving
-    ~45% staying 10+ years and ~15% a full career (avg tenure ~11y, ~50% at 10+y;
-    Goulart & Oesch 2024, OECD/Eurostat)."""
-    return hinf + (h0 - hinf) * np.exp(-t / tau)
-
-
-def survival(hazard):
-    p = np.ones(dp.T + 1)
-    for t in range(dp.T):
-        p[t + 1] = p[t] * (1.0 - hazard(t))
-    return p
+# Churn now lives with the rest of the model in DynPro; re-exported so existing
+# lx.tenure_hazard / lx.survival call sites keep working.
+tenure_hazard = dp.tenure_hazard
+survival = dp.survival
 
 
 def _terminal_leaver(Fg, rg):

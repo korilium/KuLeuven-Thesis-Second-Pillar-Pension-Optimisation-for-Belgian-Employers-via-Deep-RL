@@ -47,23 +47,26 @@ only while the environment is deterministic and the reward is linear in
 contributions — both need Monte Carlo averaging at the stochastic rung.
 """
  
-# --------------------------------------------------------------------------- 
-# Parameters
 # ---------------------------------------------------------------------------
-T = 45          # career length in years
-G = 0.0175      # frozen WAP guarantee rate
-MU = 0.01       # tarrif on mathematical reserve 
-LAMBDA = 0.5    # employee weight in [0,1] (κ negotiation dial); λ·payout − (1−λ)·(contrib + put)
-S0 = 1.0        #starting salary
-W = 0.025        # deterministic salary growth 
-DISC= 0.01
-SIGMA = 0.05   # credited-return volatility at zero
-N_EVAL = 2000 
-ALPHA= 0.02 #WEIGHT DECAY
+# Parameters -- sourced from economy.py (the shared economic scenario).
+# They are imported as module globals on purpose: every function below reads
+# them as bare globals, and testBasicEnv.apply_config() rebinds them here via
+# env.__dict__.update(cfg) to swap in a whole economy per config.
+# ---------------------------------------------------------------------------
+import sys as _sys
+_sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from economy import T, G, MU, LAMBDA, S0, W, DISC, SIGMA, N_EVAL
+from economy import plan_fixed, plan_step, plan_age
+
+ALPHA = 0.02    # WEIGHT DECAY (agent hyperparameter, not part of the economy)
 
 
 #stochastic paths
 
+# NOTE: defined here, not imported from economy, on purpose. A function reads
+# globals from the module it was DEFINED in, so this must live in basicEnv for
+# apply_config()'s `env.SIGMA = ...` patch to reach it. Importing economy's
+# version would silently keep drawing noise after a SIGMA=0 config.
 def draw_shock_batch(n_paths=N_EVAL, seed=12345):
     """One frozen batch of noise paths (SAA + common random numbers).
     None at SIGMA = 0 -> deterministic single-episode evaluation."""
@@ -94,16 +97,9 @@ def run_batch(policy, plan, shocks):
 
 
 # --- plan rules: c(t, S) -> premium ---
-def plan_fixed(rate=0.05):
-    return lambda t, S: rate * S
-
-def plan_step(rate_low=0.04, rate_high=0.10, ceiling=1.5):
-    # tranche-based, like real plans split around the pension ceiling
-    return lambda t, S: rate_low * min(S, ceiling) + rate_high * max(S - ceiling, 0.0)
-
-def plan_age(rate0=0.03, step=0.01, band=10):
-    # banded age scale; keep step within the WAP non-discrimination bound
-    return lambda t, S: (rate0 + step * (t // band)) * S
+# plan_fixed / plan_step / plan_age are imported from economy.py above; they
+# close over their own arguments and read no module globals, so sourcing them
+# from there is safe under apply_config()'s namespace patching.
 
 
  # ---------------------------------------------------------------------------
