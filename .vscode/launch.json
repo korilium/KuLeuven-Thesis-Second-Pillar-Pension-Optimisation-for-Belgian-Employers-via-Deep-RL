@@ -1,0 +1,63 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "DynPro: current file",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "cwd": "${fileDirname}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "DynPro: testSuiteDP cohort",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/Envs/testSuiteDP.py",
+      "args": ["cohort"],
+      "cwd": "${workspaceFolder}/Envs",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "DynPro: testSuiteDP diagnostics",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/Envs/testSuiteDP.py",
+      "args": ["diagnostics"],
+      "cwd": "${workspaceFolder}/Envs",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "DynPro: suite section (prompts for name)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tests/dynpro/${input:suiteFile}",
+      "args": ["${input:section}"],
+      "cwd": "${workspaceFolder}/tests/dynpro",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ],
+  "inputs": [
+    {
+      "id": "suiteFile",
+      "type": "pickString",
+      "description": "Which suite?",
+      "options": [
+        "contribution_schedule_suite.py",
+        "sensitivity_suite.py",
+        "lambda_dial_suite.py"
+      ],
+      "default": "contribution_schedule_suite.py"
+    },
+    {
+      "id": "section",
+      "type": "promptString",
+      "description": "Section to run (e.g. signal, baseline, pareto). Leave blank to run all - slow.",
+      "default": "signal"
+    }
+  ]
+}
