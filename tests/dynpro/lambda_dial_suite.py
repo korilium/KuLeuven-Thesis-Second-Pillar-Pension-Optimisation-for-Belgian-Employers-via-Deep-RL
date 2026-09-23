@@ -18,7 +18,7 @@ import common as c
 
 
 # ============ 1. funding threshold in lambda (legal baseline) ============
-def lambda_threshold(lambdas=np.linspace(0.4, 0.98, 16), nF=121, nR=51, na=25, nq=5, n_paths=15000, seed=7):
+def lambda_threshold(lambdas=np.linspace(0.20, 0.80, 16), nF=121, nR=51, na=25, nq=5, n_paths=15000, seed=7):
     Fg, rg, _ = c.grids(nF, nR, na)
     rng = np.random.default_rng(seed); R0, L0, S0 = c.new_plan_init(n_paths, rng)
     gm, pw = [], []

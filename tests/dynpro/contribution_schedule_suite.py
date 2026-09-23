@@ -222,7 +222,7 @@ def new_plan_profile(nF=145, nR=61, na=31, nq=7, n_paths=40000, seed=7):
     print(f"[new_plan_profile] a*(0)={r['a_by_t'][0]:.3f}  first-3yr share={frac3:.2f}  "
           f"rho after yr0={r['rho_med'][1]:.2f} (1/Gamma={1/c.dp.GAMMA:.2f})")
     print(f"   TOTAL RR median={r['tot']:.3f} (legal={c.dp.RR_LEGAL})  stayer={r['sty']:.3f}  leaver={r['lea']:.3f}  "
-          f"survival to T={c.lx.survival(c.lx.tenure_hazard)[c.dp.T]:.2f}")
+          f"survival to T={c.dp.survival(c.dp.tenure_hazard)[c.dp.T]:.2f}")
     yrs = np.arange(c.dp.T)
     fig, (a1, a3) = c.plt.subplots(1, 2, figsize=(12, 4.6), constrained_layout=True)
     a1.bar(yrs, r["a_by_t"], color="#1D9E75", alpha=0.85, width=0.9, label=r"mean applied $a^\star$ (present)")

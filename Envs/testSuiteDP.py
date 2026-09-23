@@ -15,7 +15,7 @@ Run from this directory:
 import numpy as np
 
 import DynPro as dp
-import leaveExtension as lx
+
 
 
 # ============ 1. cohort outcome distribution ============
@@ -26,7 +26,7 @@ def cohort(nF=121, nR=51, na=26, nq=5, n_paths=30000, seed=7,
     Fg, rg, _ = dp.grids(nF, nR, na)
     lo, hi = band_pct[0] / dp.GAMMA, band_pct[1] / dp.GAMMA
     ag = np.linspace(lo, hi, na)
-    pol = lx.solve_retention(Fg=Fg, rg=rg, ag=ag, n_quad=nq)["policy"]
+    pol = dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq)["policy"]
 
     rng = np.random.default_rng(seed)
     R0, L0, S0 = dp.new_plan_init(n_paths, rng)
@@ -65,18 +65,16 @@ def diagnostics(nF=73, nR=31, na=15, nq=5, n_paths=8000, seed=3):
 
     print("quadrature")
     zR, zL, wq = dp.gauss_hermite_2d(7)
-    z1, w1 = lx._gh_1d(9)
     print(f"    2D GH weights sum   1{wq.sum() - 1:+.2e}")
-    print(f"    1D GH weights sum   1{w1.sum() - 1:+.2e}")
 
-    print("\nleaver value (pro-rated target)")
-    Phi = lx.paidup_service(Fg, rg)
+    print("\nleaver value (deterministic paid-up, pro-rated target)")
+    Phi = dp.paidup_service(Fg, rg)
     print(f"    max|Phi[T] - dp.terminal|   {np.abs(Phi[dp.T] - dp.terminal(Fg, rg)).max():.2e}")
 
     print("\nsolve health")
-    o1 = lx.solve_retention(Fg=Fg, rg=rg, ag=ag, n_quad=nq)
+    o1 = dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq)
     pol = o1["policy"]
-    o2 = lx.solve_retention(Fg=Fg, rg=rg, ag=ag, n_quad=nq)
+    o2 = dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq)
     bang = float(np.mean((pol == ag.min()) | (pol == ag.max())))
     print(f"    grid-mean a*        {pol.mean():.3f}")
     print(f"    at a corner         {bang:.2f} of states")
@@ -86,9 +84,9 @@ def diagnostics(nF=73, nR=31, na=15, nq=5, n_paths=8000, seed=3):
     print(f"    F=1 is a grid node       {np.isclose(Fg[np.argmin(np.abs(Fg - 1))], 1.0)}")
 
     print("\ngrid convergence")
-    c = lx.solve_retention(Fg=dp.make_F_grid(n=73), rg=dp.make_rho_grid(n=31),
+    c = dp.solve(Fg=dp.make_F_grid(n=73), rg=dp.make_rho_grid(n=31),
                            ag=dp.make_a_grid(n=15), n_quad=5)["policy"].mean()
-    f = lx.solve_retention(Fg=dp.make_F_grid(n=145), rg=dp.make_rho_grid(n=61),
+    f = dp.solve(Fg=dp.make_F_grid(n=145), rg=dp.make_rho_grid(n=61),
                            ag=dp.make_a_grid(n=31), n_quad=7)["policy"].mean()
     print(f"    grid-mean a*  coarse {c:.3f}   fine {f:.3f}   diff {abs(f - c):.3f}")
 
@@ -121,7 +119,7 @@ def diagnostics(nF=73, nR=31, na=15, nq=5, n_paths=8000, seed=3):
 
     print("\nleaver vs stayer (banded policy)")
     LO, HI = 0.02 / dp.GAMMA, 0.15 / dp.GAMMA
-    polb = lx.solve_retention(Fg=Fg, rg=rg, ag=np.linspace(LO, HI, 26), n_quad=nq)["policy"]
+    polb = dp.solve(Fg=Fg, rg=rg, ag=np.linspace(LO, HI, 26), n_quad=nq)["policy"]
     rb = dp.simulate(polb, Fg, rg, S0=20.0, band=(LO, HI), n_paths=n_paths, seed=seed)
     print(f"    stayer median RR {rb['sty']:.3f}   leaver median RR {rb['lea']:.3f}")
     print(f"    career-average contribution {rb['avg']:.1f}%")

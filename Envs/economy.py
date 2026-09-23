@@ -14,15 +14,38 @@ those consume these primitives downstream. Zero internal dependencies.
 import numpy as np
  
 # --- parameters -----------------------------------------------------------
-T = 45          # career length in years
-G = 0.0175      # frozen WAP guarantee rate (liability leg)
-MU = 0.01       # tariff credited on the mathematical reserve
-LAMBDA = 0.5    # employee weight in V = λ·V_employee + (1−λ)·V_employer
-S0 = 1.0        # starting salary
-W = 0.025       # deterministic salary growth
-DISC = 0.01     # discount rate (single numeraire, to t=0)
-SIGMA = 0.05    # credited-return volatility
-N_EVAL = 2000   # default number of evaluation paths (SAA batch)
+# THE single source of truth for the economic calibration: both the tabular
+# environment (basicEnv) and the DP oracle (DynPro) import from here, so the two
+# rungs are guaranteed to run the same economy.
+#
+# Rung 1 previously carried an older vintage of its own (G=1.75%, the earlier WAP
+# floor; MU=1%; a single 1% numeraire). It now inherits the committed calibration
+# below, so its drift gap MU-G moves from -0.75% to 0 and its discount from 1% to
+# the employer rate.
+T = 45                      # career length in years
+G, MU, W = 0.03, 0.03, 0.025   # WAP guarantee rate, credited tariff, salary growth
+
+DISC_EMP = 0.025    # EMPLOYEE discount: values future retirement income at the risk-free/OLO rate
+DISC_ER  = 0.05     # EMPLOYER discount: firm cost of capital (contributions + shortfall)
+DISC = DISC_ER      # single numeraire, used by the tabular rung and as a legacy alias
+
+SIGMA_R, SIGMA_L = 0.05, 0.02   # asset shock, guarantee shock
+SIGMA = SIGMA_R     # the tabular rung has ONE shock, on the reserve
+
+GAMMA, LAMBDA, S0 = 0.15, 0.5, 1.0
+ETA = 2.0                   # CRRA curvature over the replacement rate (eta != 1)
+ANNUITY = 15.0              # actuarial annuity factor: capital -> annual pension
+                            # (Belgian life expectancy at 65 ~20y, ~2% technical rate,
+                            #  mortality-adjusted). RR is ANNUAL: pension / final salary.
+RR_LEGAL = 0.43             # 1st-pillar (legal) gross replacement, Belgian private-sector
+                            # average earner (OECD PaaG); the 2nd pillar sits ON TOP.
+SATIATE = False             # if True, cap RR at RR_TARGET in the utility (no reward for overshoot)
+RR_TARGET = 0.70            # total-adequacy target across all pillars (OECD/EU ~70%);
+                            # the employee's lifecycle utility is judged against this.
+# GAMMA/ETA/ANNUITY/RR_* and the DISC_EMP/DISC_ER split are Rung-2 concepts; the
+# binary-action tabular model simply does not read them.
+
+N_EVAL = 2000   # default number of evaluation paths (SAA batch) -- numerical, not economic
  
  
 # --- plan rules: c(t, S) -> premium --------------------------------------

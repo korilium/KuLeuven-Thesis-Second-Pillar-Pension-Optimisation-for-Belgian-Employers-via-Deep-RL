@@ -13,22 +13,16 @@ shocks; Gauss-Hermite quadrature; reduced state (t, F, rho).
 import numpy as np
 
 # --- parameters -----------------------------------------------------------
-T = 45
-G, MU, W = 0.03, 0.03, 0.025
-DISC_EMP = 0.025     # EMPLOYEE discount: values future retirement income at the risk-free/OLO rate
-DISC_ER  = 0.05      # EMPLOYER discount: firm cost of capital (contributions + shortfall)
-DISC = DISC_ER       # legacy alias
-SIGMA_R, SIGMA_L = 0.05, 0.02        # asset shock, guarantee shock
-GAMMA, LAMBDA, S0 = 0.15, 0.5, 1.0
-ETA = 2.0                            # CRRA curvature over the replacement rate (eta != 1)
-ANNUITY = 15.0                       # actuarial annuity factor: capital -> annual pension
-                                     # (Belgian life expectancy at 65 ~20y, ~2% technical rate,
-                                     #  mortality-adjusted). RR is ANNUAL: pension / final salary.
-RR_LEGAL = 0.43                      # 1st-pillar (legal) gross replacement, Belgian private-sector
-                                     # average earner (OECD PaaG); the 2nd pillar sits ON TOP.
-SATIATE = False                      # if True, cap RR at RR_TARGET in the utility (no reward for overshoot)
-RR_TARGET = 0.70                     # total-adequacy target across all pillars (OECD/EU ~70%);
-                                     # the employee's lifecycle utility is judged against this.
+# Sourced from economy.py, the single source of truth shared with the tabular
+# rung. They are imported as module globals on purpose: every function below
+# reads them as bare globals, and the sweep harnesses rebind them HERE (e.g.
+# setattr(dp, "LAMBDA", x); see tests/dynpro/common.restore) to vary one
+# parameter at a time. Rebinding dp.X does not touch economy.X, so patching the
+# oracle never silently moves the tabular environment.
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from economy import (T, G, MU, W, DISC_EMP, DISC_ER, DISC, SIGMA_R, SIGMA_L,
+                     GAMMA, LAMBDA, S0, ETA, ANNUITY, RR_LEGAL, SATIATE, RR_TARGET)
 
 
 def u(x):
@@ -45,11 +39,11 @@ def rho_next(rho, l, zL):
 
 
 def gauss_hermite_2d(n=15):
-    x, w = np.polynomial.hermite.hermgauss(n)
-    z = np.sqrt(2.0) * x
-    om = w / np.sqrt(np.pi)
-    ZR, ZL = np.meshgrid(z, z, indexing="ij")
-    return ZR.ravel(), ZL.ravel(), np.outer(om, om).ravel()
+    x, w = np.polynomial.hermite.hermgauss(n) # optimize the approximation of the integral using the gaussian quadrature: https://www.youtube.com/watch?v=Hu6yqs0R7GA
+    z = np.sqrt(2.0) * x # the nodes rescaled to the standard-normal scale.
+    om = w / np.sqrt(np.pi) # weigts should sum to one 
+    ZR, ZL = np.meshgrid(z, z, indexing="ij") # tensor-product grid
+    return ZR.ravel(), ZL.ravel(), np.outer(om, om).ravel() # The outer product gives the joint weights.This product structure is valid only because the joint density of two independent standard normals factorises,
 
 
 # --- grids ----------------------------------------------------------------
@@ -114,6 +108,45 @@ def bilinear(Fg, lrg, V, Fq, lrq):
             + V[iF, iR + 1] * (1 - tF) * tR + V[iF + 1, iR + 1] * tF * tR)
 
 
+def paidup_service(Fg, rg):
+    """Per-leave-cohort paid-up value Phi[tau](F,rho), in closed form.
+
+    On departure the contract goes paid-up: contributions cease, the reserve goes
+    on earning the locked credited return MU, and the liability hard-freezes
+    (L'=L) -- the WAP rate no longer applies to someone who has gone. The frozen
+    floor does not lapse: the employee still receives max(R_T, L_T) and the
+    employer still settles any shortfall against it at T.
+
+    Freezing the contract freezes its risk too. With L fixed, MU locked and
+    salary growth deterministic, nothing random happens between the freeze and
+    retirement, so Phi carries NO expectation -- it is a single roll-forward over
+    the remaining m = T - tau years (no quadrature, no backward pass):
+        F   -> F * exp(MU*m)      (R compounds at MU; L frozen, so no -G*m)
+        rho -> rho * (1+W)^m      (salary grows; L frozen)
+
+    The leaver keeps their FULL vested pot (immediate vesting), but it is judged
+    against a service-pro-rated target on the occupational gap only:
+        target_tau = RR_LEGAL + (tau/T)*(RR_TARGET - RR_LEGAL),
+    so only a full-career stayer faces the full target and tau=T reproduces
+    terminal() exactly. The legal first pillar is not pro-rated -- it is earned
+    across the whole career, not with this employer.
+    """
+    NF, NR = len(Fg), len(rg)
+    Phi = np.empty((T + 1, NF, NR))
+    for tau in range(0, T + 1):
+        m = T - tau; s = tau / T
+        target = RR_LEGAL + s * (RR_TARGET - RR_LEGAL)          # pro-rated target (gap only)
+        Fp = Fg * np.exp(MU * m)                                # (NF,) deterministic: no asset shock
+        rp = rg * (1.0 + W) ** m                                # (NR,)
+        rr2 = np.maximum(Fp, 1.0)[:, None] / (ANNUITY * rp[None, :])   # FULL vested pot
+        rrtot = RR_LEGAL + rr2
+        emp = LAMBDA * ANNUITY * u(rrtot / target) * np.exp(-DISC_EMP * T)
+        short = np.maximum(1.0 - Fp, 0.0)[:, None] / rp[None, :]
+        empr = (1.0 - LAMBDA) * short * np.exp(-DISC_ER * T)
+        Phi[tau] = emp - empr
+    return Phi
+
+
 def terminal(Fg, rg):
     Fc = Fg[:, None]; rc = rg[None, :]
     rr = RR_LEGAL + np.maximum(Fc, 1.0) / (rc * ANNUITY)
@@ -124,16 +157,42 @@ def terminal(Fg, rg):
 
 
 # --- backward induction (mode = 'optimize' | 'evaluate') ------------------
-def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=15):
-    if Fg is None: Fg = make_F_grid()
-    if rg is None: rg = make_rho_grid()
-    if ag is None: ag = make_a_grid()
+def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
+          hazard=tenure_hazard, betas=None):
+    """Backward induction for the committed (churn-aware) objective.
+
+    `hazard`: leaving is a hazard on the horizon, not a state variable. At each
+    step the continuation is the branch-blend
+        Vb = (1 - h(t)) * V[t+1] + h(t) * Phi[t+1],
+    where Phi is the paid-up companion value (see paidup_service). Both branches
+    pay year t's contribution and land at the same in-force state -- the worker
+    earned the year -- so the freeze applies only from t+1. Pass hazard=None for
+    the no-churn benchmark, which reduces this to the plain oracle exactly.
+
+    `betas`: optional list of softmax temperatures. The objective, V and the
+    hard-optimal `policy` are identical whether or not it is given -- each beta
+    only adds a SIGNAL READOUT of the same Q-values the argmax already computes:
+        a_soft(t,F,rho) = sum_a a * softmax(Q(t,F,rho,a) / beta),
+    i.e. the contribution responds smoothly to how much value the state-action
+    actually carries, instead of snapping to the argmax corner. beta -> 0
+    recovers the hard policy; larger beta blends near-tied actions. This is a
+    presentation/extraction layer, NOT a change of objective: rolling a_soft
+    forward is deliberately sub-optimal and the value gap to `policy` is the
+    price of that smoothness. Only meaningful in 'optimize' mode.
+    """
+    if Fg is None: Fg = make_F_grid(n=145)
+    if rg is None: rg = make_rho_grid(n=61)
+    if ag is None: ag = make_a_grid(n=31)
+    ag = np.asarray(ag, float)                 # betas path needs ag[:, None, None]
+    betas = list(betas) if betas else []
     zR, zL, wq = gauss_hermite_2d(n_quad)
     lrg = np.log(rg)
     NF, NR, Q = len(Fg), len(rg), len(wq)
+    Phi = paidup_service(Fg, rg) if hazard is not None else None
 
     V = np.empty((T + 1, NF, NR))
     policy = np.empty((T, NF, NR))
+    soft = {b: np.empty((T, NF, NR)) for b in betas}
     V[T] = terminal(Fg, rg)
 
     def bellman_scalar_a(t, a, Vnext):
@@ -152,21 +211,33 @@ def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=15)
         rp = rho_next(rg[None, :, None], l[:, :, None], zL[None, None, :])
         vi = bilinear(Fg, lrg, Vnext, Fp, np.log(rp))
         cont = (vi * wq[None, None, :]).sum(axis=2)
-        flow = -(1.0 - LAMBDA) * A * GAMMA * (1.0 + W) ** (-(T - t)) * np.exp(-DISC * t)
+        flow = -(1.0 - LAMBDA) * A * GAMMA * (1.0 + W) ** (-(T - t)) * np.exp(-DISC_ER * t)
         return flow + cont
 
     for t in range(T - 1, -1, -1):
+        Vnext = V[t + 1]
+        if hazard is not None:
+            h = float(hazard(t))
+            Vnext = (1.0 - h) * V[t + 1] + h * Phi[t + 1]
         if mode == "optimize":
             best = np.full((NF, NR), -np.inf); abest = np.zeros((NF, NR))
-            for a in ag:
-                Q_ = bellman_scalar_a(t, a, V[t + 1])
+            Qstack = np.empty((len(ag), NF, NR)) if betas else None
+            for i, a in enumerate(ag):
+                Q_ = bellman_scalar_a(t, a, Vnext)
+                if betas: Qstack[i] = Q_
                 upd = Q_ > best
                 best = np.where(upd, Q_, best); abest = np.where(upd, a, abest)
             V[t] = best; policy[t] = abest
+            for b in betas:
+                w = np.exp((Qstack - Qstack.max(axis=0, keepdims=True)) / b)
+                w /= w.sum(axis=0, keepdims=True)
+                soft[b][t] = (w * ag[:, None, None]).sum(axis=0)
         else:
             A = np.clip(plan_rule(t, Fg[:, None], rg[None, :]) * np.ones((NF, NR)), 0.0, 1.0)
-            V[t] = bellman_field_a(t, A, V[t + 1]); policy[t] = A
-    return dict(Fg=Fg, rg=rg, ag=ag, V=V, policy=policy)
+            V[t] = bellman_field_a(t, A, Vnext); policy[t] = A
+    out = dict(Fg=Fg, rg=rg, ag=ag, V=V, policy=policy)
+    if betas: out["policy_soft"] = soft
+    return out
 
 
 # --- forward evaluation of a policy (the committed scoring model) ---------

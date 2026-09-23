@@ -2,11 +2,10 @@
 contribution_schedule_suite.py, lambda_dial_suite.py): sys.path wiring to Envs/,
 figure config and labels, and baseline/restore bookkeeping for parameter sweeps.
 
-The MODEL lives in Envs/ -- DynPro.py holds the parameters, transitions, grids,
-the DP solver and simulate() (the committed forward Monte-Carlo), and
-leaveExtension.py holds the churn-aware oracle. Nothing economic is defined
-here; the names re-exported below are aliases into DynPro so the suites can keep
-calling c.simulate(...), c.grids(...) etc.
+The MODEL lives entirely in Envs/DynPro.py -- parameters, transitions, grids,
+the churn-aware DP solver, and simulate() (the committed forward Monte-Carlo).
+Nothing economic is defined here; the names re-exported below are aliases into
+DynPro so the suites can keep calling c.simulate(...), c.grids(...) etc.
 """
 import os, sys
 import numpy as np
@@ -16,7 +15,6 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "Envs"))
 import DynPro as dp
-import leaveExtension as lx
 
 OUT = "figs"; DPI = 150
 mpl.rcParams.update({"figure.facecolor": "white", "savefig.facecolor": "white", "font.size": 10,
@@ -55,5 +53,5 @@ def iso_rr(Fg, rg):
 def solve(Fg, rg, ag, nq=5, betas=None):
     """The committed (churn-aware, paid-up service-pro-rated) policy oracle.
     `betas` additionally returns soft (signal) readouts of the same Q-values;
-    it leaves V and the hard policy untouched -- see lx.solve_retention."""
-    return lx.solve_retention(Fg=Fg, rg=rg, ag=ag, n_quad=nq, betas=betas)
+    it leaves V and the hard policy untouched -- see dp.solve."""
+    return dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq, betas=betas)
