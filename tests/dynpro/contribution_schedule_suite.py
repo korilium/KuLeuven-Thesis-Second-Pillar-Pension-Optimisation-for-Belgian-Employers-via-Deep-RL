@@ -22,7 +22,7 @@ import common as c
 
 
 # ============ 1. baseline policy map ============
-def policy_map(nF=145, nR=61, na=41, nq=7, years=(5, 22, 40)):
+def policy_map(nF=145, nR=61, na=41, nq=7, years=(1, 5, 10, 20, 25, 30, 40, 44)):
     Fg, rg, ag = c.grids(nF, nR, na)
     pol = c.solve(Fg, rg, ag, nq)["policy"]
     print(f"[policy_map] bang-bang={np.all((pol==0)|(pol==1))}  mean a*={pol.mean():.3f}")

@@ -254,6 +254,93 @@ def schedule_grid(nF=73, nR=31, band_pct=(0.02, 1.0), n_paths=15000, specs=None)
     print(f"wrote {c.OUT}/sens_schedule_grid.png")
 
 
+# ============ 9. state-space visitation: which cells do careers actually reach? ============
+def state_visitation(nF=145, nR=61, na=41, nq=7, n_paths=40000, seed=7,
+                     years=(0, 5, 15, 30, 44)):
+    """Occupancy of the (F, rho) state space under the optimal policy.
+
+    The policy map colours every cell equally, but careers only ever occupy a thin
+    slice of it -- which is why grid-mean a* and path-weighted a* disagree by ~4x.
+    This makes that visible: where the mass actually is, and what the policy map
+    looks like once you know which of it is reachable."""
+    Fg, rg, ag = c.grids(nF, nR, na)
+    pol = c.solve(Fg, rg, ag, nq)["policy"]
+    r = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1],
+                   n_paths=n_paths, seed=seed, visits=True, track=True)
+    V = r["visits"]                      # (T, NF, NR)
+    dens = V.sum(axis=0)                 # pooled present path-years
+
+    reached = float(np.mean(dens > 0))
+    gm = float(pol.mean())
+    # weight jointly over (year, cell): the policy is strongly time-varying and so is
+    # occupancy, so pooling over years before weighting would decouple the two.
+    vw = float((pol * V).sum() / V.sum())
+    # comparable present-only path average from the simulation itself
+    pw = float(np.nansum(r["a_by_t"] * r["frac"]) / r["frac"].sum())
+    print(f"[state_visitation] {n_paths} paths on a {nF}x{nR} grid ({nF*nR} cells)")
+    print(f"    cells ever visited         {reached:.3f}  ({int(round(reached*nF*nR))} of {nF*nR})")
+    print(f"    grid-mean a*  (all cells)  {gm:.3f}")
+    print(f"    visit-weighted a*          {vw:.3f}   <- same policy, weighted by where careers are")
+    print(f"    ratio                      {gm/vw:.2f}x  the grid-mean overstates funding by this")
+    print(f"    cross-check, present-only path mean from sim  {pw:.3f}")
+    print(f"    (sim mean_a {r['mean_a']:.3f} counts absent path-years as a=0, so it sits lower)")
+
+    # ---- figure 1: density + policy map with visitation overlay ----
+    fig, (axL, axR) = c.plt.subplots(1, 2, figsize=(13, 5), sharey=True, constrained_layout=True)
+    pos = dens[dens > 0]
+    m = axL.pcolormesh(Fg, rg, np.where(dens > 0, dens, np.nan).T, cmap="magma",
+                       norm=c.mpl.colors.LogNorm(vmin=max(pos.min(), 1), vmax=dens.max()),
+                       shading="auto", rasterized=True)
+    axL.set_yscale("log"); axL.set_xlim(Fg[0], Fg[-1]); axL.set_ylim(rg[0], rg[-1])
+    axL.set_xlabel(r"$F=R/L$"); axL.set_ylabel(r"$\rho=S/L$ (log)")
+    axL.axvline(1.0, color="white", lw=0.9, ls=":", alpha=0.7)
+    axL.set_title(f"Where careers actually go\n(present path-years; {reached:.1%} of cells ever visited)")
+    fig.colorbar(m, ax=axL, shrink=0.9, pad=0.015).set_label("visits (log)")
+
+    mp = axR.pcolormesh(Fg, rg, pol.mean(axis=0).T, cmap="viridis", vmin=0, vmax=1,
+                        shading="auto", rasterized=True)
+    lv = [np.quantile(pos, q) for q in (0.50, 0.90, 0.99)]
+    axR.contour(Fg, rg, dens.T, levels=sorted(set(lv)), colors="white", linewidths=1.4)
+    axR.set_yscale("log"); axR.set_xlabel(r"$F=R/L$")
+    axR.axvline(1.0, color="white", lw=0.9, ls=":", alpha=0.7)
+    axR.set_title(f"Career-mean $a^\\star$ with visitation contours\n"
+                  f"grid-mean {gm:.2f} vs visit-weighted {vw:.2f}")
+    fig.colorbar(mp, ax=axR, shrink=0.9, pad=0.015).set_label(r"mean $a^\star$ over years")
+    fig.savefig(f"{c.OUT}/sens_visitation.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"    wrote {c.OUT}/sens_visitation.png")
+
+    # ---- figure 2: each year's POLICY map with that year's occupancy on top ----
+    fig, axes = c.plt.subplots(1, len(years), figsize=(3.5 * len(years), 4.4),
+                               sharey=True, constrained_layout=True)
+    mm = None
+    for ax, t in zip(np.atleast_1d(axes), years):
+        d = V[t]; tot_t = d.sum()
+        mm = ax.pcolormesh(Fg, rg, pol[t].T, cmap="viridis", vmin=0, vmax=1,
+                           shading="auto", rasterized=True)
+        pos = d[d > 0]
+        if pos.size:
+            # contours of that year's occupancy, drawn over that year's decision surface
+            levels = sorted({float(np.quantile(pos, q)) for q in (0.50, 0.90, 0.99)})
+            if len(levels) >= 1 and levels[-1] > levels[0]:
+                ax.contour(Fg, rg, d.T, levels=levels, colors="white", linewidths=1.3)
+            else:                       # degenerate (e.g. t=0: all mass in one cell)
+                jF, jR = np.unravel_index(int(d.argmax()), d.shape)
+                ax.plot(Fg[jF], rg[jR], "o", ms=9, mfc="none", mec="white", mew=1.8)
+        gm_t = float(pol[t].mean())
+        vw_t = float((pol[t] * d).sum() / tot_t) if tot_t else np.nan
+        ax.set_yscale("log"); ax.set_xlim(Fg[0], Fg[-1]); ax.set_ylim(rg[0], rg[-1])
+        ax.axvline(1.0, color="white", lw=0.9, ls=":", alpha=0.7)
+        ax.set_xlabel(r"$F=R/L$")
+        ax.set_title(f"year $t={t}$   ({int(tot_t)} present)\n"
+                     f"grid-mean {gm_t:.2f}  vs  visited {vw_t:.2f}", fontsize=10)
+    np.atleast_1d(axes)[0].set_ylabel(r"$\rho=S/L$ (log)")
+    fig.colorbar(mm, ax=axes, shrink=0.9, pad=0.015).set_label(r"$a^\star(t,F,\rho)$")
+    fig.suptitle("Each year's optimal rule, with that year's actual occupancy overlaid "
+                 r"(white = 50/90/99th pct of visits)", fontsize=12)
+    fig.savefig(f"{c.OUT}/sens_visitation_years.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"    wrote {c.OUT}/sens_visitation_years.png")
+
+
 _ALL = {
     "tornado": lambda: tornado(),
     "interaction": lambda: interaction("ETA", "GAMMA", [2, 3, 5], [0.10, 0.15, 0.20], tag="ETA_GAMMA"),
@@ -264,6 +351,7 @@ _ALL = {
     "anchor": lambda: anchor_check("G"),
     "entrydist": lambda: entry_dist_check("G"),
     "schedule": lambda: schedule_grid(),
+    "visits": lambda: state_visitation(),
 }
 
 

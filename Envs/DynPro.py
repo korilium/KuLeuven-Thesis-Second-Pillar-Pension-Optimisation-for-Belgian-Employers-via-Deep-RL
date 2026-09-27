@@ -255,7 +255,7 @@ def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
 
 # --- forward evaluation of a policy (the committed scoring model) ---------
 def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
-            seed=7, hazard=tenure_hazard, track=False):
+            seed=7, hazard=tenure_hazard, track=False, visits=False):
     """Canonical forward Monte-Carlo of a reduced policy a*(t,F,rho) under the
     committed model: Belgian churn (immediate-vesting, paid-up leavers), a split
     discount (employee at DISC_EMP, employer at DISC_ER), and the service-pro-rated
@@ -268,6 +268,13 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
     entry distribution); S0 defaults to the top of the rho-grid. `band=(lo,hi)`
     clips the applied action to a contribution band (banded-DCA); None means the
     unconstrained [0,1] rule.
+
+    `visits=True` additionally returns out["visits"], a (T, NF, NR) count of how
+    many PRESENT paths occupy each (F, rho) cell in each year -- the occupancy of
+    the state space. Sum over axis 0 for the pooled density. Cells are assigned by
+    nearest grid node (in log-rho, matching the grid), with states off the grid
+    clipped to the edge exactly as bilinear() does. This is what distinguishes a
+    grid-mean (every cell weighted equally) from a path-weighted average.
     """
     lrg = np.log(rg)
     rng = np.random.default_rng(seed)
@@ -280,12 +287,17 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
     cost = np.zeros(n); a_sum = np.zeros(n)
     a_by_t = np.full(T, np.nan); rho_med = np.zeros(T)
     frac = np.zeros(T); c_by = np.zeros(T)
+    visit = np.zeros((T, len(Fg), len(rg))) if visits else None
     for t in range(T):
         F = R / L; rho = S / L
         a = np.clip(bilinear(Fg, lrg, policy[t], F, np.log(rho)), lo, hi)
         a = np.where(present, a, 0.0)
         frac[t] = present.mean()
         c_by[t] = (a[present] * GAMMA).mean() * 100 if present.any() else 0.0
+        if visits and present.any():
+            iF = np.abs(Fg[:, None] - np.clip(F[present], Fg[0], Fg[-1])[None, :]).argmin(axis=0)
+            iR = np.abs(lrg[:, None] - np.clip(np.log(rho[present]), lrg[0], lrg[-1])[None, :]).argmin(axis=0)
+            np.add.at(visit[t], (iF, iR), 1.0)
         if track:
             a_by_t[t] = a[present].mean() if present.any() else np.nan
             rho_med[t] = np.median(rho[present]) if present.any() else np.nan
@@ -317,6 +329,8 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
     )
     if track:
         out.update(a_by_t=a_by_t, rho_med=rho_med)
+    if visits:
+        out["visits"] = visit
     return out
 
 
