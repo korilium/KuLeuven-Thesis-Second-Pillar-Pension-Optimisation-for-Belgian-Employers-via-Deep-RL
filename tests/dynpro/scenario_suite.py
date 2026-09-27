@@ -16,12 +16,14 @@ Groups:
 
 Figures (-> figs/scenarios/):
   shapes   scenario_shapes.png   contribution schedules by regime (B and C)
+  rates    scenario_rates.png    (G x delta_f) grid: delta_f sets the shape,
+                                 G sets the level -- their ordering is NOT a regime
   figures  <slug>/*.png          the full six-figure set rendered under EACH
                                  scenario (policy_map, baseline_schedule,
                                  new_plan_profile, dca_schedules,
                                  sens_visitation_years, lambda_threshold)
 
-Run:  python scenario_suite.py [table|shapes|figures]
+Run:  python scenario_suite.py [table|shapes|rates|figures]
 """
 import contextlib
 import re
@@ -58,7 +60,7 @@ SCENARIOS = [
     ("DISC_ER<MU  (0.02)",           "C", dict(DISC_ER=0.02),                        None),
     ("DISC_ER=MU  (0.03)",           "C", dict(DISC_ER=0.03),                        None),
     ("DISC_ER>MU  (0.05 committed)", "C", dict(DISC_ER=0.05),                        None),
-    ("DISC_EMP<MU (0.02)",           "C", dict(DISC_EMP=0.02),                       None),
+    ("DISC_EMP=0.02 (== a LAMBDA change)", "C", dict(DISC_EMP=0.02),                 None),
 
     ("SATIATE=True",                 "D", dict(SATIATE=True),                        None),
     ("ETA=1  log (ergodicity)",      "D", dict(ETA=1.0),                             None),
@@ -132,29 +134,73 @@ def table():
 
 
 # ============ 2. schedule shapes by regime ============
+# NOTE on the panels below. delta_e is NOT shown as a regime: it enters the objective
+# only as exp(-delta_e*T), a constant on the employee leg, so it is exactly redundant
+# with LAMBDA up to a positive rescale of the objective (which leaves the argmax
+# alone). Any (LAMBDA, d_e') has an equivalent (LAMBDA'', d_e):
+#     LAMBDA'' = A / (A + B*exp(-d_e*T)),  A = LAMBDA*exp(-d_e'*T),  B = 1-LAMBDA
+# verified to max|dPolicy| ~ 6e-11. So delta_e has no relationship to MU, G or
+# delta_f -- it never interacts with them -- and a delta_e panel would be a LAMBDA
+# panel mislabelled.
 def shapes():
     c.ensure_out(OUT)
-    panels = [("B", "drift gap  $\\mu - G$"), ("C", "discount structure")]
-    fig, axes = c.plt.subplots(1, len(panels), figsize=(6.2 * len(panels), 4.6),
+    # the committed case is EXCLUDED from each panel's lines: MU=G and DISC_ER=0.05
+    # ARE the committed values, so plotting them would sit exactly on the baseline
+    # and hide it. The baseline is drawn last, on top, as the explicit reference.
+    panels = [("B", "drift gap  $\\mu - G$", ("MU=G  at the money",)),
+              ("C", "employer discount  $\\delta_f$", ("DISC_ER>MU  (0.05 committed)",))]
+    fig, axes = c.plt.subplots(1, len(panels), figsize=(6.4 * len(panels), 4.8),
                                sharey=True, constrained_layout=True)
     yrs = np.arange(c.dp.T)
     base = _evaluate({})
-    for ax, (grp, title) in zip(np.atleast_1d(axes), panels):
-        ax.plot(yrs, base["c_by"], color="#9aa0a6", lw=2.6, ls="--", label="committed baseline", zorder=1)
-        rows = [(lb, ov) for lb, g, ov, _ in SCENARIOS if g == grp]
-        cols = c.plt.cm.viridis(np.linspace(0.12, 0.85, len(rows)))
+    for ax, (grp, title, skip) in zip(np.atleast_1d(axes), panels):
+        rows = [(lb, ov) for lb, g, ov, _ in SCENARIOS if g == grp and lb not in skip]
+        cols = c.plt.cm.viridis(np.linspace(0.12, 0.80, len(rows)))
         for (lb, ov), col in zip(rows, cols):
             r = _evaluate(ov)
             ax.plot(yrs, r["c_by"], lw=2, color=col,
                     label=f"{lb}  ({r['early']:.0f}$\\to${r['late']:.0f}%)")
-            print("  %-30s early %5.1f%%  late %5.1f%%  styRR %.3f" % (lb, r["early"], r["late"], r["sty"]))
+            print("  %-34s early %5.1f%%  late %5.1f%%  styRR %.3f" % (lb, r["early"], r["late"], r["sty"]))
+        # baseline LAST and on top, so it is never hidden by a coincident line
+        ax.plot(yrs, base["c_by"], lw=3.4, color="white", zorder=4)
+        ax.plot(yrs, base["c_by"], lw=2.2, color="#C1121F", ls=(0, (5, 2)), zorder=5,
+                label=f"COMMITTED baseline  ({base['early']:.0f}$\\to${base['late']:.0f}%)")
         ax.set_xlabel("career year $t$"); ax.set_title(title)
         ax.legend(frameon=False, fontsize=8, loc="best"); ax.grid(True, alpha=0.25, lw=0.6)
     np.atleast_1d(axes)[0].set_ylabel("contribution (% of salary)")
-    fig.suptitle("Schedule shape is set by rate ORDERINGS, not levels", fontsize=12)
+    fig.suptitle("Schedule shape responds to the rate structure "
+                 "(levels matter too -- see rates())", fontsize=12)
     fig.savefig(f"{OUT}/scenario_shapes.png", dpi=c.DPI); c.plt.close(fig)
     print(f"\nwrote {OUT}/scenario_shapes.png")
 
+
+# ============ 2b. (G x delta_f): which rate sets the LEVEL, which sets the SHAPE ============
+def rates(Gs=(0.0175, 0.03, 0.045), DERs=(0.02, 0.05)):
+    """G and delta_f do not form a regime boundary by their ORDERING -- the schedule
+    tracks delta_f alone (front-loaded at 0.02 for every G, back-loaded at 0.05 for
+    every G) while G shifts the LEVEL. This grid shows that separation directly."""
+    c.ensure_out(OUT)
+    yrs = np.arange(c.dp.T)
+    fig, axes = c.plt.subplots(1, len(DERs), figsize=(6.4 * len(DERs), 4.8),
+                               sharey=True, constrained_layout=True)
+    print("  %-18s %8s %8s %8s %8s" % ("(G, delta_f)", "styRR", "avg", "early", "late"))
+    for ax, der in zip(np.atleast_1d(axes), DERs):
+        cols = c.plt.cm.plasma(np.linspace(0.15, 0.75, len(Gs)))
+        for G, col in zip(Gs, cols):
+            r = _evaluate(dict(G=G, DISC_ER=der))
+            ax.plot(yrs, r["c_by"], lw=2, color=col,
+                    label=f"G={G:.4g}   styRR {r['sty']:.2f}")
+            print("  (%.4f, %.3f)   %8.3f %7.1f%% %8.1f %8.1f"
+                  % (G, der, r["sty"], r["avg"], r["early"], r["late"]))
+        ax.set_xlabel("career year $t$")
+        ax.set_title(f"$\\delta_f$ = {der:.0%}  "
+                     + ("(front-loads)" if der < c.dp.MU else "(back-loads)"))
+        ax.legend(frameon=False, fontsize=8.5, loc="best"); ax.grid(True, alpha=0.25, lw=0.6)
+    np.atleast_1d(axes)[0].set_ylabel("contribution (% of salary)")
+    fig.suptitle(r"$\delta_f$ selects the SHAPE; $G$ shifts the LEVEL  "
+                 r"($\mu$ fixed at %.0f%%)" % (100 * c.dp.MU), fontsize=12)
+    fig.savefig(f"{OUT}/scenario_rates.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"\nwrote {OUT}/scenario_rates.png")
 
 # ============ 3. the full figure set, per scenario ============
 # Reuses the existing suite functions wholesale -- their OUT is temporarily
@@ -232,7 +278,7 @@ def figures(only=("base", "B", "C"), grid=None, figs=None):
           % (time.time() - t_all, c.dp.MU, c.dp.DISC_ER, c.dp.LAMBDA, c.dp.SATIATE, c.dp.BETA))
 
 
-_ALL = {"table": table, "shapes": shapes, "figures": figures}
+_ALL = {"table": table, "shapes": shapes, "rates": rates, "figures": figures}
 
 
 def main(which=None):
