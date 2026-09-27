@@ -283,7 +283,8 @@ def state_visitation(nF=145, nR=101, na=41, nq=7, n_paths=40000, seed=7,
     print(f"    cells ever visited         {reached:.3f}  ({int(round(reached*nF*nR))} of {nF*nR})")
     print(f"    grid-mean a*  (all cells)  {gm:.3f}")
     print(f"    visit-weighted a*          {vw:.3f}   <- same policy, weighted by where careers are")
-    print(f"    ratio                      {gm/vw:.2f}x  the grid-mean overstates funding by this")
+    _dir = "overstates" if gm > vw else "understates"
+    print(f"    ratio                      {gm/vw:.2f}x  the grid-mean {_dir} funding")
     print(f"    cross-check, present-only path mean from sim  {pw:.3f}")
     print(f"    (sim mean_a {r['mean_a']:.3f} counts absent path-years as a=0, so it sits lower)")
 
