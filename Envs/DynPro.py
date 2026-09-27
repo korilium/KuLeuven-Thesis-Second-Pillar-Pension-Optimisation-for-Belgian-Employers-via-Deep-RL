@@ -26,8 +26,15 @@ from economy import (T, G, MU, W, DISC_EMP, DISC_ER, DISC, SIGMA_R, SIGMA_L,
 
 
 def u(x):
-    """CRRA utility, eta != 1."""
-    return np.power(x, 1.0 - ETA) / (1.0 - ETA)
+    """Normalized (Box-Cox) CRRA utility, eta != 1:
+        u(x) = (x^(1-eta) - 1) / (1 - eta),
+    which satisfies u(1) = 0 and u'(1) = 1 for every eta. The zero at the target
+    makes "on target" the natural origin; the unit slope at the target is what
+    licenses the money-metric reading of the employee leg (a marginal unit of x
+    is worth one unit of the numeraire there). Differs from the bare
+    x^(1-eta)/(1-eta) by the additive constant -1/(1-eta) only, so it shifts
+    value levels without changing any argmax."""
+    return (np.power(x, 1.0 - ETA) - 1.0) / (1.0 - ETA)
 
 
 # --- transitions ----------------------------------------------------------
