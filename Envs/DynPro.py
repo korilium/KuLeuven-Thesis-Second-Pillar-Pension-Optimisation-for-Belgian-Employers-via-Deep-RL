@@ -28,7 +28,8 @@ import numpy as np
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 from economy import (T, G, MU, W, DISC_EMP, DISC_ER, DISC, SIGMA_R, SIGMA_L,
-                     GAMMA, LAMBDA, S0, ETA, ANNUITY, RR_LEGAL, SATIATE, RR_TARGET)
+                     GAMMA, LAMBDA, S0, ETA, ANNUITY, RR_LEGAL, SATIATE, RR_TARGET,
+                     BETA)
 
 
 def u(x):
@@ -169,9 +170,17 @@ def terminal(Fg, rg):
     return emp - empr
 
 
+def _soft_readout(Qstack, ag, beta):
+    """a_soft = sum_a a * softmax(Q/beta), numerically stable. Never called with
+    beta == 0 -- the hard argmax branch handles that, so there is no 1/0."""
+    w = np.exp((Qstack - Qstack.max(axis=0, keepdims=True)) / beta)
+    w /= w.sum(axis=0, keepdims=True)
+    return (w * ag[:, None, None]).sum(axis=0)
+
+
 # --- backward induction (mode = 'optimize' | 'evaluate') ------------------
 def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
-          hazard=tenure_hazard, betas=None):
+          hazard=tenure_hazard, beta=None, betas=None):
     """Backward induction for the committed (churn-aware) objective.
 
     `hazard`: leaving is a hazard on the horizon, not a state variable. At each
@@ -182,9 +191,16 @@ def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
     earned the year -- so the freeze applies only from t+1. Pass hazard=None for
     the no-churn benchmark, which reduces this to the plain oracle exactly.
 
-    `betas`: optional list of softmax temperatures. The objective, V and the
-    hard-optimal `policy` are identical whether or not it is given -- each beta
-    only adds a SIGNAL READOUT of the same Q-values the argmax already computes:
+    `beta` (defaults to economy.BETA): the policy-EXTRACTION temperature.
+        beta == 0  -> `policy` is the hard argmax, the true optimum (default).
+        beta  > 0  -> `policy` is the soft readout at that temperature, and the
+                      argmax is still returned as `policy_hard`.
+    Either way V[t] = max_a Q is untouched, so beta never changes the objective and
+    the value gap between a soft policy and V remains the honest price of smoothing.
+
+    `betas`: optional LIST of temperatures for comparing several at once. It leaves
+    `policy` alone and returns a {beta: array} dict as `policy_soft`. Each beta only
+    adds a SIGNAL READOUT of the same Q-values the argmax already computes:
         a_soft(t,F,rho) = sum_a a * softmax(Q(t,F,rho,a) / beta),
     i.e. the contribution responds smoothly to how much value the state-action
     actually carries, instead of snapping to the argmax corner. beta -> 0
@@ -196,8 +212,10 @@ def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
     if Fg is None: Fg = make_F_grid(n=145)
     if rg is None: rg = make_rho_grid(n=61)
     if ag is None: ag = make_a_grid(n=31)
-    ag = np.asarray(ag, float)                 # betas path needs ag[:, None, None]
+    ag = np.asarray(ag, float)                 # soft path needs ag[:, None, None]
     betas = list(betas) if betas else []
+    beta = BETA if beta is None else float(beta)   # module default; 0 = hard argmax
+    need_Q = bool(betas) or beta > 0
     zR, zL, wq = gauss_hermite_2d(n_quad)
     lrg = np.log(rg)
     NF, NR, Q = len(Fg), len(rg), len(wq)
@@ -206,6 +224,7 @@ def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
     V = np.empty((T + 1, NF, NR))
     policy = np.empty((T, NF, NR))
     soft = {b: np.empty((T, NF, NR)) for b in betas}
+    hard = np.empty((T, NF, NR)) if beta > 0 else None
     V[T] = terminal(Fg, rg)
 
     def bellman_scalar_a(t, a, Vnext):
@@ -234,21 +253,25 @@ def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
             Vnext = (1.0 - h) * V[t + 1] + h * Phi[t + 1]
         if mode == "optimize":
             best = np.full((NF, NR), -np.inf); abest = np.zeros((NF, NR))
-            Qstack = np.empty((len(ag), NF, NR)) if betas else None
+            Qstack = np.empty((len(ag), NF, NR)) if need_Q else None
             for i, a in enumerate(ag):
                 Q_ = bellman_scalar_a(t, a, Vnext)
-                if betas: Qstack[i] = Q_
+                if need_Q: Qstack[i] = Q_
                 upd = Q_ > best
                 best = np.where(upd, Q_, best); abest = np.where(upd, a, abest)
-            V[t] = best; policy[t] = abest
+            V[t] = best
+            if beta > 0:                       # extraction only -- V[t] is still max_a Q
+                hard[t] = abest
+                policy[t] = _soft_readout(Qstack, ag, beta)
+            else:
+                policy[t] = abest
             for b in betas:
-                w = np.exp((Qstack - Qstack.max(axis=0, keepdims=True)) / b)
-                w /= w.sum(axis=0, keepdims=True)
-                soft[b][t] = (w * ag[:, None, None]).sum(axis=0)
+                soft[b][t] = _soft_readout(Qstack, ag, b)
         else:
             A = np.clip(plan_rule(t, Fg[:, None], rg[None, :]) * np.ones((NF, NR)), 0.0, 1.0)
             V[t] = bellman_field_a(t, A, Vnext); policy[t] = A
     out = dict(Fg=Fg, rg=rg, ag=ag, V=V, policy=policy)
+    if beta > 0: out["policy_hard"] = hard
     if betas: out["policy_soft"] = soft
     return out
 

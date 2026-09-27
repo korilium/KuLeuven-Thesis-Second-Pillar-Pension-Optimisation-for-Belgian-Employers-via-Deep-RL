@@ -45,6 +45,12 @@ RR_TARGET = 0.70            # total-adequacy target across all pillars (OECD/EU 
 # GAMMA/ETA/ANNUITY/RR_* and the DISC_EMP/DISC_ER split are Rung-2 concepts; the
 # binary-action tabular model simply does not read them.
 
+BETA = 0.0      # policy-EXTRACTION temperature: 0 = hard argmax (the true optimum);
+                # > 0 = soft signal readout, a_soft = sum_a a*softmax(Q/BETA), which responds
+                # smoothly to how much value each action carries instead of snapping to a
+                # corner. Extraction only: the objective and the value function V are
+                # IDENTICAL at every BETA, so the value gap to a soft policy stays meaningful.
+
 N_EVAL = 2000   # default number of evaluation paths (SAA batch) -- numerical, not economic
  
  

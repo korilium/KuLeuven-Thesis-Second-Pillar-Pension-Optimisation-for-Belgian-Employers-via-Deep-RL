@@ -50,8 +50,8 @@ def iso_rr(Fg, rg):
     return np.maximum(FF, 1.0) / RRr
 
 
-def solve(Fg, rg, ag, nq=5, betas=None):
+def solve(Fg, rg, ag, nq=5, beta=None, betas=None):
     """The committed (churn-aware, paid-up service-pro-rated) policy oracle.
     `betas` additionally returns soft (signal) readouts of the same Q-values;
     it leaves V and the hard policy untouched -- see dp.solve."""
-    return dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq, betas=betas)
+    return dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq, beta=beta, betas=betas)
