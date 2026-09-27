@@ -68,7 +68,7 @@ def make_F_grid(F_max=3.0, n=241):
     assert abs(g[np.argmin(np.abs(g - 1.0))] - 1.0) < 1e-12, "F=1 must be a node"
     return g
 
-def make_rho_grid(lo=0.01, hi=35.0, n=81):
+def make_rho_grid(lo=0.01, hi=35.0, n=91):
     """Log-spaced grid for rho = S/L.
 
     lo=0.01 (not 0.3) because careers genuinely reach it: under heavy funding the
@@ -83,7 +83,7 @@ def make_rho_grid(lo=0.01, hi=35.0, n=81):
 def make_a_grid(n=41):
     return np.linspace(0.0, 1.0, n)
 
-def grids(nF=145, nR=61, na=31):
+def grids(nF=145, nR=91, na=31):
     return make_F_grid(n=nF), make_rho_grid(n=nR), make_a_grid(n=na)
 
 
@@ -242,7 +242,7 @@ def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
     price of that smoothness. Only meaningful in 'optimize' mode.
     """
     if Fg is None: Fg = make_F_grid(n=145)
-    if rg is None: rg = make_rho_grid(n=61)
+    if rg is None: rg = make_rho_grid(n=91)
     if ag is None: ag = make_a_grid(n=31)
     ag = np.asarray(ag, float)                 # soft path needs ag[:, None, None]
     betas = list(betas) if betas else []
