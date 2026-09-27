@@ -41,6 +41,8 @@ def u(x):
     is worth one unit of the numeraire there). Differs from the bare
     x^(1-eta)/(1-eta) by the additive constant -1/(1-eta) only, so it shifts
     value levels without changing any argmax."""
+    if abs(ETA - 1.0) < 1e-9:          # removable singularity: the eta->1 limit IS log,
+        return np.log(x)               # which is the ergodicity-canonical (Kelly) criterion
     return (np.power(x, 1.0 - ETA) - 1.0) / (1.0 - ETA)
 
 
@@ -66,7 +68,16 @@ def make_F_grid(F_max=3.0, n=241):
     assert abs(g[np.argmin(np.abs(g - 1.0))] - 1.0) < 1e-12, "F=1 must be a node"
     return g
 
-def make_rho_grid(lo=0.3, hi=35.0, n=81):
+def make_rho_grid(lo=0.01, hi=35.0, n=81):
+    """Log-spaced grid for rho = S/L.
+
+    lo=0.01 (not 0.3) because careers genuinely reach it: under heavy funding the
+    median rho falls to ~0.13 by t=44, and bilinear() CLIPS anything below the
+    floor. Since RR2 = max(F,1)/(ANNUITY*rho), clipping rho from below caps the
+    attainable replacement rate, so a floor of 0.3 made the solver blind to the
+    outcomes that heavy contribution actually produces -- it under-valued high-a
+    policies by up to 57% and suppressed stayer RR by ~28pp. Headline results are
+    converged in n from ~51 upward at this range."""
     return np.exp(np.linspace(np.log(lo), np.log(hi), n))
 
 def make_a_grid(n=41):

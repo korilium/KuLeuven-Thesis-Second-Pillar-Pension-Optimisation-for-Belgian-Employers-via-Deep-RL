@@ -224,7 +224,7 @@ def schedule_grid(nF=73, nR=31, band_pct=(0.02, 1.0), n_paths=15000, specs=None)
         ("G", (0.02, 0.04), r"guarantee $G$"),
         ("GAMMA", (0.10, 0.20), r"ceiling $\Gamma$"),
         ("RR_TARGET", (0.60, 0.80), r"target $RR^\star$"),
-        ("ETA", (1.5, 3.0), r"risk aversion $\eta$"),
+        ("ETA", (1.0, 3.0), r"risk aversion $\eta$"),   # 1.0 = log utility (ergodicity-canonical)
         ("LAMBDA", (0.3, 0.7), r"weight $\lambda$"),
         ("ANNUITY", (12.0, 18.0), r"annuity $\ddot a$"),
     ]
@@ -345,7 +345,7 @@ _ALL = {
     "tornado": lambda: tornado(),
     "interaction": lambda: interaction("ETA", "GAMMA", [2, 3, 5], [0.10, 0.15, 0.20], tag="ETA_GAMMA"),
     "policy": lambda: [policy_map_sweep(p, v) for p, v in
-                       (("ETA", [2, 3, 5]), ("G", [0.0175, 0.025, 0.0375]), ("GAMMA", [0.25, 0.50, 0.75]))],
+                       (("ETA", [1, 2, 3, 5]), ("G", [0.0175, 0.025, 0.0375]), ("GAMMA", [0.25, 0.50, 0.75]))],
     "frontier": lambda: frontier_shift("ETA", [2, 3, 5]),
     "resolution": lambda: resolution_check("G"),
     "anchor": lambda: anchor_check("G"),
