@@ -171,9 +171,27 @@ def terminal(Fg, rg):
 
 
 def _soft_readout(Qstack, ag, beta):
-    """a_soft = sum_a a * softmax(Q/beta), numerically stable. Never called with
-    beta == 0 -- the hard argmax branch handles that, so there is no 1/0."""
-    w = np.exp((Qstack - Qstack.max(axis=0, keepdims=True)) / beta)
+    """a_soft = sum_a a * softmax( (Q - max Q) / (beta * spread) ), where
+    spread = max_a Q - min_a Q AT THAT STATE.
+
+    beta is therefore RELATIVE, not in Q units: it is the fraction of the local
+    Q-range over which actions get blended. This matters because Q is NOT
+    scale-free in the reward -- rescaling the employee leg (e.g. introducing the
+    RR_TARGET*ANNUITY multiplier) changes every Q-difference, so a fixed absolute
+    beta would silently mean something different in each specification. Dividing
+    by the local spread makes the readout exactly invariant to any affine
+    rescaling Q -> alpha*Q + c: alpha cancels between numerator and spread, and c
+    cancels in the difference.
+
+    Read beta as "blend actions lying within this fraction of the state's full
+    value range". beta -> 0 recovers the hard argmax; large beta -> uniform.
+    Never called with beta == 0 (the argmax branch handles that), so there is no
+    1/0. Where the spread is exactly 0 all actions are tied, the numerator is 0,
+    and the weights come out uniform -- the right answer for a tie."""
+    qmax = Qstack.max(axis=0, keepdims=True)
+    spread = qmax - Qstack.min(axis=0, keepdims=True)
+    denom = beta * np.where(spread > 0, spread, 1.0)
+    w = np.exp((Qstack - qmax) / denom)
     w /= w.sum(axis=0, keepdims=True)
     return (w * ag[:, None, None]).sum(axis=0)
 
@@ -191,7 +209,10 @@ def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
     earned the year -- so the freeze applies only from t+1. Pass hazard=None for
     the no-churn benchmark, which reduces this to the plain oracle exactly.
 
-    `beta` (defaults to economy.BETA): the policy-EXTRACTION temperature.
+    `beta` (defaults to economy.BETA): the policy-EXTRACTION temperature, given
+    RELATIVE to the local Q-spread -- "blend actions within this fraction of the
+    state's full value range". See _soft_readout: this makes the readout invariant
+    to any affine rescale of the reward, which a raw Q-unit temperature is not.
         beta == 0  -> `policy` is the hard argmax, the true optimum (default).
         beta  > 0  -> `policy` is the soft readout at that temperature, and the
                       argmax is still returned as `policy_hard`.

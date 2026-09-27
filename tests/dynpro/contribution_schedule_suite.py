@@ -247,7 +247,7 @@ def new_plan_profile(nF=145, nR=61, na=31, nq=7, n_paths=40000, seed=7):
 
 
 # ============ 8. value function as a signal (soft readout, objective unchanged) ============
-def signal_schedule(betas=(0.002, 0.005, 0.02, 0.05), nF=145, nR=61, na=31, nq=7,
+def signal_schedule(betas=(0.0001, 0.001, 0.01, 0.03, 0.10, 0.30), nF=145, nR=61, na=31, nq=7,
                     n_paths=30000, seed=7, years=(0, 5, 10, 15, 22, 30, 44)):
     """Read the contribution off the TRUE value function as a graded signal:
     a_soft = sum_a a*softmax(Q/beta), instead of the argmax. The objective and V
@@ -293,7 +293,7 @@ def signal_schedule(betas=(0.002, 0.005, 0.02, 0.05), nF=145, nR=61, na=31, nq=7
     ax2 = axR.twinx(); ax2.plot(betas, roughs, "-s", color="#274690", lw=1.8, label="schedule roughness")
     ax2.axhline(rough_h, color="#274690", ls=":", lw=1.2, alpha=0.7, label="argmax roughness")
     ax2.spines["top"].set_visible(False); axR.set_xscale("log")
-    axR.set_xlabel(r"readout temperature $\beta$ (log)"); axR.set_ylabel("value gap (% of joint)", color="#C1121F")
+    axR.set_xlabel(r"readout temperature $\beta$ (fraction of local $Q$-range, log)"); axR.set_ylabel("value gap (% of joint)", color="#C1121F")
     ax2.set_ylabel("roughness (mean sq. yr-on-yr change)", color="#274690")
     h1, l1 = axR.get_legend_handles_labels(); h2, l2 = ax2.get_legend_handles_labels()
     axR.legend(h1 + h2, l1 + l2, loc="center right", frameon=False, fontsize=8)
