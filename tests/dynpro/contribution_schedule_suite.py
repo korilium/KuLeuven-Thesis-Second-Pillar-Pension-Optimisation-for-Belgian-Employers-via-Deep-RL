@@ -2,7 +2,7 @@
 funding schedule a*(t) under the committed model -- unconstrained vs banded
 (predictable) vs flat, new-plan front-loading, and macro-scenario robustness.
 
-Figures (-> figs/):
+Figures (-> figs/contributionSchedule/):
   policy_map              policy_map.png            baseline a*(F,rho) heatmap w/ iso-RR contours
   baseline_schedule        baseline_schedule.png     banded-DCA schedule + stayer/leaver adequacy
   flat_design_curve        flat_design_curve.png     flat (fixed %) contribution design curve
@@ -19,6 +19,8 @@ Run:  python contribution_schedule_suite.py [policy|baseline|flat|dca|backload|m
 """
 import numpy as np
 import common as c
+
+OUT = f"{c.OUT}/contributionSchedule"   # this suite writes only here
 
 
 # ============ 1. baseline policy map ============
@@ -41,8 +43,8 @@ def policy_map(nF=145, nR=61, na=41, nq=7, years=(1, 5, 10, 20, 25, 30, 40, 44))
     fig.colorbar(m, ax=axes, shrink=0.9, pad=0.015).set_label(r"optimal funding $a^\star$")
     fig.suptitle(r"Optimal funding rule (baseline) vs iso total-replacement contours ($\eta=%.0f$, $\lambda=%.2f$)"
                 % (c.dp.ETA, c.dp.LAMBDA), fontsize=12)
-    fig.savefig(f"{c.OUT}/policy_map.png", dpi=c.DPI); c.plt.close(fig)
-    print(f"wrote {c.OUT}/policy_map.png")
+    fig.savefig(f"{OUT}/policy_map.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"wrote {OUT}/policy_map.png")
 
 
 # ============ 2. baseline banded-DCA schedule + adequacy ============
@@ -67,8 +69,8 @@ def baseline_schedule(nF=145, nR=61, nq=7, band_pct=(0.02, 0.15), n_paths=40000,
     axR.axvline(c.dp.RR_LEGAL, color="#9aa0a6", ls=":", lw=1)
     axR.set_xlabel("total replacement rate"); axR.set_ylabel("paths"); axR.legend(frameon=False, fontsize=8.5)
     axR.set_title("Adequacy: stayers on target, leavers proportional")
-    fig.savefig(f"{c.OUT}/baseline_schedule.png", dpi=c.DPI); c.plt.close(fig)
-    print(f"wrote {c.OUT}/baseline_schedule.png")
+    fig.savefig(f"{OUT}/baseline_schedule.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"wrote {OUT}/baseline_schedule.png")
 
 
 # ============ 3. flat (fixed-cashflow) design curve ============
@@ -90,8 +92,8 @@ def flat_design_curve(rates_pct=np.linspace(2, 15, 14), n_paths=30000, seed=7, n
     ax.set_xlabel("flat contribution (% of payroll, every year)"); ax.set_ylabel("replacement rate")
     ax.set_title(f"Fixed-cashflow design curve (baseline)\n~{rates_pct[i]:.1f}% flat lands stayers on target")
     ax.legend(frameon=False, fontsize=9)
-    fig.savefig(f"{c.OUT}/flat_design_curve.png", dpi=c.DPI); c.plt.close(fig)
-    print(f"wrote {c.OUT}/flat_design_curve.png  | target-hitting flat rate ~{rates_pct[i]:.1f}%")
+    fig.savefig(f"{OUT}/flat_design_curve.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"wrote {OUT}/flat_design_curve.png  | target-hitting flat rate ~{rates_pct[i]:.1f}%")
 
 
 # ============ 4. banded-DCA vs unconstrained vs pure-DCA: cost of predictability ============
@@ -129,7 +131,7 @@ def dca_predictability(nF=121, nR=51, na=31, nq=5, eps_list=(0.0, 0.10, 0.25, 0.
     ax.set_xlabel("career year $t$"); ax.set_ylabel("employer contribution (% of salary)")
     ax.set_title("Banded dollar-cost-averaging smooths the schedule")
     ax.legend(frameon=False, fontsize=9)
-    fig.savefig(f"{c.OUT}/dca_schedules.png", dpi=c.DPI); c.plt.close(fig); print(f"wrote {c.OUT}/dca_schedules.png")
+    fig.savefig(f"{OUT}/dca_schedules.png", dpi=c.DPI); c.plt.close(fig); print(f"wrote {OUT}/dca_schedules.png")
 
     fig, ax = c.plt.subplots(figsize=(7.0, 4.6), constrained_layout=True)
     eps_ax = [e for e, _, _ in res]; jv = [r["joint"] for _, r, _ in res]
@@ -140,7 +142,7 @@ def dca_predictability(nF=121, nR=51, na=31, nq=5, eps_list=(0.0, 0.10, 0.25, 0.
     ax.set_ylabel(r"joint value $\lambda V_{emp}+(1-\lambda)V_{empr}$")
     ax.set_title("Cost of predictability: joint value vs how tight the DCA band is")
     ax.legend(frameon=False, fontsize=9)
-    fig.savefig(f"{c.OUT}/dca_cost.png", dpi=c.DPI); c.plt.close(fig); print(f"wrote {c.OUT}/dca_cost.png")
+    fig.savefig(f"{OUT}/dca_cost.png", dpi=c.DPI); c.plt.close(fig); print(f"wrote {OUT}/dca_cost.png")
 
 
 # ============ 5. preference-driven back-loading vs baseline ============
@@ -169,8 +171,8 @@ def backload_vs_baseline(de=0.05, lam=0.3, nF=121, nR=51, nq=5, n_paths=40000, s
     axR.axhline(c.dp.RR_LEGAL, color="#9aa0a6", ls=":", lw=1)
     axR.set_xticks(xb); axR.set_xticklabels(["stayer", "leaver"]); axR.set_ylabel("median total RR")
     axR.legend(frameon=False); axR.set_title("Adequacy cost of back-loading")
-    fig.savefig(f"{c.OUT}/backload_compare.png", dpi=c.DPI); c.plt.close(fig)
-    print(f"wrote {c.OUT}/backload_compare.png")
+    fig.savefig(f"{OUT}/backload_compare.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"wrote {OUT}/backload_compare.png")
 
 
 # ============ 6. banded schedule vs a macro assumption (mu or G) ============
@@ -207,8 +209,8 @@ def schedule_vs_macro(param="G", values=(0.020, 0.025, 0.030, 0.035), fixed=0.02
     h1, l1 = axR.get_legend_handles_labels(); h2, l2 = ax2.get_legend_handles_labels()
     axR.legend(h1 + h2, l1 + l2, loc="center right", frameon=False, fontsize=8)
     axR.set_title(f"Outcomes vs {param}")
-    fig.savefig(f"{c.OUT}/schedule_vs_{param}.png", dpi=c.DPI); c.plt.close(fig)
-    print(f"wrote {c.OUT}/schedule_vs_{param}.png")
+    fig.savefig(f"{OUT}/schedule_vs_{param}.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"wrote {OUT}/schedule_vs_{param}.png")
 
 
 # ============ 7. new-plan funding profile ============
@@ -242,8 +244,8 @@ def new_plan_profile(nF=145, nR=61, na=31, nq=7, n_paths=40000, seed=7):
     a3.set_xlabel("TOTAL annual replacement (legal + 2nd pillar)"); a3.set_ylabel("paths")
     a3.set_title("Terminal RR: stayers on target, leavers proportional"); a3.legend(frameon=False, fontsize=9)
     fig.suptitle("New-plan behaviour: front-loaded funding, service-pro-rated adequacy", fontsize=12)
-    fig.savefig(f"{c.OUT}/new_plan_profile.png", dpi=c.DPI); c.plt.close(fig)
-    print(f"wrote {c.OUT}/new_plan_profile.png")
+    fig.savefig(f"{OUT}/new_plan_profile.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"wrote {OUT}/new_plan_profile.png")
 
 
 # ============ 8. value function as a signal (soft readout, objective unchanged) ============
@@ -298,8 +300,8 @@ def signal_schedule(betas=(0.0001, 0.001, 0.01, 0.03, 0.10, 0.30), nF=145, nR=61
     h1, l1 = axR.get_legend_handles_labels(); h2, l2 = ax2.get_legend_handles_labels()
     axR.legend(h1 + h2, l1 + l2, loc="center right", frameon=False, fontsize=8)
     axR.set_title("Price of legibility: smoother schedule costs joint value")
-    fig.savefig(f"{c.OUT}/signal_schedule.png", dpi=c.DPI); c.plt.close(fig)
-    print(f"\nwrote {c.OUT}/signal_schedule.png")
+    fig.savefig(f"{OUT}/signal_schedule.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"\nwrote {OUT}/signal_schedule.png")
 
 
 # ============ 9. (mu,G) x discount scenario grid ============
@@ -325,8 +327,8 @@ def scenario_grid(discounts=(0.025, 0.04), nF=121, nR=51, band_pct=(0.02, 0.15),
             if i == len(discounts) - 1: ax.set_xlabel("year $t$")
             if j == 0: ax.set_ylabel("contrib %sal")
     fig.suptitle(r"Scenario grid: contribution schedule under ($\mu$,$G$) x employee discount", fontsize=12)
-    fig.savefig(f"{c.OUT}/scenario_grid.png", dpi=c.DPI); c.plt.close(fig)
-    print(f"wrote {c.OUT}/scenario_grid.png")
+    fig.savefig(f"{OUT}/scenario_grid.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"wrote {OUT}/scenario_grid.png")
 
 
 _ALL = {
@@ -344,7 +346,7 @@ _ALL = {
 
 
 def main(which=None):
-    c.ensure_out()
+    c.ensure_out(OUT)
     for name, fn in _ALL.items():
         if which in (None, name):
             print(f"--- {name} ---"); fn()

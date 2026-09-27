@@ -4,7 +4,7 @@ trades employer cost off against employee adequacy under the committed model
 crowding-out by the legal pillar, and the frontier's robustness to the
 plan-entry-state assumption.
 
-Figures (-> figs/):
+Figures (-> figs/lambda/):
   lambda_threshold          lambda_threshold.png   grid-mean & path-weighted a* vs lambda
   pareto_frontier           lambda_frontier.png,    employer cost vs employee benefit, swept lambda,
                             lambda_outcomes.png     with naive constant-a plans as reference points
@@ -15,6 +15,8 @@ Run:  python lambda_dial_suite.py [threshold|pareto|crowding|entrydist]
 """
 import numpy as np
 import common as c
+
+OUT = f"{c.OUT}/lambda"   # this suite writes only here
 
 
 # ============ 1. funding threshold in lambda (legal baseline) ============
@@ -36,8 +38,8 @@ def lambda_threshold(lambdas=np.linspace(0.20, 0.80, 16), nF=121, nR=51, na=25, 
     ax.set_title("Second-pillar funding is a THRESHOLD in lambda\n"
                  f"(legal {c.dp.RR_LEGAL:.0%} floor crowds out funding below a threshold)")
     ax.legend(frameon=False); ax.grid(True, alpha=0.25, lw=0.6)
-    fig.savefig(f"{c.OUT}/lambda_threshold.png", dpi=c.DPI); c.plt.close(fig)
-    print(f"wrote {c.OUT}/lambda_threshold.png")
+    fig.savefig(f"{OUT}/lambda_threshold.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"wrote {OUT}/lambda_threshold.png")
 
 
 # ============ 2. Pareto frontier + naive-plan reference points ============
@@ -76,8 +78,8 @@ def pareto_frontier(lambdas=np.array([0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0
     ax.set_title("Employer/employee frontier traced by the negotiation dial lambda\n"
                  "a constant rule pays the frontier's cost only where it happens to match $a^\\star$")
     ax.legend(loc="lower right", frameon=False, fontsize=9); ax.grid(True, which="both", alpha=0.22, lw=0.6)
-    fig.savefig(f"{c.OUT}/lambda_frontier.png", dpi=c.DPI); c.plt.close(fig)
-    print(f"wrote {c.OUT}/lambda_frontier.png")
+    fig.savefig(f"{OUT}/lambda_frontier.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"wrote {OUT}/lambda_frontier.png")
 
     fig, ax = c.plt.subplots(figsize=(7.2, 4.8), constrained_layout=True)
     ax.plot(lambdas, fr_avg, "-o", color="#146c50", lw=2, label="career-avg contrib %")
@@ -90,8 +92,8 @@ def pareto_frontier(lambdas=np.array([0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0
     h1, l1 = ax.get_legend_handles_labels(); h2, l2 = ax2.get_legend_handles_labels()
     ax.legend(h1 + h2, l1 + l2, loc="center right", frameon=False, fontsize=8)
     ax.set_title("Contribution & adequacy vs lambda")
-    fig.savefig(f"{c.OUT}/lambda_outcomes.png", dpi=c.DPI); c.plt.close(fig)
-    print(f"wrote {c.OUT}/lambda_outcomes.png")
+    fig.savefig(f"{OUT}/lambda_outcomes.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"wrote {OUT}/lambda_outcomes.png")
 
 
 # ============ 3. crowding-out by the legal floor ============
@@ -123,8 +125,8 @@ def crowding_out(RLs=np.array([0.0, 0.10, 0.20, 0.25, 0.30, 0.35, 0.45, 0.60]),
     a2.set_title(rf"2nd pillar funds only at high $\lambda$ ($RR_{{legal}}={c.dp.RR_LEGAL}$)")
     a2.legend(frameon=False, fontsize=9); a2.grid(True, alpha=0.25, lw=0.6)
     fig.suptitle("The first pillar crowds out private second-pillar funding unless employee weight is high", fontsize=12)
-    fig.savefig(f"{c.OUT}/crowding.png", dpi=c.DPI); c.plt.close(fig)
-    print(f"wrote {c.OUT}/crowding.png")
+    fig.savefig(f"{OUT}/crowding.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"wrote {OUT}/crowding.png")
 
 
 # ============ 4. frontier robustness to the entry-state assumption ============
@@ -152,8 +154,8 @@ def frontier_entry_robustness(lambdas=np.array([0.05, 0.2, 0.4, 0.6, 0.8, 0.92, 
     ax.set_ylabel(r"employee value  $\mathbb{E}[u(\mathrm{RR})]$  (better up)")
     ax.set_title("Frontier: single corner vs. expectation over entry states")
     ax.legend(frameon=False, loc="lower right"); ax.grid(True, which="both", alpha=0.22, lw=0.6)
-    fig.savefig(f"{c.OUT}/lambda_frontier_dist.png", dpi=c.DPI); c.plt.close(fig)
-    print(f"wrote {c.OUT}/lambda_frontier_dist.png")
+    fig.savefig(f"{OUT}/lambda_frontier_dist.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"wrote {OUT}/lambda_frontier_dist.png")
 
 
 _ALL = {
@@ -165,7 +167,7 @@ _ALL = {
 
 
 def main(which=None):
-    c.ensure_out()
+    c.ensure_out(OUT)
     for name, fn in _ALL.items():
         if which in (None, name):
             print(f"--- {name} ---"); fn()

@@ -45,7 +45,7 @@ RR_TARGET = 0.70            # total-adequacy target across all pillars (OECD/EU 
 # GAMMA/ETA/ANNUITY/RR_* and the DISC_EMP/DISC_ER split are Rung-2 concepts; the
 # binary-action tabular model simply does not read them.
 
-BETA = 0.0      # policy-EXTRACTION temperature, RELATIVE to the local Q-spread:
+BETA = 0.0001      # policy-EXTRACTION temperature, RELATIVE to the local Q-spread:
                 # 0 = hard argmax (the true optimum); > 0 = soft signal readout that blends
                 # actions lying within BETA of the state's full value range
                 # (max_a Q - min_a Q). Relative, not in Q units, because Q is NOT scale-free

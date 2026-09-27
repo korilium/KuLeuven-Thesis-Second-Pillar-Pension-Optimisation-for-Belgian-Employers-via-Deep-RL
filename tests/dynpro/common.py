@@ -41,8 +41,9 @@ def restore():
     for k, v in _BASE.items(): setattr(dp, k, v)
 
 
-def ensure_out():
-    os.makedirs(OUT, exist_ok=True)
+def ensure_out(path=None):
+    """Create the figure directory. Each suite passes its own subfolder."""
+    os.makedirs(path or OUT, exist_ok=True)
 
 
 def iso_rr(Fg, rg):

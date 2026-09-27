@@ -2,7 +2,7 @@
 parameter, to grid resolution, to the choice of evaluation anchor, and to the
 plan-entry-state assumption.
 
-Figures (-> figs/):
+Figures (-> figs/sens/):
   tornado                sens_tornado.png        +/- one-at-a-time sweep of every Tier-1/2 param
   interaction(pi,pj)     sens_inter_<tag>.png     pairwise (pi,pj) grid-mean a* heatmap
   policy_map_sweep(p)    sens_policy_<p>.png      policy-map row across values of one param
@@ -17,6 +17,8 @@ Run:  python sensitivity_suite.py [tornado|interaction|policy|frontier|resolutio
 """
 import numpy as np
 import common as c
+
+OUT = f"{c.OUT}/sens"   # this suite writes only here
 
 YEAR = 22
 
@@ -55,8 +57,8 @@ def tornado(pct=0.15, nF=73, nR=31, na=15, nq=5, params=None):
         ax.set_yticks(y); ax.set_yticklabels([c.LAB[p] for p, _, _ in order])
         ax.set_xlabel(ttl); ax.legend(frameon=False, fontsize=8)
     fig.suptitle(f"Tornado: sensitivity of results to each parameter (+/-{int(pct*100)}%)", fontsize=12)
-    fig.savefig(f"{c.OUT}/sens_tornado.png", dpi=c.DPI); c.plt.close(fig)
-    print(f"wrote {c.OUT}/sens_tornado.png")
+    fig.savefig(f"{OUT}/sens_tornado.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"wrote {OUT}/sens_tornado.png")
 
 
 # ============ 2. pairwise interaction (grid-mean a*) ============
@@ -78,8 +80,8 @@ def interaction(pi, pj, vi, vj, nF=73, nR=31, na=15, nq=5, tag=""):
     fig.colorbar(im, ax=ax, label=r"grid-mean $a^\star$")
     ax.set_title(f"{c.LAB[pi]} x {c.LAB[pj]}: interaction={inter:.3f}\n(flat bands = separable; curved = they interact)")
     tag = tag or f"{pi}_{pj}"
-    fig.savefig(f"{c.OUT}/sens_inter_{tag}.png", dpi=c.DPI); c.plt.close(fig)
-    print(f"wrote {c.OUT}/sens_inter_{tag}.png")
+    fig.savefig(f"{OUT}/sens_inter_{tag}.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"wrote {OUT}/sens_inter_{tag}.png")
     return inter
 
 
@@ -107,7 +109,7 @@ def policy_map_sweep(param, values, year=YEAR, nF=121, nR=51, na=25, nq=5, n_pat
     axes[0].set_ylabel(r"$\rho=S/L$ (log)")
     cb = fig.colorbar(mesh, ax=axes, shrink=0.9, pad=0.015); cb.set_label(rf"$a^\star(t={year},F,\rho)$")
     fig.suptitle(rf"Sensitivity of the optimal rule to {c.LAB[param]} (year $t={year}$)", fontsize=12)
-    path = f"{c.OUT}/sens_policy_{param}.png"
+    path = f"{OUT}/sens_policy_{param}.png"
     fig.savefig(path, dpi=c.DPI); c.plt.close(fig); print(f"   wrote {path}")
 
 
@@ -132,7 +134,7 @@ def frontier_shift(param, values, lambdas=(0.1, 0.3, 0.5, 0.7, 0.9),
     ax.set_ylabel(r"employee value  $\mathbb{E}[u(\mathrm{RR})]$  (better up)")
     ax.set_title(rf"Frontier shift under {c.LAB[param]} (swept $\lambda$)")
     ax.legend(frameon=False, fontsize=9, loc="lower right"); ax.grid(True, which="both", alpha=0.22, lw=0.6)
-    path = f"{c.OUT}/sens_frontier_{param}.png"
+    path = f"{OUT}/sens_frontier_{param}.png"
     fig.savefig(path, dpi=c.DPI); c.plt.close(fig); print(f"   wrote {path}")
 
 
@@ -160,7 +162,7 @@ def resolution_check(param="G", values=(0.0175, 0.025, 0.0375),
     ax.set_xlabel(c.LAB[param]); ax.set_ylabel(r"grid-mean $a^\star$")
     ax.set_title(f"Resolution check: grid-mean a* vs {c.LAB[param]}\n(overlapping lines = not mesh jitter)")
     ax.legend(frameon=False); ax.grid(True, alpha=0.25, lw=0.6)
-    path = f"{c.OUT}/sens_resolution_{param}.png"
+    path = f"{OUT}/sens_resolution_{param}.png"
     fig.savefig(path, dpi=c.DPI); c.plt.close(fig); print(f"   wrote {path}")
     return series
 
@@ -185,7 +187,7 @@ def anchor_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=61, na=31
     ax.set_xlabel(c.LAB[param]); ax.set_ylabel(r"path-weighted mean applied $a^\star$")
     ax.set_title(f"Anchor check: realized funding vs {c.LAB[param]}\n(both sloping the same way = not an edge artifact)")
     ax.legend(frameon=False); ax.grid(True, alpha=0.25, lw=0.6)
-    path = f"{c.OUT}/sens_anchor_{param}.png"
+    path = f"{OUT}/sens_anchor_{param}.png"
     fig.savefig(path, dpi=c.DPI); c.plt.close(fig); print(f"   wrote {path}")
     return data
 
@@ -211,7 +213,7 @@ def entry_dist_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=61, n
     ax.set_xlabel(c.LAB[param]); ax.set_ylabel(r"path-weighted mean applied $a^\star$")
     ax.set_title(f"Realized funding vs {c.LAB[param]}: corner vs entry distribution\n(trend direction should be robust)")
     ax.legend(frameon=False); ax.grid(True, alpha=0.25, lw=0.6)
-    path = f"{c.OUT}/sens_entrydist_{param}.png"
+    path = f"{OUT}/sens_entrydist_{param}.png"
     fig.savefig(path, dpi=c.DPI); c.plt.close(fig); print(f"   wrote {path}")
 
 
@@ -250,8 +252,8 @@ def schedule_grid(nF=73, nR=31, band_pct=(0.02, 1.0), n_paths=15000, specs=None)
         ax.legend(frameon=False, fontsize=7.5, loc="upper right")
         print(f"  {pk}: base_avg={c_base.mean():.1f} lo_avg={c_lo.mean():.1f} hi_avg={c_hi.mean():.1f}")
     fig.suptitle("Year-by-year sensitivity of the optimal contribution schedule to each parameter", fontsize=13)
-    fig.savefig(f"{c.OUT}/sens_schedule_grid.png", dpi=c.DPI); c.plt.close(fig)
-    print(f"wrote {c.OUT}/sens_schedule_grid.png")
+    fig.savefig(f"{OUT}/sens_schedule_grid.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"wrote {OUT}/sens_schedule_grid.png")
 
 
 # ============ 9. state-space visitation: which cells do careers actually reach? ============
@@ -306,8 +308,8 @@ def state_visitation(nF=145, nR=61, na=41, nq=7, n_paths=40000, seed=7,
     axR.set_title(f"Career-mean $a^\\star$ with visitation contours\n"
                   f"grid-mean {gm:.2f} vs visit-weighted {vw:.2f}")
     fig.colorbar(mp, ax=axR, shrink=0.9, pad=0.015).set_label(r"mean $a^\star$ over years")
-    fig.savefig(f"{c.OUT}/sens_visitation.png", dpi=c.DPI); c.plt.close(fig)
-    print(f"    wrote {c.OUT}/sens_visitation.png")
+    fig.savefig(f"{OUT}/sens_visitation.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"    wrote {OUT}/sens_visitation.png")
 
     # ---- figure 2: each year's POLICY map with that year's occupancy on top ----
     fig, axes = c.plt.subplots(1, len(years), figsize=(3.5 * len(years), 4.4),
@@ -337,8 +339,8 @@ def state_visitation(nF=145, nR=61, na=41, nq=7, n_paths=40000, seed=7,
     fig.colorbar(mm, ax=axes, shrink=0.9, pad=0.015).set_label(r"$a^\star(t,F,\rho)$")
     fig.suptitle("Each year's optimal rule, with that year's actual occupancy overlaid "
                  r"(white = 50/90/99th pct of visits)", fontsize=12)
-    fig.savefig(f"{c.OUT}/sens_visitation_years.png", dpi=c.DPI); c.plt.close(fig)
-    print(f"    wrote {c.OUT}/sens_visitation_years.png")
+    fig.savefig(f"{OUT}/sens_visitation_years.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"    wrote {OUT}/sens_visitation_years.png")
 
 
 _ALL = {
@@ -356,7 +358,7 @@ _ALL = {
 
 
 def main(which=None):
-    c.ensure_out()
+    c.ensure_out(OUT)
     for name, fn in _ALL.items():
         if which in (None, name):
             print(f"--- {name} ---"); fn()
