@@ -349,7 +349,10 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
         c = a * GAMMA * S
         cost += np.where(present, (c / ST) * np.exp(-DISC_ER * t), 0.0)
         zR = rng.standard_normal(n); zL = rng.standard_normal(n)
-        R = np.where(present, (R + c) * np.exp(MU + SIGMA_R * zR), R * np.exp(MU + SIGMA_R * zR))
+        # in force: contribute and carry the asset shock. Paid-up: the reserve compounds at the
+        # LOCKED credited return with no further shock, matching paidup_service -- freezing the
+        # contract freezes its risk. L freezes on both counts once absent.
+        R = np.where(present, (R + c) * np.exp(MU + SIGMA_R * zR), R * np.exp(MU))
         L = np.where(present, (L + c) * np.exp(G + SIGMA_L * zL), L)
         S = S * (1.0 + W)
         lv = present & (rng.random(n) < hazard(t))
