@@ -4,8 +4,14 @@ dp_oracle_rr.py -- Rung-2 benchmark: DP oracle over (t, F, rho).
 Employee objective (option E reduced to A): mortality-weighted lifecycle CRRA over the
 ANNUITISED total replacement rate  RR_total = RR_LEGAL + max(F,1)/(ANNUITY*rho),  judged
 against a total-adequacy target RR_TARGET:
-        V_employee = ANNUITY * u(RR_total / RR_TARGET)  (lifetime; the front ANNUITY is the
-        money-metric that matches the employer's ANNUITY-scaled capital cost -- NOT double counting).
+        V_employee = target * ANNUITY * u(RR_total / target)   (lifetime).
+        u is normalized (u(1)=0, u'(1)=1), so near the target u ~ (RR - target)/target, a
+        dimensionless relative shortfall. Multiplying by `target` puts it in annual
+        replacement-rate units and by ANNUITY converts that flow to capital, i.e. the
+        employer's units (final-salary-years). The exchange rate is therefore whatever
+        denominator defines x: RR_TARGET for a full-career stayer, and the SERVICE-PRO-RATED
+        target_tau for a leaver -- using a flat RR_TARGET would over-weight short-tenure
+        leavers by RR_TARGET/target_tau (up to ~1.63x at tau=0).
 Employer leg: linear WAP shortfall  max(1-F,0)/rho.  Asset (z_R) and guarantee (z_L)
 shocks; Gauss-Hermite quadrature; reduced state (t, F, rho).
 """
@@ -147,7 +153,7 @@ def paidup_service(Fg, rg):
         rp = rg * (1.0 + W) ** m                                # (NR,)
         rr2 = np.maximum(Fp, 1.0)[:, None] / (ANNUITY * rp[None, :])   # FULL vested pot
         rrtot = RR_LEGAL + rr2
-        emp = LAMBDA * ANNUITY * u(rrtot / target) * np.exp(-DISC_EMP * T)
+        emp = LAMBDA * target * ANNUITY * u(rrtot / target) * np.exp(-DISC_EMP * T)
         short = np.maximum(1.0 - Fp, 0.0)[:, None] / rp[None, :]
         empr = (1.0 - LAMBDA) * short * np.exp(-DISC_ER * T)
         Phi[tau] = emp - empr
@@ -158,7 +164,7 @@ def terminal(Fg, rg):
     Fc = Fg[:, None]; rc = rg[None, :]
     rr = RR_LEGAL + np.maximum(Fc, 1.0) / (rc * ANNUITY)
     if SATIATE: rr = np.minimum(rr, RR_TARGET)                      # satiation: no reward above target
-    emp = LAMBDA * ANNUITY * u(rr / RR_TARGET) * np.exp(-DISC_EMP * T)          # employee rate
+    emp = LAMBDA * RR_TARGET * ANNUITY * u(rr / RR_TARGET) * np.exp(-DISC_EMP * T)   # employee rate
     empr = (1.0 - LAMBDA) * np.maximum(1.0 - Fc, 0.0) / rc * np.exp(-DISC_ER * T)  # employer rate
     return emp - empr
 
@@ -297,7 +303,7 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
     RR2 = payout / (ANNUITY * ST)
     svc = np.minimum(leave_t / T, 1.0)
     target = RR_LEGAL + svc * (RR_TARGET - RR_LEGAL)
-    benefit_paths = np.exp(-DISC_EMP * T) * ANNUITY * u((RR_LEGAL + RR2) / target)
+    benefit_paths = np.exp(-DISC_EMP * T) * target * ANNUITY * u((RR_LEGAL + RR2) / target)
     stay = leave_t >= T
     RRtot = RR_LEGAL + RR2
     out = dict(
