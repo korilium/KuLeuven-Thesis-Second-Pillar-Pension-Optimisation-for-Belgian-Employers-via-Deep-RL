@@ -23,7 +23,7 @@ Figures (-> figs/scenarios/):
                                  new_plan_profile, dca_schedules,
                                  sens_visitation_years, lambda_threshold)
 
-Run:  python scenario_suite.py [table|shapes|rates|figures]
+Run:  python scenario_suite.py [invariants|table|shapes|rates|figures]
 """
 import contextlib
 import re
@@ -278,7 +278,83 @@ def figures(only=("base", "B", "C"), grid=None, figs=None):
           % (time.time() - t_all, c.dp.MU, c.dp.DISC_ER, c.dp.LAMBDA, c.dp.SATIATE, c.dp.BETA))
 
 
-_ALL = {"table": table, "shapes": shapes, "rates": rates, "figures": figures}
+# ============ 0. invariants: properties the model must satisfy ============
+# These are not scenarios -- they are structural properties the solver is REQUIRED
+# to have. Each is a PASS/FAIL. They are what makes the DP credible as a benchmark
+# for a learned policy: a number from an unverified oracle is not a benchmark.
+def invariants(nF=73, nR=71, na=15, nq=5, n_paths=8000, seed=3, tol=1e-6):
+    c.ensure_out(OUT)
+    Fg, rg, ag = c.grids(nF, nR, na)
+    rows = []
+
+    def check(name, ok, detail):
+        rows.append((name, bool(ok), detail))
+
+    # 1. scale-freeness: the model is homogeneous of degree 0 in (R, L, S)
+    pol = c.solve(Fg, rg, ag, nq)["policy"]
+    k = 5.0
+    r1 = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=20.0, n_paths=n_paths, seed=seed)
+    rk = c.simulate(pol, Fg, rg, R0=k, L0=k, S0=k * 20.0, n_paths=n_paths, seed=seed)
+    rel = float(np.max(np.abs(rk["RR"] - r1["RR"]) / np.abs(r1["RR"])))
+    check("scale invariance of RR under (R,L,S)*k", rel < 1e-12, f"max rel diff {rel:.2e}")
+
+    # 2. delta_e is exactly a LAMBDA change (no independent degree of freedom)
+    lam, de_new = 0.5, 0.02
+    lam_eq = c.lambda_equivalent(de_new, lam=lam)
+    with c.overrides(LAMBDA=lam, DISC_EMP=de_new):
+        pa = c.solve(Fg, rg, ag, nq)["policy"]
+    with c.overrides(LAMBDA=lam_eq):
+        pb = c.solve(Fg, rg, ag, nq)["policy"]
+    d = float(np.abs(pa - pb).max())
+    check("delta_e == LAMBDA reparameterisation", d < 1e-6, f"max|dpolicy| {d:.2e} (lam_eq {lam_eq:.5f})")
+
+    # 3. eta -> 1 is continuous and equals log utility
+    x = np.array([0.4, 1.0, 2.5])
+    with c.overrides(ETA=1.0):       u1 = c.dp.u(x).copy()
+    with c.overrides(ETA=1.0 + 1e-4): ue = c.dp.u(x).copy()
+    dl = float(np.abs(u1 - np.log(x)).max()); dc = float(np.abs(u1 - ue).max())
+    check("u -> log as eta -> 1 (and continuous)", dl < 1e-12 and dc < 1e-3,
+          f"|u-log| {dl:.1e}, |u(1)-u(1+eps)| {dc:.1e}")
+
+    # 4. the leaver and stayer terminal conditions coincide at tau = T
+    d4 = float(np.abs(c.dp.paidup_service(Fg, rg)[c.dp.T] - c.dp.terminal(Fg, rg)).max())
+    check("Phi[T] == terminal (full-service cohort)", d4 == 0.0, f"max|diff| {d4:.2e}")
+
+    # 5. cost and stayer adequacy are monotone in LAMBDA
+    cost, sty = [], []
+    for lam in (0.2, 0.4, 0.6, 0.8):
+        with c.overrides(LAMBDA=lam):
+            p = c.solve(Fg, rg, ag, nq)["policy"]
+            rr = c.simulate(p, Fg, rg, **c.entry(n_paths, seed), n_paths=n_paths, seed=seed)
+        cost.append(rr["cost"]); sty.append(rr["sty"])
+    check("employer cost increasing in LAMBDA", bool(np.all(np.diff(cost) > 0)),
+          " ".join(f"{v:.3f}" for v in cost))
+    check("stayer RR increasing in LAMBDA", bool(np.all(np.diff(sty) > 0)),
+          " ".join(f"{v:.3f}" for v in sty))
+
+    # 6. frictionless benchmark: with delta_f = delta_e = mu the benefit/cost ratio
+    #    exp((mu-d_e)T + (d_f-mu)t) is 1 for every t, so timing must be neutral
+    lo, hi = 0.02 / c.dp.GAMMA, 0.15 / c.dp.GAMMA
+    with c.overrides(DISC_ER=c.dp.MU, DISC_EMP=c.dp.MU):
+        p = c.solve(Fg, rg, np.linspace(lo, hi, 20), nq)["policy"]
+        rr = c.simulate(p, Fg, rg, **c.entry(n_paths, seed), band=(lo, hi),
+                        n_paths=n_paths, seed=seed)
+    early, late = float(np.mean(rr["c_by"][:10])), float(np.mean(rr["c_by"][35:]))
+    tilt = abs(early - late) / max(early, late)
+    check("timing neutral when delta_f = delta_e = mu", tilt < 0.25,
+          f"early {early:.1f}% vs late {late:.1f}% (tilt {tilt:.0%})")
+
+    print("  %-46s %-6s %s" % ("invariant", "result", "detail"))
+    for name, ok, detail in rows:
+        print("  %-46s %-6s %s" % (name, "PASS" if ok else "FAIL", detail))
+    bad = [n for n, ok, _ in rows if not ok]
+    print("\n  %d/%d pass%s" % (len(rows) - len(bad), len(rows),
+                                "" if not bad else "   FAILING: " + ", ".join(bad)))
+    return not bad
+
+
+_ALL = {"invariants": invariants, "table": table, "shapes": shapes,
+        "rates": rates, "figures": figures}
 
 
 def main(which=None):

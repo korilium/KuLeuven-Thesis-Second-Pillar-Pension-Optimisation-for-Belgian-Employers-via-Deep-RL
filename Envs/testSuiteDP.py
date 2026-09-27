@@ -59,7 +59,7 @@ def cohort(nF=121, nR=91, na=26, nq=5, n_paths=30000, seed=7,
 
 
 # ============ 2. model-health diagnostics ============
-def diagnostics(nF=73, nR=51, na=15, nq=5, n_paths=8000, seed=3):
+def diagnostics(nF=73, nR=91, na=15, nq=5, n_paths=8000, seed=3):
     """The quantities the old assertion suite used to check, printed as numbers."""
     Fg, rg, ag = dp.grids(nF, nR, na)
 

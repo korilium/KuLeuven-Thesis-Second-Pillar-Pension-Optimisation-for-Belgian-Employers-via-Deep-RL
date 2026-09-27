@@ -53,7 +53,7 @@ def baseline_schedule(nF=145, nR=101, nq=7, band_pct=(0.02, 0.15), n_paths=40000
     lo, hi = band_pct[0] / c.dp.GAMMA, band_pct[1] / c.dp.GAMMA
     ag = np.linspace(lo, hi, 26)
     pol = c.solve(Fg, rg, ag, nq)["policy"]
-    r = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], band=(lo, hi), n_paths=n_paths, seed=seed)
+    r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), band=(lo, hi), n_paths=n_paths, seed=seed)
     print(f"[baseline_schedule] career-avg {r['avg']:.1f}%  stayer RR {r['sty']:.3f}  leaver RR {r['lea']:.3f}")
     yrs = np.arange(c.dp.T)
     fig, (axL, axR) = c.plt.subplots(1, 2, figsize=(12, 4.4), constrained_layout=True)
@@ -80,7 +80,7 @@ def flat_design_curve(rates_pct=np.linspace(2, 15, 14), n_paths=30000, seed=7, n
     for cp in rates_pct:
         a = cp / 100.0 / c.dp.GAMMA
         pol = c.const_policy(a, c.dp.T, len(Fg), len(rg))
-        r = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], n_paths=n_paths, seed=seed)
+        r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), n_paths=n_paths, seed=seed)
         tot.append(r["tot"]); sty.append(r["sty"])
     i = int(np.argmin(np.abs(np.array(sty) - c.dp.RR_TARGET)))
     fig, ax = c.plt.subplots(figsize=(7, 4.6), constrained_layout=True)
@@ -100,13 +100,13 @@ def flat_design_curve(rates_pct=np.linspace(2, 15, 14), n_paths=30000, seed=7, n
 def dca_predictability(nF=121, nR=91, na=31, nq=5, eps_list=(0.0, 0.10, 0.25, 0.50, 1.0), n_paths=30000, seed=7):
     Fg, rg, _ = c.grids(nF, nR, na)
     unc = c.solve(Fg, rg, c.dp.make_a_grid(n=na), nq)["policy"]
-    r_unc = c.simulate(unc, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], n_paths=n_paths, seed=seed)
+    r_unc = c.simulate(unc, Fg, rg, **c.entry(n_paths, seed), n_paths=n_paths, seed=seed)
     print(f"unconstrained: joint={r_unc['joint']:+.3f}")
 
     best = None
     for ac in np.linspace(0.02, 0.6, 20):
         pol = c.const_policy(ac, c.dp.T, len(Fg), len(rg))
-        r = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], n_paths=n_paths, seed=seed)
+        r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), n_paths=n_paths, seed=seed)
         if best is None or r["joint"] > best[1]: best = (ac, r["joint"])
     abar = best[0]
     print(f"optimal constant rate abar={abar:.3f} (contrib {abar*c.dp.GAMMA*100:.1f}% salary)  joint={best[1]:+.3f}")
@@ -116,7 +116,7 @@ def dca_predictability(nF=121, nR=91, na=31, nq=5, eps_list=(0.0, 0.10, 0.25, 0.
         lo, hi = max(0.0, abar - eps), min(1.0, abar + eps)
         agb = np.array([abar]) if eps == 0 else np.linspace(lo, hi, max(3, int(na * (hi - lo) + 2)))
         pol = c.solve(Fg, rg, agb, nq)["policy"]
-        r = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], band=(lo, hi), n_paths=n_paths, seed=seed)
+        r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), band=(lo, hi), n_paths=n_paths, seed=seed)
         rough = float(np.mean(np.diff(r["c_by"]) ** 2))
         res.append((eps, r, rough))
         print(f"  eps={eps:.2f}: joint={r['joint']:+.3f}  rough={rough:.4f}  totRR={r['tot']:.3f}")
@@ -126,7 +126,8 @@ def dca_predictability(nF=121, nR=91, na=31, nq=5, eps_list=(0.0, 0.10, 0.25, 0.
     yrs = np.arange(c.dp.T)
     fig, ax = c.plt.subplots(figsize=(7.4, 4.6), constrained_layout=True)
     ax.plot(yrs, r_unc["c_by"], lw=2, color="#C1121F", label="unconstrained (front-loaded)")
-    ax.plot(yrs, res[2][1]["c_by"], lw=2, color="#1D9E75", label=f"banded DCA (eps={res[2][0]:.2f})")
+    mid = res[len(res) // 2]          # a representative band, not a hardcoded index
+    ax.plot(yrs, mid[1]["c_by"], lw=2, color="#1D9E75", label=f"banded DCA (eps={mid[0]:.2f})")
     ax.plot(yrs, res[0][1]["c_by"], lw=2, color="#274690", label="pure DCA (eps=0, flat)")
     ax.set_xlabel("career year $t$"); ax.set_ylabel("employer contribution (% of salary)")
     ax.set_title("Banded dollar-cost-averaging smooths the schedule")
@@ -146,24 +147,36 @@ def dca_predictability(nF=121, nR=91, na=31, nq=5, eps_list=(0.0, 0.10, 0.25, 0.
 
 
 # ============ 5. preference-driven back-loading vs baseline ============
+@c.restores
 def backload_vs_baseline(de=0.05, lam=0.3, nF=121, nR=91, nq=5, n_paths=40000, seed=7):
+    """Back-loading driven by a weaker employee weight.
+
+    NOTE the (de, lam) pair is ONE lever, not two: delta_e enters only as
+    exp(-delta_e*T) on the employee leg, so it is exactly redundant with LAMBDA.
+    The configuration below is reported by its LAMBDA-equivalent to avoid reading
+    the discount as an independent mechanism -- see c.lambda_equivalent."""
     Fg, rg, _ = c.grids(nF, nR)
     lo, hi = 0.02 / c.dp.GAMMA, 1.0
 
     def run(de_, lam_):
         c.restore(); c.dp.DISC_EMP = de_; c.dp.LAMBDA = lam_
         pol = c.solve(Fg, rg, np.linspace(lo, hi, 26), nq)["policy"]
-        r = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], band=(lo, hi), n_paths=n_paths, seed=seed)
+        r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), band=(lo, hi), n_paths=n_paths, seed=seed)
         c.restore()
         return r
 
     rb = run(c._BASE["DISC_EMP"], c._BASE["LAMBDA"]); rx = run(de, lam)
+    lam_eq = c.lambda_equivalent(de, lam=lam)
+    print(f"[backload] (delta_e={de:.0%}, lambda={lam}) == LAMBDA {lam_eq:.3f} at the committed "
+          f"delta_e={c._BASE['DISC_EMP']:.0%}  (one lever, not two)")
     yrs = np.arange(c.dp.T)
     fig, (axL, axR) = c.plt.subplots(1, 2, figsize=(12, 4.6), constrained_layout=True)
     axL.plot(yrs, rb["c_by"], lw=2.4, color="#1D9E75", label=f"baseline avg {rb['avg']:.1f}%")
     axL.plot(yrs, rx["c_by"], lw=2.4, color="#C1121F", label=f"back-load avg {rx['avg']:.1f}%")
     axL.set_xlabel("career year $t$"); axL.set_ylabel("contribution (% of salary)"); axL.set_ylim(0, 16)
-    axL.legend(frameon=False); axL.set_title(rf"Schedule: baseline vs back-load ($\delta_e$={de:.0%}, $\lambda$={lam})")
+    axL.legend(frameon=False)
+    axL.set_title(rf"Schedule: baseline vs back-load"
+                  "\n" rf"($\delta_e$={de:.0%}, $\lambda$={lam}) $\equiv$ $\lambda$={lam_eq:.3f}", fontsize=10)
     xb = np.arange(2); w = 0.35
     axR.bar(xb - w / 2, [rb["sty"], rb["lea"]], w, color="#1D9E75", label="baseline")
     axR.bar(xb + w / 2, [rx["sty"], rx["lea"]], w, color="#C1121F", label="back-load")
@@ -176,6 +189,7 @@ def backload_vs_baseline(de=0.05, lam=0.3, nF=121, nR=91, nq=5, n_paths=40000, s
 
 
 # ============ 6. banded schedule vs a macro assumption (mu or G) ============
+@c.restores
 def schedule_vs_macro(param="G", values=(0.020, 0.025, 0.030, 0.035), fixed=0.025,
                       nF=121, nR=91, band_pct=(0.02, 0.15), n_paths=30000, seed=7):
     assert param in ("MU", "G")
@@ -189,7 +203,7 @@ def schedule_vs_macro(param="G", values=(0.020, 0.025, 0.030, 0.035), fixed=0.02
         if param == "MU": c.dp.MU, c.dp.G = v, fixed
         else: c.dp.MU, c.dp.G = fixed, v
         pol = c.solve(Fg, rg, agb, 5)["policy"]
-        r = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], band=(lo, hi), n_paths=n_paths, seed=seed)
+        r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), band=(lo, hi), n_paths=n_paths, seed=seed)
         nceil = int((r["c_by"] > (band_pct[1] * 100 - 0.5)).sum())
         res.append((r, nceil))
         print(f"  {param}={v:.3f}: avg={r['avg']:.1f}%  yrs@ceiling={nceil}  stayerRR={r['sty']:.3f}")
@@ -260,14 +274,14 @@ def signal_schedule(betas=(0.0001, 0.001, 0.01, 0.03, 0.10, 0.30), nF=145, nR=10
     out = c.solve(Fg, rg, ag, nq, betas=betas)
     hard = out["policy"]; soft = out["policy_soft"]
 
-    rh = c.simulate(hard, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], n_paths=n_paths, seed=seed)
+    rh = c.simulate(hard, Fg, rg, **c.entry(n_paths, seed), n_paths=n_paths, seed=seed)
     corner_h = float(np.mean((hard < 1e-9) | (hard > ag.max() - 1e-9)))
     rough_h = float(np.mean(np.diff(rh["c_by"]) ** 2))
     print(f"hard argmax : corner-frac={corner_h:.2f}  rough={rough_h:7.3f}  avg={rh['avg']:5.1f}%  "
           f"sty={rh['sty']:.3f}  joint={rh['joint']:+.4f}")
     rows = [("argmax", rh, corner_h, rough_h, 0.0)]
     for b in betas:
-        r = c.simulate(soft[b], Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], n_paths=n_paths, seed=seed)
+        r = c.simulate(soft[b], Fg, rg, **c.entry(n_paths, seed), n_paths=n_paths, seed=seed)
         corner = float(np.mean((soft[b] < 1e-9) | (soft[b] > ag.max() - 1e-9)))
         rough = float(np.mean(np.diff(r["c_by"]) ** 2))
         gap = 100 * (rh["joint"] - r["joint"]) / abs(rh["joint"])
@@ -305,6 +319,7 @@ def signal_schedule(betas=(0.0001, 0.001, 0.01, 0.03, 0.10, 0.30), nF=145, nR=10
 
 
 # ============ 9. (mu,G) x discount scenario grid ============
+@c.restores
 def scenario_grid(discounts=(0.025, 0.04), nF=121, nR=91, band_pct=(0.02, 0.15), n_paths=15000, seed=7):
     scen = [("B21 underwater", dict(MU=0.01, G=0.03)), ("neutral", dict(MU=0.02, G=0.02)),
             ("baseline", dict(MU=0.03, G=0.03)), ("B23", dict(MU=0.05, G=0.03))]
@@ -320,13 +335,16 @@ def scenario_grid(discounts=(0.025, 0.04), nF=121, nR=91, band_pct=(0.02, 0.15),
             c.restore(); c.dp.DISC_EMP = de
             for k, v in ov.items(): setattr(c.dp, k, v)
             pol = c.solve(Fg, rg, agb, 5)["policy"]
-            r = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], band=(lo, hi), n_paths=n_paths, seed=seed)
+            r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), band=(lo, hi), n_paths=n_paths, seed=seed)
             c.restore()
             ax = axes[i, j]; ax.bar(yrs, r["c_by"], color="#1D9E75", alpha=0.85, width=0.9)
-            ax.set_title(f"{nm}\n$\\delta_e$={de:.0%}  avg {r['avg']:.1f}%  sty {r['sty']:.2f}", fontsize=9)
+            ax.set_title(f"{nm}\n$\\lambda_{{eq}}$={c.lambda_equivalent(de):.2f}  "
+                         f"avg {r['avg']:.1f}%  sty {r['sty']:.2f}", fontsize=9)
             if i == len(discounts) - 1: ax.set_xlabel("year $t$")
             if j == 0: ax.set_ylabel("contrib %sal")
-    fig.suptitle(r"Scenario grid: contribution schedule under ($\mu$,$G$) x employee discount", fontsize=12)
+    fig.suptitle(r"Scenario grid: schedule under ($\mu$,$G$) $\times$ employee weight"
+                 "\n" r"(rows vary $\delta_e$, which is exactly a $\lambda$ change -- labelled by "
+                 r"its $\lambda$-equivalent)", fontsize=11)
     fig.savefig(f"{OUT}/scenario_grid.png", dpi=c.DPI); c.plt.close(fig)
     print(f"wrote {OUT}/scenario_grid.png")
 
@@ -337,8 +355,12 @@ _ALL = {
     "flat": flat_design_curve,
     "dca": dca_predictability,
     "backload": backload_vs_baseline,
-    "macro": lambda: [schedule_vs_macro("MU", (0.015, 0.025, 0.035, 0.045, 0.055), fixed=0.03),
-                     schedule_vs_macro("G", (0.020, 0.025, 0.030, 0.035), fixed=0.025)],
+    # both sweeps pass through the COMMITTED point (MU=G=0.03): the MU grid now
+    # contains 0.03, and the G sweep holds MU at the committed 0.03 (was 0.025).
+    "macro": lambda: [schedule_vs_macro("MU", (0.015, 0.02, 0.03, 0.04, 0.05),
+                                        fixed=c._BASE["G"]),
+                      schedule_vs_macro("G", (0.0175, 0.025, 0.03, 0.035, 0.045),
+                                        fixed=c._BASE["MU"])],
     "newplan": new_plan_profile,
     "signal": signal_schedule,
     "scenario": scenario_grid,

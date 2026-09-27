@@ -7,7 +7,10 @@ the churn-aware DP solver, and simulate() (the committed forward Monte-Carlo).
 Nothing economic is defined here; the names re-exported below are aliases into
 DynPro so the suites can keep calling c.simulate(...), c.grids(...) etc.
 """
+import contextlib
+import functools
 import os, sys
+
 import numpy as np
 import matplotlib as mpl
 mpl.use("Agg")
@@ -20,8 +23,12 @@ OUT = "figs"; DPI = 150
 mpl.rcParams.update({"figure.facecolor": "white", "savefig.facecolor": "white", "font.size": 10,
                      "axes.spines.top": False, "axes.spines.right": False})
 
+# NOTE: DISC_EMP is deliberately ABSENT. It enters the objective only as
+# exp(-DISC_EMP*T), a constant on the employee leg, so it is exactly redundant with
+# LAMBDA (verified to ~6e-11; see lambda_equivalent below). LAMBDA is already here,
+# so including DISC_EMP too would double-count one lever and mis-rank the tornado.
 PARAMS = ["LAMBDA", "RR_TARGET", "RR_LEGAL", "ANNUITY", "GAMMA", "ETA", "G", "MU",
-          "SIGMA_R", "DISC_EMP", "DISC_ER"]
+          "SIGMA_R", "DISC_ER"]
 LAB = {"LAMBDA": r"$\lambda$", "RR_TARGET": r"$RR^\star$", "RR_LEGAL": r"$RR_{\rm legal}$",
        "ANNUITY": r"$\ddot a$", "GAMMA": r"$\Gamma$", "ETA": r"$\eta$", "G": r"$G$",
        "MU": r"$\mu$", "SIGMA_R": r"$\sigma_R$", "DISC_EMP": r"$\delta_e$", "DISC_ER": r"$\delta_f$"}
@@ -31,7 +38,7 @@ LAB = {"LAMBDA": r"$\lambda$", "RR_TARGET": r"$RR^\star$", "RR_LEGAL": r"$RR_{\r
 # caller might set on dp. SATIATE is a bool and BETA is extraction-only, so neither
 # belongs in a +/-15% sweep, but both must still be reset -- leaving them out let a
 # scenario leak SATIATE=True into every later run.
-_RESTORE = PARAMS + ["SIGMA_L", "SATIATE", "BETA", "DISC", "T", "W", "S0"]
+_RESTORE = PARAMS + ["DISC_EMP", "SIGMA_L", "SATIATE", "BETA", "DISC", "T", "W", "S0"]
 
 _BASE = {k: getattr(dp, k) for k in _RESTORE}
 
@@ -48,9 +55,68 @@ def restore():
     for k, v in _BASE.items(): setattr(dp, k, v)
 
 
+@contextlib.contextmanager
+def overrides(**kw):
+    """Apply dp.* overrides for the duration, then ALWAYS restore.
+
+        with c.overrides(G=0.02, MU=0.05):
+            ...
+
+    Use this rather than a bare `c.restore(); setattr(...)` pair: on an exception
+    the bare form leaks the mutated global into every later figure in the run."""
+    try:
+        restore()
+        for k, v in kw.items(): setattr(dp, k, v)
+        yield
+    finally:
+        restore()
+
+
+def restores(fn):
+    """Decorator: guarantee restore() on the way out, however the call ends.
+    Belt-and-braces for functions that sweep globals in a loop."""
+    @functools.wraps(fn)
+    def _wrapped(*a, **k):
+        try:
+            return fn(*a, **k)
+        finally:
+            restore()
+    return _wrapped
+
+
+def lambda_equivalent(de_new, lam=None, de_ref=None):
+    """The LAMBDA that reproduces (lam, de_new) at the reference DISC_EMP.
+
+    delta_e multiplies the employee leg by exp(-delta_e*T) and nothing else, so it
+    is redundant with LAMBDA up to a positive rescale of the objective (which
+    leaves the argmax alone):
+        lambda'' = A / (A + B*exp(-de_ref*T)),  A = lam*exp(-de_new*T), B = 1-lam
+    Report this alongside any delta_e result so it is not read as an independent
+    economic mechanism."""
+    lam = _BASE["LAMBDA"] if lam is None else lam
+    de_ref = _BASE["DISC_EMP"] if de_ref is None else de_ref
+    A = lam * np.exp(-de_new * dp.T); B = 1.0 - lam
+    return float(A / (A + B * np.exp(-de_ref * dp.T)))
+
+
 def ensure_out(path=None):
     """Create the figure directory. Each suite passes its own subfolder."""
     os.makedirs(path or OUT, exist_ok=True)
+
+
+def entry(n_paths, seed=7):
+    """THE STANDARD ENTRY STATE (protocol, not model): a new-plan cohort.
+
+    Splat into simulate():  c.simulate(pol, Fg, rg, **c.entry(n, seed), ...)
+
+    Every figure uses this so results are comparable across the suites. The single
+    corner point (F=1, rho=rho_max) is a DIAGNOSTIC only -- it is one arbitrary
+    inception state, and conclusions drawn from it were not comparable with
+    cohort-based ones. Swap this for the calibrated DB2P/Marsh entry spread when
+    it lands; every call site inherits it automatically."""
+    rng = np.random.default_rng(seed)
+    R0, L0, S0 = dp.new_plan_init(n_paths, rng)
+    return dict(R0=R0, L0=L0, S0=S0)
 
 
 def iso_rr(Fg, rg):

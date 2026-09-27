@@ -32,7 +32,8 @@ def _metrics(Fg, rg, ag, nq, n_paths=15000, seed=7):
 
 
 # ============ 1. tornado (one-at-a-time) ============
-def tornado(pct=0.15, nF=73, nR=51, na=15, nq=5, params=None):
+@c.restores
+def tornado(pct=0.15, nF=73, nR=91, na=15, nq=5, params=None):
     params = params or c.PARAMS
     Fg, rg, ag = c.grids(nF, nR, na)
     c.restore(); base = _metrics(Fg, rg, ag, nq)
@@ -62,7 +63,8 @@ def tornado(pct=0.15, nF=73, nR=51, na=15, nq=5, params=None):
 
 
 # ============ 2. pairwise interaction (grid-mean a*) ============
-def interaction(pi, pj, vi, vj, nF=73, nR=51, na=15, nq=5, tag=""):
+@c.restores
+def interaction(pi, pj, vi, vj, nF=73, nR=91, na=15, nq=5, tag=""):
     Fg, rg, ag = c.grids(nF, nR, na)
     Z = np.zeros((len(vj), len(vi)))
     for a, vjj in enumerate(vj):
@@ -86,6 +88,7 @@ def interaction(pi, pj, vi, vj, nF=73, nR=51, na=15, nq=5, tag=""):
 
 
 # ============ 3. policy-map sweep (one param, several values) ============
+@c.restores
 def policy_map_sweep(param, values, year=YEAR, nF=121, nR=91, na=25, nq=5, n_paths=15000):
     Fg, rg, ag = c.grids(nF, nR, na); RR = c.iso_rr(Fg, rg)
     lev = [0.1, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5]
@@ -96,7 +99,7 @@ def policy_map_sweep(param, values, year=YEAR, nF=121, nR=91, na=25, nq=5, n_pat
     for ax, val in zip(axes, values):
         c.restore(); setattr(c.dp, param, float(val))
         pol = c.solve(Fg, rg, ag, nq)["policy"]
-        r = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], n_paths=n_paths, seed=12345)
+        r = c.simulate(pol, Fg, rg, **c.entry(n_paths, 12345), n_paths=n_paths, seed=12345)
         print(f"   {param}={val}:  mean a*={pol.mean():.3f}   lambda={c.dp.LAMBDA:.2f}  "
               f"benefit={r['benefit']:+.4f}  cost={r['cost']:.4f}")
         mesh = ax.pcolormesh(Fg, rg, pol[year].T, cmap="viridis", vmin=0, vmax=1, shading="auto", rasterized=True)
@@ -114,6 +117,7 @@ def policy_map_sweep(param, values, year=YEAR, nF=121, nR=91, na=25, nq=5, n_pat
 
 
 # ============ 4. lambda-frontier shift under one param ============
+@c.restores
 def frontier_shift(param, values, lambdas=(0.1, 0.3, 0.5, 0.7, 0.9),
                    nF=100, nR=71, na=21, nq=5, n_paths=15000):
     Fg, rg, ag = c.grids(nF, nR, na)
@@ -124,7 +128,7 @@ def frontier_shift(param, values, lambdas=(0.1, 0.3, 0.5, 0.7, 0.9),
         for lam in lambdas:
             c.restore(); setattr(c.dp, param, float(val)); c.dp.LAMBDA = float(lam)
             pol = c.solve(Fg, rg, ag, nq)["policy"]
-            r = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], n_paths=n_paths, seed=12345)
+            r = c.simulate(pol, Fg, rg, **c.entry(n_paths, 12345), n_paths=n_paths, seed=12345)
             ben.append(r["benefit"]); cost.append(r["cost"])
         c.restore()
         ax.plot(cost, ben, "-o", color=col, lw=1.7, ms=4, label=rf"{c.LAB[param]} = {val}")
@@ -139,6 +143,7 @@ def frontier_shift(param, values, lambdas=(0.1, 0.3, 0.5, 0.7, 0.9),
 
 
 # ============ 5. resolution: coarse vs fine mesh ============
+@c.restores
 def resolution_check(param="G", values=(0.0175, 0.025, 0.0375),
                      coarse=(121, 51, 25, 5), fine=(181, 61, 25, 7), n_paths=15000):
     print(f"[resolution_check] {param}  coarse={coarse}  fine={fine}")
@@ -149,7 +154,7 @@ def resolution_check(param="G", values=(0.0175, 0.025, 0.0375),
         for val in values:
             c.restore(); setattr(c.dp, param, float(val))
             pol = c.solve(Fg, rg, ag, nq)["policy"]
-            r = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], n_paths=n_paths, seed=12345)
+            r = c.simulate(pol, Fg, rg, **c.entry(n_paths, 12345), n_paths=n_paths, seed=12345)
             ma.append(float(pol.mean())); cst.append(r["cost"]); ben.append(r["benefit"])
             print(f"   [{tag:6}] {param}={val:<7}: grid-mean a*={ma[-1]:.3f}  cost={r['cost']:.4f}  benefit={r['benefit']:+.4f}")
         series[tag] = dict(mean_a=ma, cost=cst, benefit=ben)
@@ -168,6 +173,7 @@ def resolution_check(param="G", values=(0.0175, 0.025, 0.0375),
 
 
 # ============ 6. anchor: edge vs interior rho0 ============
+@c.restores
 def anchor_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=101, na=31, nq=7,
                  anchors=(("edge (rho0=35)", 35.0), ("interior (rho0=3)", 3.0)), n_paths=15000):
     print(f"[anchor_check] {param}  grids=({nF},{nR},{na},q{nq})")
@@ -193,6 +199,7 @@ def anchor_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=101, na=3
 
 
 # ============ 7. entry-state distribution vs single corner anchor ============
+@c.restores
 def entry_dist_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=101, na=31, nq=7, n_paths=15000):
     print(f"[entry_dist_check] {param}  (placeholder entry distribution, see common.sample_entry)")
     Fg, rg, ag = c.grids(nF, nR, na)
@@ -200,7 +207,7 @@ def entry_dist_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=101, 
     for val in values:
         c.restore(); setattr(c.dp, param, float(val))
         pol = c.solve(Fg, rg, ag, nq)["policy"]
-        rc = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], n_paths=n_paths, seed=7)
+        rc = c.simulate(pol, Fg, rg, **c.entry(n_paths, 7), n_paths=n_paths, seed=7)
         rng = np.random.default_rng(8); R0, L0, S0 = c.sample_entry(rng, n_paths)
         rd = c.simulate(pol, Fg, rg, R0=R0, L0=L0, S0=S0, n_paths=n_paths, seed=7)
         corner_a.append(rc["mean_a"]); dist_a.append(rd["mean_a"])
@@ -218,9 +225,9 @@ def entry_dist_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=101, 
 
 
 # ============ 8. year-by-year schedule sensitivity, 3x3 param grid ============
-def schedule_grid(nF=73, nR=51, band_pct=(0.02, 1.0), n_paths=15000, specs=None):
+@c.restores
+def schedule_grid(nF=73, nR=91, band_pct=(0.02, 1.0), n_paths=15000, specs=None):
     specs = specs or [
-        ("DISC_EMP", (0.02, 0.04), r"employee disc $\delta_e$"),
         ("DISC_ER", (0.03, 0.07), r"employer disc $\delta_f$"),
         ("MU", (0.02, 0.05), r"credited return $\mu$"),
         ("G", (0.02, 0.04), r"guarantee $G$"),
@@ -236,7 +243,7 @@ def schedule_grid(nF=73, nR=51, band_pct=(0.02, 1.0), n_paths=15000, specs=None)
         lo, hi = band_pct[0] / c.dp.GAMMA, band_pct[1] / c.dp.GAMMA
         ag = np.linspace(lo, min(hi, 1.0), 20)
         pol = c.solve(Fg, rg, ag, 5)["policy"]
-        return c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], band=(lo, min(hi, 1.0)),
+        return c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), band=(lo, min(hi, 1.0)),
                           n_paths=n_paths, seed=7)["c_by"]
 
     c.restore(); c_base = schedule(); print("baseline schedule computed")
@@ -267,7 +274,7 @@ def state_visitation(nF=145, nR=101, na=41, nq=7, n_paths=40000, seed=7,
     looks like once you know which of it is reachable."""
     Fg, rg, ag = c.grids(nF, nR, na)
     pol = c.solve(Fg, rg, ag, nq)["policy"]
-    r = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1],
+    r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed),
                    n_paths=n_paths, seed=seed, visits=True, track=True)
     V = r["visits"]                      # (T, NF, NR)
     dens = V.sum(axis=0)                 # pooled present path-years

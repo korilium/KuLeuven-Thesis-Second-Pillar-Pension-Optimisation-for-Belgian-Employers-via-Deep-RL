@@ -20,6 +20,7 @@ OUT = f"{c.OUT}/lambda"   # this suite writes only here
 
 
 # ============ 1. funding threshold in lambda (legal baseline) ============
+@c.restores
 def lambda_threshold(lambdas=np.linspace(0.20, 0.80, 16), nF=121, nR=91, na=25, nq=5, n_paths=15000, seed=7):
     Fg, rg, _ = c.grids(nF, nR, na)
     rng = np.random.default_rng(seed); R0, L0, S0 = c.new_plan_init(n_paths, rng)
@@ -43,6 +44,7 @@ def lambda_threshold(lambdas=np.linspace(0.20, 0.80, 16), nF=121, nR=91, na=25, 
 
 
 # ============ 2. Pareto frontier + naive-plan reference points ============
+@c.restores
 def pareto_frontier(lambdas=np.array([0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.98]),
                     naive_a=(0.2, 0.5, 1.0), nF=121, nR=91, na=31, nq=5, n_paths=30000, seed=7):
     Fg, rg, ag = c.grids(nF, nR, na)
@@ -50,7 +52,7 @@ def pareto_frontier(lambdas=np.array([0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0
     for lam in lambdas:
         c.restore(); c.dp.LAMBDA = float(lam)
         pol = c.solve(Fg, rg, ag, nq)["policy"]
-        r = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], n_paths=n_paths, seed=seed)
+        r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), n_paths=n_paths, seed=seed)
         fr_ben.append(r["benefit"]); fr_cost.append(r["cost"])
         fr_avg.append(r["mean_a"] * c.dp.GAMMA * 100); fr_sty.append(r["sty"]); fr_lea.append(r["lea"])
         print(f"  lambda={lam:.2f}: benefit={r['benefit']:+.4f}  cost={r['cost']:.4f}  stayerRR={r['sty']:.3f}")
@@ -59,7 +61,7 @@ def pareto_frontier(lambdas=np.array([0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0
     nv_ben, nv_cost = [], []
     for a_c in naive_a:
         pol = c.const_policy(a_c, c.dp.T, len(Fg), len(rg))
-        r = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], n_paths=n_paths, seed=seed)
+        r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), n_paths=n_paths, seed=seed)
         nv_ben.append(r["benefit"]); nv_cost.append(r["cost"])
         print(f"  naive a={a_c:.1f}: benefit={r['benefit']:+.4f}  cost={r['cost']:.4f}")
 
@@ -97,6 +99,7 @@ def pareto_frontier(lambdas=np.array([0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0
 
 
 # ============ 3. crowding-out by the legal floor ============
+@c.restores
 def crowding_out(RLs=np.array([0.0, 0.10, 0.20, 0.25, 0.30, 0.35, 0.45, 0.60]),
                  lambdas=np.array([0.5, 0.65, 0.75, 0.80, 0.85, 0.90, 0.97]),
                  nF=121, nR=91, na=25, nq=5):
@@ -115,7 +118,8 @@ def crowding_out(RLs=np.array([0.0, 0.10, 0.20, 0.25, 0.30, 0.35, 0.45, 0.60]),
     c.restore()
     fig, (a1, a2) = c.plt.subplots(1, 2, figsize=(11, 4.4), constrained_layout=True)
     a1.plot(RLs, a_rl, "-o", color="#C1121F", lw=1.8, ms=5)
-    a1.axvline(0.45, color="#274690", ls="--", lw=1.2, label=r"Belgian $RR_{legal}\approx0.45$")
+    a1.axvline(c._BASE["RR_LEGAL"], color="#274690", ls="--", lw=1.2,
+               label=rf'committed $RR_{{legal}}$ = {c._BASE["RR_LEGAL"]:.2f}')
     a1.set_xlabel(r"first-pillar (legal) replacement $RR_{legal}$"); a1.set_ylabel(r"grid-mean $a^\star$")
     a1.set_title(r"Legal floor crowds out the 2nd pillar ($\lambda=0.5$)")
     a1.legend(frameon=False, fontsize=9); a1.grid(True, alpha=0.25, lw=0.6)
@@ -130,6 +134,7 @@ def crowding_out(RLs=np.array([0.0, 0.10, 0.20, 0.25, 0.30, 0.35, 0.45, 0.60]),
 
 
 # ============ 4. frontier robustness to the entry-state assumption ============
+@c.restores
 def frontier_entry_robustness(lambdas=np.array([0.05, 0.2, 0.4, 0.6, 0.8, 0.92, 0.97]),
                               nF=121, nR=91, na=25, nq=5, n_paths=30000, seed=7):
     print("[frontier_entry_robustness] corner anchor vs sampled entry distribution (placeholder)")
@@ -138,7 +143,7 @@ def frontier_entry_robustness(lambdas=np.array([0.05, 0.2, 0.4, 0.6, 0.8, 0.92, 
     for lam in lambdas:
         c.restore(); c.dp.LAMBDA = float(lam)
         pol = c.solve(Fg, rg, ag, nq)["policy"]
-        rc = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], n_paths=n_paths, seed=seed)
+        rc = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), n_paths=n_paths, seed=seed)
         rng = np.random.default_rng(seed + 1); R0, L0, S0 = c.sample_entry(rng, n_paths)
         rd = c.simulate(pol, Fg, rg, R0=R0, L0=L0, S0=S0, n_paths=n_paths, seed=seed)
         c_cost.append(rc["cost"]); c_ben.append(rc["benefit"])
