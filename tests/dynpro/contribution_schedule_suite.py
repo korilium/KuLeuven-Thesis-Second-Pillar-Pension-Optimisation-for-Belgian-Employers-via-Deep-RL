@@ -24,7 +24,7 @@ OUT = f"{c.OUT}/contributionSchedule"   # this suite writes only here
 
 
 # ============ 1. baseline policy map ============
-def policy_map(nF=145, nR=61, na=41, nq=7, years=(1, 5, 10, 20, 25, 30, 40, 44)):
+def policy_map(nF=145, nR=101, na=41, nq=7, years=(1, 5, 10, 20, 25, 30, 40, 44)):
     Fg, rg, ag = c.grids(nF, nR, na)
     pol = c.solve(Fg, rg, ag, nq)["policy"]
     print(f"[policy_map] bang-bang={np.all((pol==0)|(pol==1))}  mean a*={pol.mean():.3f}")
@@ -48,7 +48,7 @@ def policy_map(nF=145, nR=61, na=41, nq=7, years=(1, 5, 10, 20, 25, 30, 40, 44))
 
 
 # ============ 2. baseline banded-DCA schedule + adequacy ============
-def baseline_schedule(nF=145, nR=61, nq=7, band_pct=(0.02, 0.15), n_paths=40000, seed=7):
+def baseline_schedule(nF=145, nR=101, nq=7, band_pct=(0.02, 0.15), n_paths=40000, seed=7):
     Fg, rg, _ = c.grids(nF, nR)
     lo, hi = band_pct[0] / c.dp.GAMMA, band_pct[1] / c.dp.GAMMA
     ag = np.linspace(lo, hi, 26)
@@ -74,7 +74,7 @@ def baseline_schedule(nF=145, nR=61, nq=7, band_pct=(0.02, 0.15), n_paths=40000,
 
 
 # ============ 3. flat (fixed-cashflow) design curve ============
-def flat_design_curve(rates_pct=np.linspace(2, 15, 14), n_paths=30000, seed=7, nF=145, nR=61):
+def flat_design_curve(rates_pct=np.linspace(2, 15, 14), n_paths=30000, seed=7, nF=145, nR=101):
     Fg, rg, _ = c.grids(nF, nR)
     tot, sty = [], []
     for cp in rates_pct:
@@ -97,7 +97,7 @@ def flat_design_curve(rates_pct=np.linspace(2, 15, 14), n_paths=30000, seed=7, n
 
 
 # ============ 4. banded-DCA vs unconstrained vs pure-DCA: cost of predictability ============
-def dca_predictability(nF=121, nR=51, na=31, nq=5, eps_list=(0.0, 0.10, 0.25, 0.50, 1.0), n_paths=30000, seed=7):
+def dca_predictability(nF=121, nR=91, na=31, nq=5, eps_list=(0.0, 0.10, 0.25, 0.50, 1.0), n_paths=30000, seed=7):
     Fg, rg, _ = c.grids(nF, nR, na)
     unc = c.solve(Fg, rg, c.dp.make_a_grid(n=na), nq)["policy"]
     r_unc = c.simulate(unc, Fg, rg, R0=1.0, L0=1.0, S0=rg[-1], n_paths=n_paths, seed=seed)
@@ -146,7 +146,7 @@ def dca_predictability(nF=121, nR=51, na=31, nq=5, eps_list=(0.0, 0.10, 0.25, 0.
 
 
 # ============ 5. preference-driven back-loading vs baseline ============
-def backload_vs_baseline(de=0.05, lam=0.3, nF=121, nR=51, nq=5, n_paths=40000, seed=7):
+def backload_vs_baseline(de=0.05, lam=0.3, nF=121, nR=91, nq=5, n_paths=40000, seed=7):
     Fg, rg, _ = c.grids(nF, nR)
     lo, hi = 0.02 / c.dp.GAMMA, 1.0
 
@@ -177,7 +177,7 @@ def backload_vs_baseline(de=0.05, lam=0.3, nF=121, nR=51, nq=5, n_paths=40000, s
 
 # ============ 6. banded schedule vs a macro assumption (mu or G) ============
 def schedule_vs_macro(param="G", values=(0.020, 0.025, 0.030, 0.035), fixed=0.025,
-                      nF=121, nR=51, band_pct=(0.02, 0.15), n_paths=30000, seed=7):
+                      nF=121, nR=91, band_pct=(0.02, 0.15), n_paths=30000, seed=7):
     assert param in ("MU", "G")
     Fg, rg, _ = c.grids(nF, nR)
     lo, hi = band_pct[0] / c.dp.GAMMA, band_pct[1] / c.dp.GAMMA
@@ -214,7 +214,7 @@ def schedule_vs_macro(param="G", values=(0.020, 0.025, 0.030, 0.035), fixed=0.02
 
 
 # ============ 7. new-plan funding profile ============
-def new_plan_profile(nF=145, nR=61, na=31, nq=7, n_paths=40000, seed=7):
+def new_plan_profile(nF=145, nR=101, na=31, nq=7, n_paths=40000, seed=7):
     Fg, rg, ag = c.grids(nF, nR, na)
     pol = c.solve(Fg, rg, ag, nq)["policy"]
     rng = np.random.default_rng(seed)
@@ -249,7 +249,7 @@ def new_plan_profile(nF=145, nR=61, na=31, nq=7, n_paths=40000, seed=7):
 
 
 # ============ 8. value function as a signal (soft readout, objective unchanged) ============
-def signal_schedule(betas=(0.0001, 0.001, 0.01, 0.03, 0.10, 0.30), nF=145, nR=61, na=31, nq=7,
+def signal_schedule(betas=(0.0001, 0.001, 0.01, 0.03, 0.10, 0.30), nF=145, nR=101, na=31, nq=7,
                     n_paths=30000, seed=7, years=(0, 5, 10, 15, 22, 30, 44)):
     """Read the contribution off the TRUE value function as a graded signal:
     a_soft = sum_a a*softmax(Q/beta), instead of the argmax. The objective and V
@@ -305,7 +305,7 @@ def signal_schedule(betas=(0.0001, 0.001, 0.01, 0.03, 0.10, 0.30), nF=145, nR=61
 
 
 # ============ 9. (mu,G) x discount scenario grid ============
-def scenario_grid(discounts=(0.025, 0.04), nF=121, nR=51, band_pct=(0.02, 0.15), n_paths=15000, seed=7):
+def scenario_grid(discounts=(0.025, 0.04), nF=121, nR=91, band_pct=(0.02, 0.15), n_paths=15000, seed=7):
     scen = [("B21 underwater", dict(MU=0.01, G=0.03)), ("neutral", dict(MU=0.02, G=0.02)),
             ("baseline", dict(MU=0.03, G=0.03)), ("B23", dict(MU=0.05, G=0.03))]
     Fg, rg, _ = c.grids(nF, nR)

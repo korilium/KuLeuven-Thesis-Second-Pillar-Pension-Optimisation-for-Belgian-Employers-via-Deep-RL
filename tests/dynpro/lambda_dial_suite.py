@@ -20,7 +20,7 @@ OUT = f"{c.OUT}/lambda"   # this suite writes only here
 
 
 # ============ 1. funding threshold in lambda (legal baseline) ============
-def lambda_threshold(lambdas=np.linspace(0.20, 0.80, 16), nF=121, nR=51, na=25, nq=5, n_paths=15000, seed=7):
+def lambda_threshold(lambdas=np.linspace(0.20, 0.80, 16), nF=121, nR=91, na=25, nq=5, n_paths=15000, seed=7):
     Fg, rg, _ = c.grids(nF, nR, na)
     rng = np.random.default_rng(seed); R0, L0, S0 = c.new_plan_init(n_paths, rng)
     gm, pw = [], []
@@ -44,7 +44,7 @@ def lambda_threshold(lambdas=np.linspace(0.20, 0.80, 16), nF=121, nR=51, na=25, 
 
 # ============ 2. Pareto frontier + naive-plan reference points ============
 def pareto_frontier(lambdas=np.array([0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.98]),
-                    naive_a=(0.2, 0.5, 1.0), nF=121, nR=51, na=31, nq=5, n_paths=30000, seed=7):
+                    naive_a=(0.2, 0.5, 1.0), nF=121, nR=91, na=31, nq=5, n_paths=30000, seed=7):
     Fg, rg, ag = c.grids(nF, nR, na)
     fr_ben, fr_cost, fr_avg, fr_sty, fr_lea = [], [], [], [], []
     for lam in lambdas:
@@ -99,7 +99,7 @@ def pareto_frontier(lambdas=np.array([0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0
 # ============ 3. crowding-out by the legal floor ============
 def crowding_out(RLs=np.array([0.0, 0.10, 0.20, 0.25, 0.30, 0.35, 0.45, 0.60]),
                  lambdas=np.array([0.5, 0.65, 0.75, 0.80, 0.85, 0.90, 0.97]),
-                 nF=121, nR=51, na=25, nq=5):
+                 nF=121, nR=91, na=25, nq=5):
     Fg, rg, ag = c.grids(nF, nR, na)
     a_rl = []
     for rl in RLs:
@@ -131,7 +131,7 @@ def crowding_out(RLs=np.array([0.0, 0.10, 0.20, 0.25, 0.30, 0.35, 0.45, 0.60]),
 
 # ============ 4. frontier robustness to the entry-state assumption ============
 def frontier_entry_robustness(lambdas=np.array([0.05, 0.2, 0.4, 0.6, 0.8, 0.92, 0.97]),
-                              nF=121, nR=51, na=25, nq=5, n_paths=30000, seed=7):
+                              nF=121, nR=91, na=25, nq=5, n_paths=30000, seed=7):
     print("[frontier_entry_robustness] corner anchor vs sampled entry distribution (placeholder)")
     Fg, rg, ag = c.grids(nF, nR, na)
     c_cost, c_ben, d_cost, d_ben = [], [], [], []

@@ -32,7 +32,7 @@ def _metrics(Fg, rg, ag, nq, n_paths=15000, seed=7):
 
 
 # ============ 1. tornado (one-at-a-time) ============
-def tornado(pct=0.15, nF=73, nR=31, na=15, nq=5, params=None):
+def tornado(pct=0.15, nF=73, nR=51, na=15, nq=5, params=None):
     params = params or c.PARAMS
     Fg, rg, ag = c.grids(nF, nR, na)
     c.restore(); base = _metrics(Fg, rg, ag, nq)
@@ -62,7 +62,7 @@ def tornado(pct=0.15, nF=73, nR=31, na=15, nq=5, params=None):
 
 
 # ============ 2. pairwise interaction (grid-mean a*) ============
-def interaction(pi, pj, vi, vj, nF=73, nR=31, na=15, nq=5, tag=""):
+def interaction(pi, pj, vi, vj, nF=73, nR=51, na=15, nq=5, tag=""):
     Fg, rg, ag = c.grids(nF, nR, na)
     Z = np.zeros((len(vj), len(vi)))
     for a, vjj in enumerate(vj):
@@ -86,7 +86,7 @@ def interaction(pi, pj, vi, vj, nF=73, nR=31, na=15, nq=5, tag=""):
 
 
 # ============ 3. policy-map sweep (one param, several values) ============
-def policy_map_sweep(param, values, year=YEAR, nF=121, nR=51, na=25, nq=5, n_paths=15000):
+def policy_map_sweep(param, values, year=YEAR, nF=121, nR=91, na=25, nq=5, n_paths=15000):
     Fg, rg, ag = c.grids(nF, nR, na); RR = c.iso_rr(Fg, rg)
     lev = [0.1, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5]
     fig, axes = c.plt.subplots(1, len(values), figsize=(4.5 * len(values), 4.3),
@@ -115,7 +115,7 @@ def policy_map_sweep(param, values, year=YEAR, nF=121, nR=51, na=25, nq=5, n_pat
 
 # ============ 4. lambda-frontier shift under one param ============
 def frontier_shift(param, values, lambdas=(0.1, 0.3, 0.5, 0.7, 0.9),
-                   nF=100, nR=41, na=21, nq=5, n_paths=15000):
+                   nF=100, nR=71, na=21, nq=5, n_paths=15000):
     Fg, rg, ag = c.grids(nF, nR, na)
     colors = ["#1D9E75", "#C1121F", "#274690", "#E08D1C"]
     fig, ax = c.plt.subplots(figsize=(6.8, 5.4), constrained_layout=True)
@@ -168,7 +168,7 @@ def resolution_check(param="G", values=(0.0175, 0.025, 0.0375),
 
 
 # ============ 6. anchor: edge vs interior rho0 ============
-def anchor_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=61, na=31, nq=7,
+def anchor_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=101, na=31, nq=7,
                  anchors=(("edge (rho0=35)", 35.0), ("interior (rho0=3)", 3.0)), n_paths=15000):
     print(f"[anchor_check] {param}  grids=({nF},{nR},{na},q{nq})")
     Fg, rg, ag = c.grids(nF, nR, na)
@@ -193,7 +193,7 @@ def anchor_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=61, na=31
 
 
 # ============ 7. entry-state distribution vs single corner anchor ============
-def entry_dist_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=61, na=31, nq=7, n_paths=15000):
+def entry_dist_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=101, na=31, nq=7, n_paths=15000):
     print(f"[entry_dist_check] {param}  (placeholder entry distribution, see common.sample_entry)")
     Fg, rg, ag = c.grids(nF, nR, na)
     corner_a, dist_a = [], []
@@ -218,7 +218,7 @@ def entry_dist_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=61, n
 
 
 # ============ 8. year-by-year schedule sensitivity, 3x3 param grid ============
-def schedule_grid(nF=73, nR=31, band_pct=(0.02, 1.0), n_paths=15000, specs=None):
+def schedule_grid(nF=73, nR=51, band_pct=(0.02, 1.0), n_paths=15000, specs=None):
     specs = specs or [
         ("DISC_EMP", (0.02, 0.04), r"employee disc $\delta_e$"),
         ("DISC_ER", (0.03, 0.07), r"employer disc $\delta_f$"),
@@ -257,7 +257,7 @@ def schedule_grid(nF=73, nR=31, band_pct=(0.02, 1.0), n_paths=15000, specs=None)
 
 
 # ============ 9. state-space visitation: which cells do careers actually reach? ============
-def state_visitation(nF=145, nR=61, na=41, nq=7, n_paths=40000, seed=7,
+def state_visitation(nF=145, nR=101, na=41, nq=7, n_paths=40000, seed=7,
                      years=(0, 5, 15, 30, 44)):
     """Occupancy of the (F, rho) state space under the optimal policy.
 

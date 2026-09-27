@@ -19,7 +19,7 @@ import DynPro as dp
 
 
 # ============ 1. cohort outcome distribution ============
-def cohort(nF=121, nR=51, na=26, nq=5, n_paths=30000, seed=7,
+def cohort(nF=121, nR=91, na=26, nq=5, n_paths=30000, seed=7,
            band_pct=(0.02, 0.15), years=(0, 5, 10, 15, 22, 30, 44)):
     """Solve the committed policy, simulate a fresh-plan cohort, report the
     spread of outcomes it produces."""
@@ -59,7 +59,7 @@ def cohort(nF=121, nR=51, na=26, nq=5, n_paths=30000, seed=7,
 
 
 # ============ 2. model-health diagnostics ============
-def diagnostics(nF=73, nR=31, na=15, nq=5, n_paths=8000, seed=3):
+def diagnostics(nF=73, nR=51, na=15, nq=5, n_paths=8000, seed=3):
     """The quantities the old assertion suite used to check, printed as numbers."""
     Fg, rg, ag = dp.grids(nF, nR, na)
 
