@@ -24,24 +24,58 @@ OUT = f"{c.OUT}/contributionSchedule"   # this suite writes only here
 
 
 # ============ 1. baseline policy map ============
-def policy_map(nF=145, nR=101, na=41, nq=7, years=(1, 5, 10, 20, 25, 30, 40, 44)):
+def policy_map(nF=145, nR=101, na=41, nq=7, years=(1, 5, 10, 20, 25, 30, 40, 44),
+               n_paths=20000, seed=7):
+    """Three layers on one (F, rho) plane, per year:
+
+      colour     the optimal rule a*(t, F, rho);
+      white      iso TOTAL-replacement contours, with RR_TARGET picked out;
+      magenta    where the simulated cohort actually is that year (50/90/99th
+                 percentile of occupancy).
+
+    The third layer is what keeps the first two honest: the rule is defined on the
+    whole grid, but only a thin ribbon of it is ever reached, and the grid-mean and
+    path-weighted a* differ by ~4x as a result."""
     Fg, rg, ag = c.grids(nF, nR, na)
     pol = c.solve(Fg, rg, ag, nq)["policy"]
-    print(f"[policy_map] bang-bang={np.all((pol==0)|(pol==1))}  mean a*={pol.mean():.3f}")
+    r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed),
+                   n_paths=n_paths, seed=seed, visits=True)
+    V = r["visits"]
+    print(f"[policy_map] bang-bang={np.all((pol==0)|(pol==1))}  mean a*={pol.mean():.3f}  "
+          f"visit-weighted a*={(pol * V).sum() / V.sum():.3f}")
     RR = c.iso_rr(Fg, rg)
     fig, axes = c.plt.subplots(1, len(years), figsize=(4.5 * len(years), 4.4), sharey=True, constrained_layout=True)
     m = None
     for ax, t in zip(axes, years):
         m = ax.pcolormesh(Fg, rg, pol[t].T, cmap="viridis", vmin=0, vmax=1, shading="auto", rasterized=True)
-        cs = ax.contour(Fg, rg, RR.T, levels=[0.1, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5],
-                        colors="white", linewidths=0.8, alpha=0.85)
-        ax.clabel(cs, inline=True, fontsize=7, fmt="RR=%.1f")
+        # Levels are TOTAL replacement now that iso_rr returns it (it used to return
+        # max(F,1)/rho and label that "RR", which is ANNUITY times the second-pillar
+        # rate -- the old "RR=0.7" contour actually sat at a total of 0.477). The
+        # target gets its own heavier line: it is the level a reader looks for.
+        lv = [l for l in (0.5, 0.6, 0.8, 1.0, 1.5) if l != c.dp.RR_TARGET]
+        cs = ax.contour(Fg, rg, RR.T, levels=lv, colors="white", linewidths=0.8, alpha=0.8)
+        ax.clabel(cs, inline=True, fontsize=7, fmt="RR=%.2f")
+        ct = ax.contour(Fg, rg, RR.T, levels=[c.dp.RR_TARGET],
+                        colors="#FFD166", linewidths=1.6)
+        ax.clabel(ct, inline=True, fontsize=7.5, fmt="target %.2f")
+        # where the cohort actually is that year -- degenerate early on, when
+        # essentially all mass sits in one cell and the quantiles coincide
+        d = V[t]; pos = d[d > 0]
+        if pos.size:
+            lvv = sorted({float(np.quantile(pos, q)) for q in (0.50, 0.90, 0.99)})
+            if len(lvv) > 1:
+                ax.contour(Fg, rg, d.T, levels=lvv, colors="#FF4D9D", linewidths=1.2)
+            else:
+                jF, jR = np.unravel_index(int(d.argmax()), d.shape)
+                ax.plot(Fg[jF], rg[jR], "o", ms=9, mfc="none", mec="#FF4D9D", mew=1.8)
         ax.axvline(1.0, color="white", lw=0.9, ls=":", alpha=0.7); ax.set_yscale("log")
         ax.set_xlim(Fg[0], Fg[-1]); ax.set_ylim(rg[0], rg[-1])
-        ax.set_xlabel(r"$F=R/L$"); ax.set_title(f"year $t={t}$")
+        ax.set_xlabel(r"$F=R/L$")
+        ax.set_title(f"year $t={t}$   ({int(d.sum())} present)")
     axes[0].set_ylabel(r"$\rho=S/L$ (log)")
     fig.colorbar(m, ax=axes, shrink=0.9, pad=0.015).set_label(r"optimal funding $a^\star$")
-    fig.suptitle(r"Optimal funding rule (baseline) vs iso total-replacement contours ($\eta=%.0f$, $\lambda=%.2f$)"
+    fig.suptitle(r"Optimal funding rule vs iso TOTAL-replacement contours, with the simulated "
+                 r"cohort's occupancy (magenta) — $\eta=%.0f$, $\lambda=%.2f$"
                 % (c.dp.ETA, c.dp.LAMBDA), fontsize=12)
     fig.savefig(f"{OUT}/policy_map.png", dpi=c.DPI); c.plt.close(fig)
     print(f"wrote {OUT}/policy_map.png")

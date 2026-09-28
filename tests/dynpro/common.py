@@ -131,9 +131,23 @@ def entry(n_paths, seed=7):
     return dict(R0=R0, L0=L0, S0=S0)
 
 
-def iso_rr(Fg, rg):
+def iso_rr(Fg, rg, total=True):
+    """TOTAL annual replacement on the (F, rho) grid:
+
+        RR = RR_LEGAL + max(F, 1) / (ANNUITY * rho).
+
+    This used to return max(F,1)/rho, which policy_map then contoured and labelled
+    "RR=%.1f". That quantity is the accrued capital in final-salary-years, i.e.
+    ANNUITY times the SECOND-PILLAR rate -- at ANNUITY=15 the contour labelled
+    "RR=0.7" actually sat at RR2 = 0.047, a total of 0.477. The labels were off by
+    the annuity factor and did not line up with RR_TARGET, which is the one level
+    a reader wants to find on that map.
+
+    `total=False` returns the second-pillar rate alone, for a figure that wants to
+    separate the employer's contribution from the legal floor."""
     FF, RRr = np.meshgrid(Fg, rg, indexing="ij")
-    return np.maximum(FF, 1.0) / RRr
+    rr2 = np.maximum(FF, 1.0) / (dp.ANNUITY * RRr)
+    return dp.RR_LEGAL + rr2 if total else rr2
 
 
 def solve(Fg, rg, ag, nq=5, beta=None, betas=None):
