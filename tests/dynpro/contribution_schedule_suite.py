@@ -164,7 +164,12 @@ def dca_predictability(nF=121, nR=91, na=31, nq=5, eps_list=(0.0, 0.10, 0.25, 0.
     ax.plot(yrs, mid[1]["c_by"], lw=2, color="#1D9E75", label=f"banded DCA (eps={mid[0]:.2f})")
     ax.plot(yrs, res[0][1]["c_by"], lw=2, color="#274690", label="pure DCA (eps=0, flat)")
     ax.set_xlabel("career year $t$"); ax.set_ylabel("employer contribution (% of salary)")
-    ax.set_title("Banded dollar-cost-averaging smooths the schedule")
+    # The function already measures roughness (mean squared year-on-year change);
+    # report it instead of asserting that banding smooths.
+    rough_unc = float(np.mean(np.diff(r_unc["c_by"]) ** 2))
+    ax.set_title("Banded dollar-cost-averaging vs the unconstrained rule\n"
+                 f"roughness {rough_unc:.1f} unconstrained, {mid[2]:.1f} banded, "
+                 f"{res[0][2]:.1f} flat", fontsize=10)
     ax.legend(frameon=False, fontsize=9)
     fig.savefig(f"{OUT}/dca_schedules.png", dpi=c.DPI); c.plt.close(fig); print(f"wrote {OUT}/dca_schedules.png")
 

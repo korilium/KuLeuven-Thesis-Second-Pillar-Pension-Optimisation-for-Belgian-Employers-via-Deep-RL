@@ -7,9 +7,14 @@ plan-entry-state assumption.
 Figures (-> figs/lambda/):
   lambda_threshold          lambda_threshold.png   grid-mean & path-weighted a* vs lambda
   pareto_frontier           lambda_frontier.png,    employer cost vs employee benefit, swept lambda,
-                            lambda_outcomes.png     with naive constant-a plans as reference points
-  crowding_out              crowding.png            RR_legal sweep and lambda sweep: what crowds out funding
-  frontier_entry_robustness lambda_frontier_dist.png single corner anchor vs sampled entry distribution
+                            lambda_outcomes.png     with constant-a plans as reference points
+  crowding_out              crowding.png            a* against the first-pillar floor, and against lambda
+  frontier_entry_robustness lambda_frontier_dist.png the frontier under two entry-state assumptions
+
+Every lambda sweep here stops around 0.62. Above that the optimum is pinned at the
+top of the action grid, so the curves are flat and a wider grid only resolves a
+horizontal line -- measured: path-weighted a* is 0.349 at every lambda from 0.60
+to 0.80, and employer cost 0.559 at 0.6 against 0.560 at 0.8.
 
 Run:  python lambda_dial_suite.py [threshold|pareto|crowding|entrydist]
 """
@@ -21,7 +26,14 @@ OUT = f"{c.OUT}/lambda"   # this suite writes only here
 
 # ============ 1. funding threshold in lambda (legal baseline) ============
 @c.restores
-def lambda_threshold(lambdas=np.linspace(0.20, 0.80, 16), nF=121, nR=91, na=25, nq=5, n_paths=15000, seed=7):
+def lambda_threshold(lambdas=np.linspace(0.15, 0.62, 16), nF=121, nR=91, na=25, nq=5,
+                     n_paths=15000, seed=7):
+    """Optimal funding against the employee weight.
+
+    The sweep stops at 0.62 on purpose. Above lambda ~= 0.6 the optimum is pinned
+    at the top of the action grid, so path-weighted a* is flat (measured: 0.349 at
+    every lambda from 0.60 to 0.80) and a uniform 0.2-0.8 grid spent its top third
+    resolving a horizontal line."""
     Fg, rg, _ = c.grids(nF, nR, na)
     rng = np.random.default_rng(seed); R0, L0, S0 = c.new_plan_init(n_paths, rng)
     gm, pw = [], []
@@ -36,8 +48,14 @@ def lambda_threshold(lambdas=np.linspace(0.20, 0.80, 16), nF=121, nR=91, na=25, 
     ax.plot(lambdas, gm, "-o", color="#1D9E75", lw=1.8, ms=4, label=r"grid-mean $a^\star$")
     ax.plot(lambdas, pw, "-s", color="#274690", lw=1.5, ms=4, label=r"path-weighted $a^\star$")
     ax.set_xlabel(r"employee weight $\lambda$"); ax.set_ylabel(r"optimal funding $a^\star$")
-    ax.set_title("Second-pillar funding is a THRESHOLD in lambda\n"
-                 f"(legal {c.dp.RR_LEGAL:.0%} floor crowds out funding below a threshold)")
+    # Report what was measured. The earlier title claimed a THRESHOLD; the curve is
+    # a smooth, near-linear rise to the action ceiling, with no kink anywhere.
+    # Keep the subtitle short enough to fit the axes: the long version ran off both
+    # edges. The legal-floor effect belongs to crowding(), which actually varies it.
+    ax.set_title(r"Optimal funding rises smoothly in $\lambda$, then saturates"
+                 "\n"
+                 rf"grid-mean {gm[0]:.2f}$\to${gm[-1]:.2f},  "
+                 rf"path-weighted {pw[0]:.2f}$\to${pw[-1]:.2f}", fontsize=10)
     ax.legend(frameon=False); ax.grid(True, alpha=0.25, lw=0.6)
     fig.savefig(f"{OUT}/lambda_threshold.png", dpi=c.DPI); c.plt.close(fig)
     print(f"wrote {OUT}/lambda_threshold.png")
@@ -45,8 +63,20 @@ def lambda_threshold(lambdas=np.linspace(0.20, 0.80, 16), nF=121, nR=91, na=25, 
 
 # ============ 2. Pareto frontier + naive-plan reference points ============
 @c.restores
-def pareto_frontier(lambdas=np.array([0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.98]),
-                    naive_a=(0.2, 0.5, 1.0), nF=121, nR=91, na=31, nq=5, n_paths=30000, seed=7):
+def pareto_frontier(lambdas=np.array([0.10, 0.18, 0.24, 0.30, 0.34, 0.38, 0.42,
+                                      0.46, 0.50, 0.54, 0.58, 0.65]),
+                    naive_a=(0.2, 0.5, 1.0), nF=121, nR=91, na=31, nq=5,
+                    n_paths=30000, seed=7):
+    """Employer cost against employee value, traced by sweeping lambda.
+
+    Both axes are lambda-FREE -- simulate's `benefit` and `cost` contain no LAMBDA
+    -- so sweeping it traces the locus of optima rather than re-scoring one policy.
+
+    The grid is concentrated on 0.10-0.65 because the frontier is censored at both
+    ends: below ~0.15 the optimum funds nothing, and from ~0.6 it is pinned at the
+    top of the action grid (measured cost 0.559 at lambda=0.6 against 0.560 at
+    0.8). A uniform 0.05-0.98 grid put half its points in those two clumps, and the
+    annotations then overprinted inside them."""
     Fg, rg, ag = c.grids(nF, nR, na)
     fr_ben, fr_cost, fr_avg, fr_sty, fr_lea = [], [], [], [], []
     for lam in lambdas:
@@ -54,7 +84,11 @@ def pareto_frontier(lambdas=np.array([0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0
         pol = c.solve(Fg, rg, ag, nq)["policy"]
         r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), n_paths=n_paths, seed=seed)
         fr_ben.append(r["benefit"]); fr_cost.append(r["cost"])
-        fr_avg.append(r["mean_a"] * c.dp.GAMMA * 100); fr_sty.append(r["sty"]); fr_lea.append(r["lea"])
+        # r["avg"], not r["mean_a"]: mean_a divides the summed action by T while
+        # zeroing absent years, so churn dilutes it (~85% of path-years are absent
+        # by T) and it read ~5% where the career average is ~10%. avg is the
+        # present-only, survival-weighted career average -- what the axis claims.
+        fr_avg.append(r["avg"]); fr_sty.append(r["sty"]); fr_lea.append(r["lea"])
         print(f"  lambda={lam:.2f}: benefit={r['benefit']:+.4f}  cost={r['cost']:.4f}  stayerRR={r['sty']:.3f}")
     c.restore()
 
@@ -68,17 +102,34 @@ def pareto_frontier(lambdas=np.array([0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0
     fig, ax = c.plt.subplots(figsize=(6.8, 5.6), constrained_layout=True)
     ax.plot(fr_cost, fr_ben, "-o", color="#1D9E75", lw=1.8, ms=5, zorder=3, label=r"optimal frontier (swept $\lambda$)")
     n_lam = len(lambdas)
+    shown = []          # skip a label whose point coincides with one already drawn
     for k in (0, n_lam // 3, 2 * n_lam // 3, n_lam - 1):
+        if any(abs(fr_cost[k] / fr_cost[j] - 1) < 0.02 for j in shown):
+            continue
+        shown.append(k)
         ax.annotate(rf"$\lambda={lambdas[k]:.2f}$", (fr_cost[k], fr_ben[k]),
                     textcoords="offset points", xytext=(6, -12), fontsize=8.5, color="#146c50")
     ax.scatter(nv_cost, nv_ben, marker="s", s=60, color="#C1121F", zorder=4, label="constant-$a$ plans (reference)")
     for a_c, xc, yb in zip(naive_a, nv_cost, nv_ben):
-        ax.annotate(rf"$a={a_c:.1f}$", (xc, yb), textcoords="offset points", xytext=(7, 5), fontsize=9, color="#8a0d16")
+        # to the LEFT: the frontier labels go right, and at a=0.2 the two collided
+        ax.annotate(rf"$a={a_c:.1f}$", (xc, yb), textcoords="offset points",
+                    xytext=(-30, 4), fontsize=9, color="#8a0d16")
     ax.set_xscale("log")
     ax.set_xlabel("employer cost per unit final salary (log; cheaper <-)")
     ax.set_ylabel(r"employee value  $\mathbb{E}[u(\mathrm{RR})]$  (better up)")
-    ax.set_title("Employer/employee frontier traced by the negotiation dial lambda\n"
-                 "a constant rule pays the frontier's cost only where it happens to match $a^\\star$")
+    # State the measured gap rather than asserting the conclusion: for each constant
+    # plan, how much more it costs than the frontier at the same employee value.
+    gaps = []
+    for xc, yb in zip(nv_cost, nv_ben):
+        if min(fr_ben) <= yb <= max(fr_ben):
+            o = np.argsort(fr_ben)
+            gaps.append(xc / float(np.interp(yb, np.array(fr_ben)[o],
+                                             np.array(fr_cost)[o])) - 1)
+    tag = (f"constant plans cost {100*min(gaps):.0f}-{100*max(gaps):.0f}% more than the "
+           "frontier at equal employee value" if gaps else
+           "constant plans fall outside the swept frontier")
+    ax.set_title(r"Employer/employee frontier traced by the dial $\lambda$" + "\n" + tag,
+                 fontsize=10)
     ax.legend(loc="lower right", frameon=False, fontsize=9); ax.grid(True, which="both", alpha=0.22, lw=0.6)
     fig.savefig(f"{OUT}/lambda_frontier.png", dpi=c.DPI); c.plt.close(fig)
     print(f"wrote {OUT}/lambda_frontier.png")
@@ -121,23 +172,29 @@ def crowding_out(RLs=np.array([0.0, 0.10, 0.20, 0.25, 0.30, 0.35, 0.45, 0.60]),
     a1.axvline(c._BASE["RR_LEGAL"], color="#274690", ls="--", lw=1.2,
                label=rf'committed $RR_{{legal}}$ = {c._BASE["RR_LEGAL"]:.2f}')
     a1.set_xlabel(r"first-pillar (legal) replacement $RR_{legal}$"); a1.set_ylabel(r"grid-mean $a^\star$")
-    a1.set_title(r"Legal floor crowds out the 2nd pillar ($\lambda=0.5$)")
+    d_rl = (a_rl[-1] - a_rl[0]) / (RLs[-1] - RLs[0]) if len(RLs) > 1 else float("nan")
+    a1.set_title(r"$a^\star$ vs the first pillar ($\lambda=%.2f$)" % c._BASE["LAMBDA"]
+                 + "\n" + rf"slope {d_rl:+.2f} per unit $RR_{{legal}}$; "
+                 rf"{a_rl[0]:.2f}$\to${a_rl[-1]:.2f}", fontsize=10)
     a1.legend(frameon=False, fontsize=9); a1.grid(True, alpha=0.25, lw=0.6)
     a2.plot(lambdas, a_lam, "-s", color="#1D9E75", lw=1.8, ms=5)
     a2.axvline(0.5, color="#9aa0a6", ls=":", lw=1.2, label=r"equal weight $\lambda=0.5$")
     a2.set_xlabel(r"employee weight $\lambda$"); a2.set_ylabel(r"grid-mean $a^\star$")
-    a2.set_title(rf"2nd pillar funds only at high $\lambda$ ($RR_{{legal}}={c.dp.RR_LEGAL}$)")
+    a2.set_title(rf"$a^\star$ vs employee weight ($RR_{{legal}}={c.dp.RR_LEGAL}$)"
+                 + "\n" + rf"{a_lam[0]:.2f}$\to${a_lam[-1]:.2f} over "
+                 rf"$\lambda$={lambdas[0]:.2f}-{lambdas[-1]:.2f}", fontsize=10)
     a2.legend(frameon=False, fontsize=9); a2.grid(True, alpha=0.25, lw=0.6)
-    fig.suptitle("The first pillar crowds out private second-pillar funding unless employee weight is high", fontsize=12)
+    fig.suptitle("What moves optimal funding: the first-pillar floor (left) and the "
+                 "employee weight (right)", fontsize=12)
     fig.savefig(f"{OUT}/crowding.png", dpi=c.DPI); c.plt.close(fig)
     print(f"wrote {OUT}/crowding.png")
 
 
 # ============ 4. frontier robustness to the entry-state assumption ============
 @c.restores
-def frontier_entry_robustness(lambdas=np.array([0.05, 0.2, 0.4, 0.6, 0.8, 0.92, 0.97]),
+def frontier_entry_robustness(lambdas=np.array([0.15, 0.25, 0.35, 0.45, 0.55, 0.62]),
                               nF=121, nR=91, na=25, nq=5, n_paths=30000, seed=7):
-    print("[frontier_entry_robustness] corner anchor vs sampled entry distribution (placeholder)")
+    print("[frontier_entry_robustness] new-plan cohort vs the placeholder entry spread")
     Fg, rg, ag = c.grids(nF, nR, na)
     c_cost, c_ben, d_cost, d_ben = [], [], [], []
     for lam in lambdas:
@@ -152,12 +209,17 @@ def frontier_entry_robustness(lambdas=np.array([0.05, 0.2, 0.4, 0.6, 0.8, 0.92, 
               f"dist (cost {rd['cost']:.3f}, ben {rd['benefit']:+.3f})")
     c.restore()
     fig, ax = c.plt.subplots(figsize=(6.8, 5.4), constrained_layout=True)
-    ax.plot(c_cost, c_ben, "-o", color="#274690", lw=1.7, ms=5, label="single corner anchor")
+    # NOT a single corner any more: c.entry() is the new-plan cohort. The old label
+    # predated that change and made this read as corner-vs-distribution, which it is not.
+    ax.plot(c_cost, c_ben, "-o", color="#274690", lw=1.7, ms=5,
+            label="new-plan cohort (the standard entry)")
     ax.plot(d_cost, d_ben, "-s", color="#1D9E75", lw=1.7, ms=5, label="entry distribution (placeholder)")
     ax.set_xscale("log")
     ax.set_xlabel("employer cost per unit final salary (log; cheaper <-)")
     ax.set_ylabel(r"employee value  $\mathbb{E}[u(\mathrm{RR})]$  (better up)")
-    ax.set_title("Frontier: single corner vs. expectation over entry states")
+    ax.set_title("Frontier robustness: two entry-state assumptions\n"
+                 "both are distributions; the placeholder spread is uncalibrated",
+                 fontsize=10)
     ax.legend(frameon=False, loc="lower right"); ax.grid(True, which="both", alpha=0.22, lw=0.6)
     fig.savefig(f"{OUT}/lambda_frontier_dist.png", dpi=c.DPI); c.plt.close(fig)
     print(f"wrote {OUT}/lambda_frontier_dist.png")
