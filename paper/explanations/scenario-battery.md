@@ -4,6 +4,9 @@
 than a sweep. This note explains the selection: what each group tests, why those
 particular configurations, and what the model actually does in each.
 
+A final section covers the market-plan benchmark in
+`tests/dynpro/benchmark_suite.py`, which runs on the same protocol.
+
 All numbers below come from `scenario_suite.py table` on the committed calibration
 (`MU = G = DISC_EMP = 0.03`, `DISC_ER = 0.05`, `BETA = 0.01`, `SATIATE = False`)
 at a 73×71 grid, `na = 20`, `n_quad = 5`, banded 2–15% of salary, 15 000 paths.
@@ -208,6 +211,111 @@ marginal utility $1/x$ decays more slowly than $1/x^2$, so overshoot keeps payin
 `BETA = 0` is a control, and it currently shows the smoothing dial is inert: β is
 measured relative to the local $Q$-spread, and 0.01 is about 1% of it. A visible
 effect needs roughly 0.1–0.3.
+
+---
+
+## The market benchmark
+
+`benchmark_suite.py` answers the question the scenario battery cannot: **what does
+optimising the schedule actually buy, measured against what employers do?** Everything
+runs on the same protocol constants, which now live in `common.py` precisely so the
+benchmark cannot drift onto a different grid than the results it is compared with.
+
+Two design families are covered, both *calendar-driven* — the contribution depends on
+the year, not on how well funded the plan happens to be:
+
+| design | stayer RR | cost | joint | avg | early → late |
+|---|---|---|---|---|---|
+| flat 3% of salary | 0.544 | 0.1123 | −0.178 | 3.0% | 3.0 → 3.0 |
+| flat 5% of salary | 0.617 | 0.1870 | −0.149 | 5.0% | 5.0 → 5.0 |
+| flat 8% of salary | 0.726 | 0.2991 | −0.126 | 8.0% | 8.0 → 8.0 |
+| age scale 3% +1%/10y | 0.604 | 0.1429 | −0.154 | 4.2% | 3.0 → 6.5 |
+| age scale 2% +1%/5y | 0.644 | 0.1504 | −0.142 | 4.7% | 2.5 → 9.5 |
+| **optimised, banded 2–15%** | 0.875 | 0.3201 | **−0.108** | 10.0% | 4.4 → 14.9 |
+
+The optimum dominates every design in joint value, which it must by construction — the
+check is that it does, because if it did not, the two evaluation paths would not be
+running the same protocol.
+
+The economically meaningful comparisons are the two readings of the same gap, both
+taken along the $\lambda$-frontier: the cost the optimum needs to reach a design's
+adequacy, and the adequacy it reaches on a design's budget.
+
+| design | cost at matched adequacy | adequacy at matched cost |
+|---|---|---|
+| flat 3% | −25% | +0.078 |
+| flat 5% | −41% | +0.134 |
+| flat 8% | −43% | +0.133 |
+| age scale 3% +1%/10y | −26% | +0.080 |
+| age scale 2% +1%/5y | −19% | +0.052 |
+
+### The gain splits into two parts
+
+The age scale is not merely *better* than flat — it captures a specific part of the
+gain. At 3% rising 1% per decade it reaches 0.604 for a cost of 0.1429, against flat
+5%'s 0.617 for 0.1870: about a quarter cheaper for essentially the same adequacy. And
+the optimum in turn reaches the age scale's adequacy for 0.1050, about another quarter
+below it.
+
+So at this one point, roughly half the available saving comes from **back-loading at
+all** — which a calendar rule can do — and the other half from making the contribution
+respond to the **state**, which it cannot. That decomposition is a single-point
+estimate, not a general result, but it is the right shape of claim for the thesis:
+the DP is not beating the market by contributing more, it is beating it by contributing
+at the right time and in the right states.
+
+### Three honest caveats
+
+**The levels are placeholders.** 3/5/8% and the age steps were chosen to bracket
+plausible Belgian practice. They need a DB2P or Assuralia figure before being
+described as representative, and any age step must stay inside the WAP
+non-discrimination bound. This is the same "confirm before citing" flag the statutory
+$G$ carries.
+
+**The matched figures are interpolations, and they understate the gain.** They read
+the frontier at the design's cost or adequacy by linear interpolation between swept
+$\lambda$ points. The frontier is concave, so a chord lies *below* it: the interpolated
+optimum looks worse than it is, and every reported saving is therefore conservative.
+
+Choosing those $\lambda$ points needs care, because the frontier is **doubly censored
+by the contribution band**:
+
+| $\lambda$ | cost | stayer RR | |
+|---|---|---|---|
+| 0.05 – 0.15 | 0.0750 | 0.507 | pinned at the 2% band **floor** |
+| 0.20 – 0.50 | 0.081 → 0.320 | 0.532 → 0.875 | the informative range |
+| 0.60 – 0.90 | 0.5602 | 0.981 | pinned at the 15% band **ceiling** |
+
+Every market design costs between 0.11 and 0.30, so all of them land in the middle
+stretch — and a uniform grid from 0.1 to 0.95 spent 7 of its 10 points on the two flat
+ones, leaving four to resolve the part that matters. The default grid is concentrated
+on $\lambda \in [0.15, 0.60]$ instead. Retargeting moved every figure by at most one
+point of cost and 0.006 of replacement, and always in the conservative direction, which
+is what the chord argument predicts. A design falling outside the swept range is
+reported as such rather than silently extrapolated.
+
+**There are no error bars.** Every number is one seed and one entry cohort. Monte
+Carlo noise at 15 000 paths is visible: the flat-5% cost moves from 0.1870 to 0.1848
+on doubling the paths, about 1.2%. Differences of that order should not be read as
+real. (The adequacy figures are far more stable — stayer RR is identical to four
+decimals across grids, because a calendar-driven design makes no use of the grid
+except as an exact lookup.)
+
+### Why the two-tier design is not here
+
+Belgian DC plans commonly split contributions at the social-security wage ceiling: a
+low rate below it, a high rate above. That design is **not scale-free**. It compares a
+salary *level* against a fixed ceiling, while the whole model is homogeneous of degree
+0 in $(R, L, S)$ — which is what lets a three-variable problem collapse to the reduced
+state $(F, \rho)$ in the first place. Representing it faithfully would mean carrying
+the ceiling as a further ratio in the state.
+
+Little is lost by leaving it out. If salary and ceiling are indexed at the same rate,
+then $S_t / C_t$ never moves and the two-tier plan degenerates exactly to a flat rate
+whose level depends on where the worker sits relative to the ceiling — already covered
+by the flat rows. The design only does something distinctive when career progression
+outruns ceiling indexation, and that is a statement about wage dynamics rather than
+about pension design.
 
 ---
 

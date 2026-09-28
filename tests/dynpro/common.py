@@ -46,8 +46,20 @@ _BASE = {k: getattr(dp, k) for k in _RESTORE}
 grids = dp.grids
 simulate = dp.simulate
 const_policy = dp.const_policy
+schedule_policy = dp.schedule_policy
 new_plan_init = dp.new_plan_init
 sample_entry = dp.sample_entry
+
+# --- THE evaluation protocol (numerical, not economic) -------------------------
+# Lives here, not in one suite, so no suite can silently drift onto a different grid
+# than the results it is compared against. nR >= 71 is REQUIRED at the rho floor of
+# 0.01: the schedule-shape columns are not converged below that (widening the range
+# without raising n coarsens the step). Suites that need finer grids for a headline
+# figure pass their own, but anything cross-compared uses these.
+GRID = dict(nF=73, nR=71, na=20, nq=5)
+N_PATHS = 15000
+SEED = 7
+BAND_PCT = (0.02, 0.15)          # contribution band, as a fraction of salary
 
 
 def restore():

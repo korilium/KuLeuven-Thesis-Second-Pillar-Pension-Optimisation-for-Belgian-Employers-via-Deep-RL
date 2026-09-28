@@ -37,12 +37,9 @@ import lambda_dial_suite as _ld
 
 OUT = f"{c.OUT}/scenarios"   # this suite writes only here
 
-# grid: nR >= 71 required at rho lo=0.01 -- the schedule-shape columns are not
-# converged below that (widening the range without raising n coarsens the step).
-GRID = dict(nF=73, nR=71, na=20, nq=5)
-N_PATHS = 15000
-SEED = 7
-BAND_PCT = (0.02, 0.15)
+# THE evaluation protocol now lives in common.py, so benchmark_suite.py cannot
+# drift onto a different grid than the scenarios it is compared against.
+GRID, N_PATHS, SEED, BAND_PCT = c.GRID, c.N_PATHS, c.SEED, c.BAND_PCT
 
 # (label, group, overrides, expectation)  -- expectation is checked only for group A
 SCENARIOS = [
