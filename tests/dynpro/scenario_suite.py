@@ -85,9 +85,7 @@ def _evaluate(overrides, **grid):
         lo, hi = BAND_PCT[0] / c.dp.GAMMA, min(BAND_PCT[1] / c.dp.GAMMA, 1.0)
         lo = min(lo, hi)                       # GAMMA->0 can invert the band
         pol = c.solve(Fg, rg, np.linspace(lo, hi, g["na"]), g["nq"])["policy"]
-        rng = np.random.default_rng(SEED)
-        R0, L0, S0 = c.new_plan_init(N_PATHS, rng)
-        r = c.simulate(pol, Fg, rg, R0=R0, L0=L0, S0=S0, band=(lo, hi),
+        r = c.simulate(pol, Fg, rg, **c.entry(N_PATHS, SEED), band=(lo, hi),
                        n_paths=N_PATHS, seed=SEED, track=True)
         r["band"] = (lo * c.dp.GAMMA * 100, hi * c.dp.GAMMA * 100)
         r["early"] = float(np.mean(r["c_by"][:10]))
