@@ -107,6 +107,27 @@ def const_policy(a, n_years, nF, nR):
     return np.full((n_years, nF, nR), float(a))
 
 
+def schedule_policy(a_of_t, nF, nR, n_years=None):
+    """Lift a STATE-INDEPENDENT schedule a(t) to a (T, nF, nR) policy array.
+
+    The time-varying generalisation of const_policy, for market plan designs whose
+    contribution depends on the year alone (a flat percentage of salary, an
+    age-related scale) and not on how well funded the plan happens to be. Such a
+    design is scale-free, so it needs no extra state: simulate() reads it through
+    the same bilinear lookup as an optimised policy, which is what makes the two
+    directly comparable.
+
+    `a_of_t` is a callable t -> a or a length-T sequence, in CAPACITY-FRACTION
+    units (contribution = a*GAMMA*S), not in percent of salary: convert a
+    percentage rate with a = rate / GAMMA.
+    """
+    n = T if n_years is None else n_years
+    a = np.array([float(a_of_t(t)) for t in range(n)]) if callable(a_of_t) else \
+        np.asarray(a_of_t, float)
+    assert a.shape == (n,), f"a_of_t must give {n} values, got {a.shape}"
+    return np.broadcast_to(a[:, None, None], (n, nF, nR)).copy()
+
+
 def new_plan_init(n, rng, rho_lo=15.0, rho_hi=34.0, F_sd=0.08):
     """Fresh plans: F0 ~ 1, high rho (liability small relative to salary)."""
     F0 = np.clip(rng.normal(1.0, F_sd, n), 0.5, 1.5)
