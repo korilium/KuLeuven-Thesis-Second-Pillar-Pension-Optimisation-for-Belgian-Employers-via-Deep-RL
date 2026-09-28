@@ -1,6 +1,6 @@
 """Contribution-schedule suite: shape and design of the employer's optimal
 funding schedule a*(t) under the committed model -- unconstrained vs banded
-(predictable) vs flat, new-plan front-loading, and macro-scenario robustness.
+(predictable) vs flat, the new-plan ramp-up, and macro-scenario robustness.
 
 Figures (-> figs/contributionSchedule/):
   policy_map              policy_map.png            baseline a*(F,rho) heatmap w/ iso-RR contours
@@ -10,7 +10,7 @@ Figures (-> figs/contributionSchedule/):
                            dca_cost.png              joint-value cost of imposing predictability
   backload_vs_baseline     backload_compare.png      preference-driven back-loading vs baseline
   schedule_vs_macro(p)     schedule_vs_<p>.png       banded schedule swept over mu or G
-  new_plan_profile         new_plan_profile.png      front-load-then-coast funnel + terminal RR
+  new_plan_profile         new_plan_profile.png      ramp-to-capacity funnel + terminal RR
   signal_schedule          signal_schedule.png       contribution read off V as a graded signal
                                                      (soft-argmax at temperature beta) + value gap
   scenario_grid            scenario_grid.png         (mu,G) x discount grid of schedules
@@ -125,7 +125,7 @@ def dca_predictability(nF=121, nR=91, na=31, nq=5, eps_list=(0.0, 0.10, 0.25, 0.
 
     yrs = np.arange(c.dp.T)
     fig, ax = c.plt.subplots(figsize=(7.4, 4.6), constrained_layout=True)
-    ax.plot(yrs, r_unc["c_by"], lw=2, color="#C1121F", label="unconstrained (front-loaded)")
+    ax.plot(yrs, r_unc["c_by"], lw=2, color="#C1121F", label="unconstrained (ramps to the cap)")
     mid = res[len(res) // 2]          # a representative band, not a hardcoded index
     ax.plot(yrs, mid[1]["c_by"], lw=2, color="#1D9E75", label=f"banded DCA (eps={mid[0]:.2f})")
     ax.plot(yrs, res[0][1]["c_by"], lw=2, color="#274690", label="pure DCA (eps=0, flat)")
@@ -235,6 +235,8 @@ def new_plan_profile(nF=145, nR=101, na=31, nq=7, n_paths=40000, seed=7):
     R0, L0, S0 = c.new_plan_init(n_paths, rng)
     r = c.simulate(pol, Fg, rg, R0=R0, L0=L0, S0=S0, n_paths=n_paths, seed=seed, track=True)
     frac3 = np.nan_to_num(r["a_by_t"])[:3].sum() / np.nan_to_num(r["a_by_t"]).sum()
+    # a LOW first-3yr share means deferred funding: with delta_f > mu the optimum defers,
+    # so this diagnostic documents how little is funded early rather than how much.
     print(f"[new_plan_profile] a*(0)={r['a_by_t'][0]:.3f}  first-3yr share={frac3:.2f}  "
           f"rho after yr0={r['rho_med'][1]:.2f} (1/Gamma={1/c.dp.GAMMA:.2f})")
     print(f"   TOTAL RR median={r['tot']:.3f} (legal={c.dp.RR_LEGAL})  stayer={r['sty']:.3f}  leaver={r['lea']:.3f}  "
@@ -248,7 +250,7 @@ def new_plan_profile(nF=145, nR=101, na=31, nq=7, n_paths=40000, seed=7):
     a2.set_yscale("log"); a2.set_ylabel(r"median $\rho$ (log)", color="#274690"); a2.spines["top"].set_visible(False)
     h1, l1 = a1.get_legend_handles_labels(); h2, l2 = a2.get_legend_handles_labels()
     a1.legend(h1 + h2, l1 + l2, loc="upper right", frameon=False, fontsize=9)
-    a1.set_title("New-plan funding: front-load then coast")
+    a1.set_title("New-plan funding: ramp up, then hold at capacity")
     a3.hist(r["RR_tot"][r["stay"]], bins=45, range=(c.dp.RR_LEGAL * 0.98, np.quantile(r["RR_tot"], 0.99)),
             color="#274690", alpha=0.6, label=f"stayers (med {r['sty']:.2f})")
     a3.hist(r["RR_tot"][~r["stay"]], bins=45, range=(c.dp.RR_LEGAL * 0.98, np.quantile(r["RR_tot"], 0.99)),
@@ -257,7 +259,8 @@ def new_plan_profile(nF=145, nR=101, na=31, nq=7, n_paths=40000, seed=7):
     a3.axvline(c.dp.RR_LEGAL, color="#9aa0a6", ls="--", lw=1.0)
     a3.set_xlabel("TOTAL annual replacement (legal + 2nd pillar)"); a3.set_ylabel("paths")
     a3.set_title("Terminal RR: stayers on target, leavers proportional"); a3.legend(frameon=False, fontsize=9)
-    fig.suptitle("New-plan behaviour: front-loaded funding, service-pro-rated adequacy", fontsize=12)
+    fig.suptitle("New-plan behaviour: deferred ramp to capacity, service-pro-rated adequacy",
+                 fontsize=12)
     fig.savefig(f"{OUT}/new_plan_profile.png", dpi=c.DPI); c.plt.close(fig)
     print(f"wrote {OUT}/new_plan_profile.png")
 

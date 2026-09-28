@@ -177,14 +177,38 @@ $\mu$ fixed at 3%:
 | (0.0300, 0.05) | $G < \delta_f$ | 0.875 | 4.4 → 14.9 |
 | (0.0450, 0.05) | $G < \delta_f$ | 0.984 | 4.8 → 14.7 |
 
-The shape tracks $\delta_f$ alone: front-loaded at 0.02 for *every* $G$, back-loaded
-at 0.05 for *every* $G$. The ordering tags do not line up with any flip. What $G$
-changes is the **level** — stayer RR rises 0.850 → 0.984 at fixed $\delta_f$, because
-a higher guarantee raises the floor payout.
+The **direction** of the tilt tracks $\delta_f$ alone: front-loaded at 0.02 for *every*
+$G$, back-loaded at 0.05 for *every* $G$. The ordering tags do not line up with any
+flip, so there is no regime boundary at $G = \delta_f$. And $G$ clearly moves the
+**level** — stayer RR rises 0.850 → 0.984 at fixed $\delta_f$, because a higher
+guarantee raises the floor payout.
 
-So the honest presentation is a $(G \times \delta_f)$ grid separating level from
-shape, which is what `scenario_suite.py rates` draws, rather than a regime panel
-implying a boundary that is not there.
+But "$G$ moves levels, not shapes" is too strong, and the table above says so. Read down
+the $\delta_f = 0.02$ rows: the early leg falls 10.4 → 10.2 → **6.8** as $G$ rises. A
+34% change in early funding is a change of shape, not of level. It is confined to that
+one corner, and the marginal analysis says why.
+
+Below the floor the employer's cost of an extra contribution includes its effect on the
+terminal shortfall, $d(L_T - R_T) = (e^{Gm} - e^{\mu m})\,dc$. At the committed
+$\mu = G$ that term is exactly zero — a contribution lifts reserve and guarantee
+equally and leaves the deficit untouched — so the timing condition collapses to
+$\mathrm{sign}(\delta_f - \mu)$ and $G$ really is shape-neutral. Away from $\mu = G$
+it does not vanish: at $G = 0.045 > \mu$, each contribution is guaranteed at a rate it
+does not earn, which *enlarges* the shortfall and penalises early funding. And
+$\delta_f = 0.02$ front-loads, which leaves the plan least funded at $T$ and therefore
+most often below the floor. The one cell where both conditions hold is $(0.045, 0.02)$
+— precisely the cell that breaks the pattern.
+
+So the correct statement is regime-dependent: **above the floor $G$ moves levels only;
+below it, $G$ enters the timing condition too**, through $(\delta_f - G)$ and through
+the $(\mu - G)$ self-financing term. Our committed calibration sits at $\mu = G$, where
+the two regimes agree at the margin, which is why the simpler claim held everywhere we
+usually look.
+
+The honest presentation is therefore the $(G \times \delta_f)$ grid that
+`scenario_suite.py rates` draws — separating level from shape, and showing the one
+corner where the separation fails — rather than a regime panel implying a boundary at
+$G = \delta_f$ that is not there.
 
 ---
 

@@ -29,8 +29,10 @@ Figures (-> figs/benchmark/):
                                        cost at matched adequacy / adequacy at matched cost
   frontier   benchmark_frontier.png    the lambda-frontier with the designs on it
   schedules  benchmark_schedules.png   each design's shape vs the DP's
+  visitation benchmark_visitation.png  where each plan drives the (F, rho) state
+             benchmark_misfunding.png  a_design - a* on the states each design visits
 
-Run:  python benchmark_suite.py [table|frontier|schedules]
+Run:  python benchmark_suite.py [table|frontier|schedules|visitation]
 """
 import numpy as np
 import common as c
@@ -64,16 +66,28 @@ def _metrics(r):
                 c_by=r["c_by"])
 
 
-def _run_design(rate_of_t, Fg, rg):
-    """A market design: contribution set by the calendar, not by the state."""
+def _run_design(rate_of_t, Fg, rg, visits=False):
+    """A market design: contribution set by the calendar, not by the state.
+
+    `visits=True` additionally returns the policy array and the (T, NF, NR) occupancy
+    counts, so visitation() can reuse this construction rather than rebuilding it."""
     a_of_t = lambda t: min(rate_of_t(t) / c.dp.GAMMA, 1.0)
     pol = c.schedule_policy(a_of_t, len(Fg), len(rg))
-    r = c.simulate(pol, Fg, rg, **c.entry(N_PATHS, SEED), n_paths=N_PATHS, seed=SEED)
-    return _metrics(r)
+    r = c.simulate(pol, Fg, rg, **c.entry(N_PATHS, SEED), n_paths=N_PATHS, seed=SEED,
+                   visits=visits)
+    m = _metrics(r)
+    if visits:
+        m.update(pol=pol, visits=r["visits"], frac=r["frac"])
+    return m
 
 
-def _run_dp(Fg, rg, banded=True, lam=None, **g):
-    """The optimised schedule, banded to the protocol band or unconstrained."""
+def _run_dp(Fg, rg, banded=True, lam=None, visits=False, **g):
+    """The optimised schedule, banded to the protocol band or unconstrained.
+
+    NOTE on what `pol` means when `visits=True`: simulate() CLIPS the looked-up action
+    to the band, so the policy array alone is not what was applied. The banded action
+    grid already lies inside the band, so for the banded case the two coincide; this is
+    why visitation() compares against the banded optimum and not the unconstrained one."""
     gg = {**GRID, **g}
     with c.overrides(**({} if lam is None else dict(LAMBDA=float(lam)))):
         if banded:
@@ -83,8 +97,11 @@ def _run_dp(Fg, rg, banded=True, lam=None, **g):
             ag, band = c.dp.make_a_grid(n=gg["na"]), None
         pol = c.solve(Fg, rg, ag, gg["nq"])["policy"]
         r = c.simulate(pol, Fg, rg, **c.entry(N_PATHS, SEED), band=band,
-                       n_paths=N_PATHS, seed=SEED)
-    return _metrics(r)
+                       n_paths=N_PATHS, seed=SEED, visits=visits)
+    m = _metrics(r)
+    if visits:
+        m.update(pol=pol, visits=r["visits"], frac=r["frac"])
+    return m
 
 
 # --- the lambda frontier, used for the matched comparisons -----------------
@@ -242,7 +259,195 @@ def schedules(**g):
     print(f"wrote {OUT}/benchmark_schedules.png")
 
 
-_ALL = {"table": table, "frontier": frontier, "schedules": schedules}
+# ============ 4. where each design drives the plan, and where it misfunds ============
+MAP_DESIGNS = ["flat 5% of salary", "age scale 3% +1%/10y"]
+
+# Occupancy is a DENSITY, and the protocol's 73x71 is coarse for one, so this section
+# defaults to the finer grid state_visitation() uses. Nothing here is a cross-design
+# VALUE comparison, so the difference from the protocol grid is a presentation choice --
+# but a* is resolution-sensitive, so the scalars are checked across both (see the
+# docstring note on grid stability).
+MAP_GRID = dict(nF=145, nR=101, na=20, nq=5)
+
+
+def _weighted(pol, V):
+    """Visit-weighted mean of a policy, weighted JOINTLY over (year, cell).
+
+    Pooling over years first would decouple the policy's time variation from the
+    occupancy's -- both are strong here, so that average would answer no question."""
+    tot = V.sum()
+    return float((pol * V).sum() / tot) if tot else np.nan
+
+
+def _contours(ax, d, Fg, rg, color="white"):
+    """That year's occupancy at the 50/90/99th percentiles, with the degenerate case.
+
+    Early on essentially all mass sits in one cell, so the quantiles coincide and
+    contour() has nothing to draw; mark the modal cell instead."""
+    pos = d[d > 0]
+    if not pos.size:
+        return
+    levels = sorted({float(np.quantile(pos, q)) for q in (0.50, 0.90, 0.99)})
+    if len(levels) > 1:
+        ax.contour(Fg, rg, d.T, levels=levels, colors=color, linewidths=1.2)
+    else:
+        jF, jR = np.unravel_index(int(d.argmax()), d.shape)
+        ax.plot(Fg[jF], rg[jR], "o", ms=9, mfc="none", mec=color, mew=1.8)
+
+
+def visitation(designs=MAP_DESIGNS, years=(0, 10, 22, 44), **g):
+    """Map the market designs onto the state space, and localise where they misfund.
+
+    Two questions, two figures.
+
+    WHERE THE PLAN GOES. A design that funds less keeps F lower, and keeps rho = S/L
+    higher because L grows more slowly, so each design occupies a different part of
+    (F, rho) than the optimum does. Figure A puts the three occupancy clouds side by
+    side.
+
+    WHERE IT MISFUNDS. For a calendar-driven design the policy surface is CONSTANT over
+    (F, rho), so plotting it would colour a flat sheet. The informative quantity is
+        Delta(t, F, rho) = a_design(t) - a*(t, F, rho)
+    on the cells the design actually visits: what it contributes minus what the optimum
+    would contribute THERE. Positive = over-funds that state, negative = under-funds it.
+
+    OFF-POLICY CAVEAT. Delta reads a* at states the optimum's own simulation may rarely
+    reach, because the design steers the plan elsewhere. a* is defined on the whole grid
+    so this is legitimate, but it is extrapolation to the extent the two occupancies
+    differ -- so the share of the design's mass landing in cells the optimum never
+    visits is reported, and a large share means the map is not a clean attribution.
+    Measured, that share is ~1%: the optimum's occupancy is a union over 45 years and
+    covers nearly everything the designs reach, so the caveat turns out to be minor here.
+
+    GRID SENSITIVITY. a* is resolution-sensitive, so the scalars move with the grid.
+    Measured at 73x71 against the default 145x101: mean misfunding differs by 0.012
+    (flat 5%) and 0.022 (age scale), a few percent of the value, with the sign and
+    ordering unchanged; the state step is identical (+0.240) on both. The LEAST stable
+    figure is the over-funded share (age scale: 33% at 145x101, 25% at 73x71), so read
+    it as "roughly a third" rather than as a point estimate.
+    """
+    c.ensure_out(OUT)
+    gg = {**MAP_GRID, **g}
+    Fg, rg, _ = c.grids(gg["nF"], gg["nR"])
+    by_label = dict(DESIGNS)
+    missing = [d for d in designs if d not in by_label]
+    assert not missing, f"not in DESIGNS: {missing}"
+
+    star = _run_dp(Fg, rg, banded=True, visits=True, **gg)
+    Vs = star["visits"]
+    reach_star = Vs.sum(axis=0) > 0                 # cells the optimum ever occupies
+    rows = [(lb, _run_design(by_label[lb], Fg, rg, visits=True)) for lb in designs]
+
+    print(f"[visitation] {N_PATHS} paths on {gg['nF']}x{gg['nR']} "
+          f"({gg['nF']*gg['nR']} cells), banded optimum as reference")
+    # The visit weighting does TWO things at once, and they are worth separating:
+    #   grid-mean -> year-weighted : re-weights YEARS by survival (churn thins later years)
+    #   year-weighted -> visited   : re-weights STATES within each year
+    # The second step is identically zero for any calendar design, because its policy does
+    # not vary over (F, rho). So the optimum's state step is what state-dependence buys,
+    # and it is not contaminated by the survival effect the designs also have.
+    print("  %-24s %9s %9s %8s %10s %9s %9s %9s" % (
+        "policy", "grid-mean", "yr-wtd", "visited", "a* there", "misfund",
+        "over-fund", "off-policy"))
+    stats = []
+    for lb, m in [("OPTIMUM (banded)", star)] + rows:
+        V, pol = m["visits"], m["pol"]
+        w = V.sum(axis=(1, 2))                       # present path-years per year
+        gm = float(pol.mean())
+        ym = float((w * pol.mean(axis=(1, 2))).sum() / w.sum())
+        vw = _weighted(pol, V)
+        if lb.startswith("OPTIMUM"):
+            star_steps = (gm, ym, vw)
+            print("  %-24s %9.3f %9.3f %8.3f %10s %9s %9s %9s"
+                  % (lb, gm, ym, vw, "-", "-", "-", "-"))
+            continue
+        vw_star = _weighted(star["pol"], V)          # a* on THIS design's occupancy
+        D = pol - star["pol"]
+        tot = V.sum()
+        over = float((V * (D > 0)).sum() / tot)
+        off = float((V * ~reach_star[None, :, :]).sum() / tot)
+        stats.append((lb, m, D, gm, ym, vw, vw_star, over, off))
+        print("  %-24s %9.3f %9.3f %8.3f %10.3f %+9.3f %8.0f%% %8.0f%%"
+              % (lb, gm, ym, vw, vw_star, vw - vw_star, 100 * over, 100 * off))
+
+    # Known-answer checks on the new code, both exact rather than eyeballed.
+    for lb, m, _D, _gm, ym, vw, *_ in stats:
+        # (1) a calendar design is constant over (F, rho), so the STATE step must vanish
+        assert abs(ym - vw) < 1e-9, f"{lb}: state step must be 0 for a calendar design"
+        # (2) the visit histogram must reproduce the independently-computed per-year
+        #     present means: avg = sum_t c_by*frac / sum_t frac, in percent of salary
+        assert abs(vw - m["avg"] / (100 * c.dp.GAMMA)) < 1e-9, f"{lb}: avg cross-check"
+    g0, y0, v0 = star_steps
+    print(f"  year step (survival) {g0:+.3f} -> {y0:+.3f};  state step {y0:+.3f} -> {v0:+.3f}"
+          f"  = {v0 - y0:+.3f} for the optimum, 0.000 for every calendar design")
+
+    # ---- figure A: where each design drives the plan ----
+    panels = [(lb, m["visits"].sum(axis=0)) for lb, m, *_ in stats]
+    panels.append(("OPTIMUM (banded)", Vs.sum(axis=0)))
+    fig, axes = c.plt.subplots(1, len(panels), figsize=(4.6 * len(panels), 4.8),
+                               sharey=True, constrained_layout=True)
+    mm = None
+    allpos = np.concatenate([d[d > 0].ravel() for _lb, d in panels])
+    norm = c.mpl.colors.LogNorm(vmin=max(allpos.min(), 1), vmax=allpos.max())
+    for ax, (lb, d) in zip(np.atleast_1d(axes), panels):
+        mm = ax.pcolormesh(Fg, rg, np.where(d > 0, d, np.nan).T, cmap="magma",
+                           norm=norm, shading="auto", rasterized=True)
+        ax.set_yscale("log"); ax.set_xlim(Fg[0], Fg[-1]); ax.set_ylim(rg[0], rg[-1])
+        ax.axvline(1.0, color="white", lw=0.9, ls=":", alpha=0.7)
+        ax.set_xlabel(r"$F=R/L$")
+        ax.set_title(f"{lb}\n{float(np.mean(d > 0)):.1%} of cells ever visited", fontsize=10)
+    np.atleast_1d(axes)[0].set_ylabel(r"$\rho=S/L$ (log)")
+    fig.colorbar(mm, ax=axes, shrink=0.9, pad=0.015).set_label("present path-years (log)")
+    fig.suptitle("Where each plan drives the state (shared colour scale)", fontsize=12)
+    fig.savefig(f"{OUT}/benchmark_visitation.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"  wrote {OUT}/benchmark_visitation.png")
+
+    # ---- figure B: the misfunding map ----
+    lim = max(float(np.nanmax(np.abs(np.where(m["visits"] > 0, D, np.nan))))
+              for _lb, m, D, *_ in stats)
+    # Careers occupy a thin ribbon of the grid, so plotting the full extent would leave
+    # every panel mostly blank and hide the variation of Delta ACROSS F, which is the
+    # part that is actually about the state. Crop to the cells shown, with a margin.
+    shown = np.zeros((len(Fg), len(rg)), bool)
+    for _lb, m, *_ in stats:
+        shown |= m["visits"][list(years)].sum(axis=0) > 0
+    iF, iR = np.where(shown)
+    xlo, xhi = Fg[iF.min()], Fg[iF.max()]
+    ylo, yhi = rg[iR.min()], rg[iR.max()]
+    xpad = 0.05 * (xhi - xlo)
+    xlo, xhi = max(Fg[0], xlo - xpad), min(Fg[-1], xhi + xpad)
+    ylo, yhi = ylo / 1.6, yhi * 1.6                       # log axis: pad multiplicatively
+    fig, axes = c.plt.subplots(len(stats), len(years),
+                               figsize=(3.3 * len(years), 3.9 * len(stats)),
+                               sharex=True, sharey=True, constrained_layout=True)
+    axes = np.atleast_2d(axes)
+    mm = None
+    for i, (lb, m, D, _gm, _ym, _vw, _vws, _ov, _off) in enumerate(stats):
+        V = m["visits"]
+        for j, t in enumerate(years):
+            ax = axes[i, j]
+            d = V[t]
+            mm = ax.pcolormesh(Fg, rg, np.where(d > 0, D[t], np.nan).T, cmap="RdBu_r",
+                               vmin=-lim, vmax=lim, shading="auto", rasterized=True)
+            _contours(ax, d, Fg, rg, color="#222222")
+            ax.set_yscale("log"); ax.set_xlim(xlo, xhi); ax.set_ylim(ylo, yhi)
+            ax.axvline(1.0, color="#222222", lw=0.9, ls=":", alpha=0.6)
+            w = _weighted(D[t:t + 1], d[None, :, :])
+            ax.set_title(f"$t={t}$   mean $\\Delta$ {w:+.2f}", fontsize=9.5)
+            if i == len(stats) - 1: ax.set_xlabel(r"$F=R/L$")
+        axes[i, 0].set_ylabel(f"{lb}\n" + r"$\rho=S/L$ (log)", fontsize=9)
+    fig.colorbar(mm, ax=axes, shrink=0.85, pad=0.015).set_label(
+        r"$\Delta = a_{\rm design} - a^\star$   (red = over-funds, blue = under-funds)")
+    fig.suptitle("Where each design departs from the optimum, on the states it actually visits\n"
+                 "(blank = never visited; contours = 50/90/99th pct of that year's occupancy; "
+                 "$a^\\star$ is read off-policy)", fontsize=11)
+    fig.savefig(f"{OUT}/benchmark_misfunding.png", dpi=c.DPI); c.plt.close(fig)
+    print(f"  wrote {OUT}/benchmark_misfunding.png")
+    return stats
+
+
+_ALL = {"table": table, "frontier": frontier, "schedules": schedules,
+        "visitation": visitation}
 
 
 def main(which=None):
