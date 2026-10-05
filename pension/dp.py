@@ -25,6 +25,7 @@ import numpy as np
 # is no module state: two calls with different p never interact, so sweeps need no
 # restore bookkeeping and independent economies can run side by side.
 from pension.params import Params, DEFAULT
+from pension.dynamics import Exogenous, State, step, settle
 import pension.economy as _economy      # draw_rate_scenarios: the rate engine is loaded only on use
 import pension.objective as _objective_mod
 from pension.objective import OBJECTIVES, Objective
@@ -446,77 +447,43 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
         guarantee risk is now G_t itself;
       * leavers go paid-up as before: L freezes, R compounds at the path's book
         yield without the excess-return shock.
-    The draw order (zR, zL, leave) is the same in both branches, so a degenerate
-    scenario (G == G, mu == MU) with SIGMA_L = 0 reproduces the constant branch.
+    The year itself is pension.dynamics.step(); all randomness is one
+    dynamics.Exogenous drawn from `seed` (per year: zR, zL, churn), the same in
+    both regimes, so a degenerate scenario (G == G, mu == MU) with SIGMA_L = 0
+    reproduces the constant branch.
     The output then also carries G_by_t / mu_by_t (path means), regime_B (share
     of paths with L_T > R_T), the terminal R_T / L_T per path, and the scenario
     itself under "rates".
     """
     p = _params(p)
     obj = _objective(objective, p); w_emp, w_er = obj.weights(p)
-    use_rates = rates is not None or p.RATE_MODEL != "constant"
-    if use_rates and rates is None:
+    if rates is None and p.RATE_MODEL != "constant":
         rates = _economy.draw_rate_scenarios(n_paths, seed=p.RATE_SEED, model=p.RATE_MODEL,
                                              horizon=p.T, p=p)
-    if use_rates:
-        Gr, mur = np.asarray(rates["G"]), np.asarray(rates["mu"])
-        assert Gr.shape[0] >= p.T and Gr.shape[1] == n_paths, \
-            f"rates must cover T={p.T} years x n_paths={n_paths}, got {Gr.shape}"
+    exo = Exogenous.draw(p, n_paths, seed, rates)
+    state = State.initial(p, exo, R0, L0, S0 if S0 is not None else rg[-1])
+    ST = state.S * (1.0 + p.W) ** p.T
     lrg = np.log(rg)
-    rng = np.random.default_rng(seed)
-    n = n_paths
-    R = np.full(n, 1.0) * np.asarray(R0); L = np.full(n, 1.0) * np.asarray(L0)
-    S = np.full(n, 1.0) * np.asarray(S0 if S0 is not None else rg[-1])
-    ST = S * (1.0 + p.W) ** p.T
     lo, hi = (0.0, 1.0) if band is None else band
-    present = np.ones(n, bool); leave_t = np.full(n, p.T, float)
-    cost = np.zeros(n); a_sum = np.zeros(n)
-    a_by_t = np.full(p.T, np.nan); rho_med = np.zeros(p.T)
-    frac = np.zeros(p.T); c_by = np.zeros(p.T)
-    visit = np.zeros((p.T, len(Fg), len(rg))) if visits else None
-    if use_rates:
-        # horizontal vintages: slot 0 = opening liability, slot t+1 = year-t contribution
-        Lv = np.zeros((p.T + 1, n)); Lv[0] = L
-        lock = np.zeros((p.T + 1, n)); lock[0] = Gr[0]
+    diag = _Diagnostics(p.T, Fg, lrg, track, visits)
+    cost = np.zeros(n_paths); a_sum = np.zeros(n_paths)
     for t in range(p.T):
-        F = R / L; rho = S / L
+        present = state.present
+        F, rho = state.F, state.rho
         a = np.clip(bilinear(Fg, lrg, policy[t], F, np.log(rho)), lo, hi)
         a = np.where(present, a, 0.0)
-        frac[t] = present.mean()
-        c_by[t] = (a[present] * p.GAMMA).mean() * 100 if present.any() else 0.0
-        if visits and present.any():
-            iF = np.abs(Fg[:, None] - np.clip(F[present], Fg[0], Fg[-1])[None, :]).argmin(axis=0)
-            iR = np.abs(lrg[:, None] - np.clip(np.log(rho[present]), lrg[0], lrg[-1])[None, :]).argmin(axis=0)
-            np.add.at(visit[t], (iF, iR), 1.0)
-        if track:
-            a_by_t[t] = a[present].mean() if present.any() else np.nan
-            rho_med[t] = np.median(rho[present]) if present.any() else np.nan
+        diag.record(t, a, present, F, rho, p)
         a_sum += a
-        c = a * p.GAMMA * S
         cost += np.where(present, obj.contribution(a, t, p) * np.exp(-p.DISC_ER * t), 0.0)
-        zR = rng.standard_normal(n); zL = rng.standard_normal(n)
-        # in force: contribute and carry the asset shock. Paid-up: the reserve compounds at the
-        # LOCKED credited return with no further shock, matching paidup_service -- freezing the
-        # contract freezes its risk. L freezes on both counts once absent.
-        if not use_rates:
-            R = np.where(present, (R + c) * np.exp(p.MU + p.SIGMA_R * zR), R * np.exp(p.MU))
-            L = np.where(present, (L + c) * np.exp(p.G + p.SIGMA_L * zL), L)
-        else:
-            R = np.where(present, (R + c) * np.exp(mur[t] + p.SIGMA_R_RATES * zR), R * np.exp(mur[t]))
-            Lv[t + 1] = c; lock[t + 1] = Gr[t]
-            Lv[:t + 2] = np.where(present, Lv[:t + 2] * np.exp(lock[:t + 2]), Lv[:t + 2])
-            L = Lv[:t + 2].sum(axis=0)
-        S = S * (1.0 + p.W)
-        lv = present & (rng.random(n) < hazard(t))
-        leave_t = np.where(lv, t + 1, leave_t); present = present & ~lv
-    payout = np.maximum(R, L); short = np.maximum(L - R, 0.0)
-    cost += obj.shortfall(short / ST, p) * np.exp(-p.DISC_ER * p.T)
-    RR2 = payout / (p.ANNUITY * ST)
-    svc = np.minimum(leave_t / p.T, 1.0)
-    target = p.RR_LEGAL + svc * (p.RR_TARGET - p.RR_LEGAL)
+        state, _ = step(state, a, exo, p, hazard)
+    end = settle(state, p)
+    cost += obj.shortfall(end["short"] / ST, p) * np.exp(-p.DISC_ER * p.T)
+    RR2 = end["payout"] / (p.ANNUITY * ST)
+    target = p.RR_LEGAL + end["svc"] * (p.RR_TARGET - p.RR_LEGAL)
     benefit_paths = np.exp(-p.DISC_EMP * p.T) * obj.employee(p.RR_LEGAL + RR2, target, p)
-    stay = leave_t >= p.T
+    stay = end["stay"]
     RRtot = p.RR_LEGAL + RR2
+    frac, c_by = diag.frac, diag.c_by
     out = dict(
         benefit=float(benefit_paths.mean()), cost=float(cost.mean()),
         joint=float(w_emp * benefit_paths.mean() - w_er * cost.mean()),
@@ -526,14 +493,42 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
         sty=float(np.median(RRtot[stay])) if stay.any() else np.nan,
         lea=float(np.median(RRtot[~stay])) if (~stay).any() else np.nan,
     )
-    if track:
-        out.update(a_by_t=a_by_t, rho_med=rho_med)
-    if visits:
-        out["visits"] = visit
-    if use_rates:
-        out.update(G_by_t=Gr[:p.T].mean(axis=1), mu_by_t=mur[:p.T].mean(axis=1),
-                   regime_B=float((L > R).mean()), R_T=R, L_T=L, rates=rates)
+    out.update(diag.extras())
+    if exo.rates:
+        out.update(G_by_t=exo.G[:p.T].mean(axis=1), mu_by_t=exo.mu[:p.T].mean(axis=1),
+                   regime_B=float((state.L > state.R).mean()), R_T=state.R, L_T=state.L,
+                   rates=rates)
     return out
 
 
+class _Diagnostics:
+    """Per-year cohort statistics collected by simulate(): participation and mean
+    contribution always; the mean action and median rho with track=True; the
+    (T, NF, NR) occupancy of the (F, rho) grid with visits=True."""
 
+    def __init__(self, T, Fg, lrg, track, visits):
+        self.Fg, self.lrg, self.track, self.visits = Fg, lrg, track, visits
+        self.frac = np.zeros(T); self.c_by = np.zeros(T)
+        self.a_by_t = np.full(T, np.nan); self.rho_med = np.zeros(T)
+        self.visit = np.zeros((T, len(Fg), len(lrg))) if visits else None
+
+    def record(self, t, a, present, F, rho, p):
+        any_ = present.any()
+        self.frac[t] = present.mean()
+        self.c_by[t] = (a[present] * p.GAMMA).mean() * 100 if any_ else 0.0
+        if self.visits and any_:
+            Fg, lrg = self.Fg, self.lrg
+            iF = np.abs(Fg[:, None] - np.clip(F[present], Fg[0], Fg[-1])[None, :]).argmin(axis=0)
+            iR = np.abs(lrg[:, None] - np.clip(np.log(rho[present]), lrg[0], lrg[-1])[None, :]).argmin(axis=0)
+            np.add.at(self.visit[t], (iF, iR), 1.0)
+        if self.track:
+            self.a_by_t[t] = a[present].mean() if any_ else np.nan
+            self.rho_med[t] = np.median(rho[present]) if any_ else np.nan
+
+    def extras(self):
+        out = {}
+        if self.track:
+            out.update(a_by_t=self.a_by_t, rho_med=self.rho_med)
+        if self.visits:
+            out["visits"] = self.visit
+        return out
