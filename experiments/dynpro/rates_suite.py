@@ -14,6 +14,7 @@ Checks (asserted; the suite stops on the first failure):
   horizontal  with G stepping down mid-career, L_T equals the closed form
               L0 e^{G_0 T} + sum_s c_s e^{G_s (T - s)}: old money keeps its rate
   wap         G_t inside [1.75%, 3.75%], on the 25 bp grid, G_0 = today's fixing
+  fsma        the statutory formula reproduces the FSMA's published rates 2016-2026
 
 Figures (-> figs/rates/):
   rates_fan.png    10Y OLO, G_t, mu_t and the gap mu_t - G_t, per rate model
@@ -24,6 +25,7 @@ Run:  python rates_suite.py [checks|fan|table]
 """
 import numpy as np
 import common as c
+from pension import checks as known   # (the suite function below is called checks)
 
 # This suite compares the regimes itself, so it always starts from constant rates.
 assert c.RATES == "constant", "rates_suite compares the rate regimes itself; run it without --rates"
@@ -57,41 +59,27 @@ def checks(n=4000):
     print("  switch      constant mode identical after visiting hull_white          OK")
 
     # known answer: degenerate scenario == constant branch (SIGMA_L = 0 in both)
-    c.update(SIGMA_L=0.0, SIGMA_R_RATES=c.P.SIGMA_R)
-    ref = c.simulate(pol, Fg, rg, **kw)
-    deg = c.simulate(pol, Fg, rg, **kw, rates=_scen("constant", n))
-    gap = max(abs(ref["joint"] - deg["joint"]), float(np.abs(ref["RR_tot"] - deg["RR_tot"]).max()))
+    gap = known.degenerate_rates_gap(c.P, Fg, rg, c.entry(n, SEED), n, SEED)
     assert gap < 1e-10, gap
     print(f"  known       degenerate scenario vs constant branch: max gap {gap:.1e}       OK")
-    c.restore()
 
     # horizontal: G steps 3.00% -> 1.75% at t = 20; deterministic, no churn
-    T, W, GAM = c.P.T, c.P.W, c.P.GAMMA
-    Gs = np.where(np.arange(T) < 20, 0.03, 0.0175)
-    scen = dict(G=np.repeat(Gs[:, None], 1, 1), mu=np.full((T, 1), 0.02))
-    c.update(SIGMA_R_RATES=0.0)
-    a, S0, L0 = 0.4, 20.0, 1.0
-    r = c.simulate(c.const_policy(a, T, len(Fg), len(rg)), Fg, rg, R0=1.0, L0=L0, S0=S0,
-                   n_paths=1, hazard=lambda t: 0.0, rates=scen)
-    cs = a * GAM * S0 * (1 + W) ** np.arange(T)
-    closed = L0 * np.exp(Gs[0] * T) + np.sum(cs * np.exp(Gs * (T - np.arange(T))))
-    vertical = L0
-    for t in range(T):
-        vertical = (vertical + cs[t]) * np.exp(Gs[t])
-    rel = abs(r["L_T"][0] / closed - 1)
+    rel, vertical_gap = known.horizontal_closed_form(c.P)
     assert rel < 1e-12, rel
     print(f"  horizontal  L_T = closed form (rel err {rel:.1e}); vertical would give "
-          f"{vertical / closed - 1:+.1%}  OK")
-    c.restore()
+          f"{vertical_gap:+.1%}  OK")
 
-    # wap: bounds, grid, today's fixing
+    # wap: bounds, grid, today's fixing; and the formula against the FSMA's rates
     for m in MODELS:
-        G = _scen(m, 2000)["G"]
-        on_grid = np.abs(G / 0.0025 - np.round(G / 0.0025)).max()
-        assert G.min() >= 0.0175 - 1e-12 and G.max() <= 0.0375 + 1e-12 and on_grid < 1e-9
-        assert np.allclose(G[0], 0.025), G[0][:3]
-        print(f"  wap         {m:10s} G in [{G.min():.2%}, {G.max():.2%}], 25 bp grid, "
-              f"G_0 = {G[0, 0]:.2%}  OK")
+        st = known.wap_scenario_stats(c.P, m, 2000)
+        assert st["min"] >= 0.0175 - 1e-12 and st["max"] <= 0.0375 + 1e-12 and st["grid_err"] < 1e-9
+        assert abs(st["G0"] - 0.025) < 1e-12 and st["G0_spread"] == 0.0, st
+        print(f"  wap         {m:10s} G in [{st['min']:.2%}, {st['max']:.2%}], 25 bp grid, "
+              f"G_0 = {st['G0']:.2%}  OK")
+    fsma = known.wap_vs_fsma()
+    bad = {y: v for y, v in fsma.items() if abs(v[0] - v[1]) > 1e-9}
+    assert not bad, bad
+    print(f"  fsma        statutory formula = published WAP rate, {min(fsma)}-{max(fsma)}          OK")
 
 
 # --- figures ----------------------------------------------------------------

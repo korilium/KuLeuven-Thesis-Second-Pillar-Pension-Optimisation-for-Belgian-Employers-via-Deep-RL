@@ -71,19 +71,10 @@ def test_degenerate_rates_equal_constant_rates():
 
 def test_horizontal_ledger_closed_form():
     """G steps 3% -> 1.75% at t = 20: old money keeps its rate,
-    L_T = L0 e^{G_0 T} + sum_s c_s e^{G_s (T - s)}."""
-    p = DEFAULT; T = p.T
-    Gs = np.where(np.arange(T) < 20, 0.03, 0.0175)
-    exo = Exogenous(np.zeros((T, 1)), np.zeros((T, 1)), np.ones((T, 1)),
-                    Gs[:, None], np.full((T, 1), 0.02))
-    s = State.initial(p, exo, R0=1.0, L0=1.0, S0=20.0)
-    cs = []
-    for _ in range(T):
-        s, c = step(s, np.array([0.4]), exo, p, NEVER)
-        cs.append(c[0])
-    cs = np.array(cs)
-    closed = np.exp(Gs[0] * T) + np.sum(cs * np.exp(Gs * (T - np.arange(T))))
-    assert abs(s.L[0] / closed - 1) < 1e-12
+    L_T = L0 e^{G_0 T} + sum_s c_s e^{G_s (T - s)}; vertical would differ."""
+    from pension.checks import horizontal_closed_form
+    rel, vertical_gap = horizontal_closed_form(DEFAULT)
+    assert rel < 1e-12 and abs(vertical_gap) > 0.05
 
 
 def test_churn_freezes_liability():

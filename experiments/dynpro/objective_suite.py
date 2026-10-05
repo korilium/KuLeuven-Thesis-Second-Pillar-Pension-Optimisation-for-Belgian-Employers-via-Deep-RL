@@ -31,6 +31,7 @@ Run:  python objective_suite.py [checks|maps|schedules|frontier|cross] [--rates=
 """
 import numpy as np
 import common as c
+from pension import checks as known   # (the suite function below is called checks)
 import benchmark_suite as _bm
 from pension.objective import OBJECTIVES
 
@@ -79,11 +80,10 @@ def _floor_policy(g=None):
 # --- checks -------------------------------------------------------------------
 def _cross_matrix(names=NAMES):
     """J[i, j] = score under objective j of the policy optimised under objective i,
-    plus each column's band-floor score for normalisation."""
-    pols = {n: _policy(n) for n in names}
-    J = np.array([[_sim(pols[i], j)["joint"] for j in names] for i in names])
-    floor = np.array([_sim(_floor_policy(), j)["joint"] for j in names])
-    return J, floor
+    plus each column's band-floor score for normalisation (pension.checks.cross_scores)."""
+    Fg, rg, _, _ = _grids()
+    return known.cross_scores(c.P, {n: _policy(n) for n in names}, Fg, rg,
+                               c.entry(N_PATHS, SEED), N_PATHS, SEED, _band(), _band()[0])
 
 
 @c.restores
@@ -101,28 +101,18 @@ def checks(tol=0.02):
     print(f"  baseline   terminal == committed formula (rel {d:.1e})                  OK")
 
     for n in NAMES:
-        d = float(np.abs(dp.paidup_service(Fg, rg, n, p=P)[P.T] - dp.terminal(Fg, rg, n, p=P)).max())
+        d = known.leaver_terminal_gap(P, Fg, rg, n)
         assert d < 1e-12, (n, d)
     print(f"  leaver     Phi[T] == terminal for all {len(NAMES)} objectives                      OK")
 
-    lam, de_new = 0.5, 0.02
-    lam_eq = c.lambda_equivalent(de_new, lam=lam)
-    with c.overrides(LAMBDA=lam, DISC_EMP=de_new):
-        pa = c.solve(Fg, rg, ag, nq, objective="baseline")["policy"]
-    with c.overrides(LAMBDA=lam_eq):
-        pb = c.solve(Fg, rg, ag, nq, objective="baseline")["policy"]
-    d = float(np.abs(pa - pb).max())
+    d, _ = known.lambda_reparam(P, Fg, rg, ag, nq, objective="baseline")
     assert d < 1e-6, d
     print(f"  lambda     delta_e == LAMBDA reparametrisation (max|dpolicy| {d:.1e})        OK")
 
     J, floor = _cross_matrix()
-    scale = np.abs(np.diag(J) - floor)
-    rel = (J - np.diag(J)[None, :]) / np.where(scale > 0, scale, 1.0)[None, :]
-    np.fill_diagonal(rel, -np.inf)                 # compare against the OTHER policies only
-    worst = rel.max(axis=0)
+    worst, arg = known.diagonal_margin(J, floor)
     for j, n in enumerate(NAMES):
-        other = NAMES[int(rel[:, j].argmax())]
-        print(f"  diagonal   {n:17s} best other policy ({other}) {worst[j]:+.3f} of own gain over floor"
+        print(f"  diagonal   {n:17s} best other policy ({NAMES[arg[j]]}) {worst[j]:+.3f} of own gain over floor"
               f"  {'OK' if worst[j] <= tol else 'FAIL'}")
     assert np.all(worst <= tol), "an objective is beaten by another objective's policy"
 

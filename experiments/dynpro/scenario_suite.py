@@ -37,6 +37,7 @@ import time
 
 import numpy as np
 import common as c
+from pension import checks
 import sensitivity_suite as _sens
 import contribution_schedule_suite as _cs
 import lambda_dial_suite as _ld
@@ -312,68 +313,44 @@ def figures(only=("base", "B", "C"), grid=None, figs=None):
 # to have. Each is a PASS/FAIL. They are what makes the DP credible as a benchmark
 # for a learned policy: a number from an unverified oracle is not a benchmark.
 def invariants(nF=73, nR=71, na=15, nq=5, n_paths=8000, seed=3, tol=1e-6):
+    """The structural invariants (pension.checks) on the protocol grid, printed as
+    a PASS/FAIL table. tests/test_invariants.py asserts the same checks on a small
+    grid."""
     c.ensure_out(OUT)
     Fg, rg, ag = c.grids(nF, nR, na)
+    P = c.P
     rows = []
 
     def check(name, ok, detail):
         rows.append((name, bool(ok), detail))
 
-    # 1. scale-freeness: the model is homogeneous of degree 0 in (R, L, S)
-    pol = c.solve(Fg, rg, ag, nq)["policy"]
-    k = 5.0
-    r1 = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=20.0, n_paths=n_paths, seed=seed)
-    rk = c.simulate(pol, Fg, rg, R0=k, L0=k, S0=k * 20.0, n_paths=n_paths, seed=seed)
-    rel = float(np.max(np.abs(rk["RR"] - r1["RR"]) / np.abs(r1["RR"])))
+    rel = checks.scale_invariance(P, Fg, rg, ag, nq, n_paths, seed)
     check("scale invariance of RR under (R,L,S)*k", rel < 1e-12, f"max rel diff {rel:.2e}")
 
-    # 2. delta_e is exactly a LAMBDA change (no independent degree of freedom)
-    lam, de_new = 0.5, 0.02
-    lam_eq = c.lambda_equivalent(de_new, lam=lam)
-    with c.overrides(LAMBDA=lam, DISC_EMP=de_new):
-        pa = c.solve(Fg, rg, ag, nq)["policy"]
-    with c.overrides(LAMBDA=lam_eq):
-        pb = c.solve(Fg, rg, ag, nq)["policy"]
-    d = float(np.abs(pa - pb).max())
+    d, lam_eq = checks.lambda_reparam(P, Fg, rg, ag, nq, lam=0.5, de_new=0.02)
     check("delta_e == LAMBDA reparameterisation", d < 1e-6, f"max|dpolicy| {d:.2e} (lam_eq {lam_eq:.5f})")
 
-    # 3. eta -> 1 is continuous and equals log utility
-    x = np.array([0.4, 1.0, 2.5])
-    with c.overrides(ETA=1.0):       u1 = c.dp.u(x, p=c.P).copy()
-    with c.overrides(ETA=1.0 + 1e-4): ue = c.dp.u(x, p=c.P).copy()
-    dl = float(np.abs(u1 - np.log(x)).max()); dc = float(np.abs(u1 - ue).max())
+    dl, dc = checks.eta_log_limit(P)
     check("u -> log as eta -> 1 (and continuous)", dl < 1e-12 and dc < 1e-3,
           f"|u-log| {dl:.1e}, |u(1)-u(1+eps)| {dc:.1e}")
 
-    # 4. the leaver and stayer terminal conditions coincide at tau = T
-    d4 = float(np.abs(c.dp.paidup_service(Fg, rg, p=c.P)[c.P.T] - c.dp.terminal(Fg, rg, p=c.P)).max())
+    d4 = checks.leaver_terminal_gap(P, Fg, rg)
     check("Phi[T] == terminal (full-service cohort)", d4 == 0.0, f"max|diff| {d4:.2e}")
 
-    # 5. cost and stayer adequacy are monotone in LAMBDA
-    cost, sty = [], []
-    for lam in (0.2, 0.4, 0.6, 0.8):
-        with c.overrides(LAMBDA=lam):
-            p = c.solve(Fg, rg, ag, nq)["policy"]
-            rr = c.simulate(p, Fg, rg, **c.entry(n_paths, seed), n_paths=n_paths, seed=seed)
-        cost.append(rr["cost"]); sty.append(rr["sty"])
+    cost, sty = checks.lambda_monotonicity(P, Fg, rg, ag, nq, c.entry(n_paths, seed), n_paths, seed)
     check("employer cost increasing in LAMBDA", bool(np.all(np.diff(cost) > 0)),
           " ".join(f"{v:.3f}" for v in cost))
     check("stayer RR increasing in LAMBDA", bool(np.all(np.diff(sty) > 0)),
           " ".join(f"{v:.3f}" for v in sty))
 
-    # 6. frictionless benchmark: with delta_f = delta_e = mu the benefit/cost ratio
-    #    exp((mu-d_e)T + (d_f-mu)t) is 1 for every t, so timing must be neutral
-    # Under a rate model mu is path-wise, so there is no single mu to set the discounts
-    # to; the invariant is a constant-rate property and is not run.
+    # frictionless benchmark: with delta_f = delta_e = mu the benefit/cost ratio
+    # exp((mu-d_e)T + (d_f-mu)t) is 1 for every t, so timing must be neutral.
+    # Under a rate model mu is path-wise, so there is no single mu to set the
+    # discounts to; the invariant is a constant-rate property and is not run.
     if c.RATES != "constant":
         print(f"  (timing-neutrality invariant skipped under {c.RATES}: mu is path-wise)")
         return _report(rows)
-    lo, hi = 0.02 / c.P.GAMMA, 0.15 / c.P.GAMMA
-    with c.overrides(DISC_ER=c.P.MU, DISC_EMP=c.P.MU):
-        p = c.solve(Fg, rg, np.linspace(lo, hi, 20), nq)["policy"]
-        rr = c.simulate(p, Fg, rg, **c.entry(n_paths, seed), band=(lo, hi),
-                        n_paths=n_paths, seed=seed)
-    early, late = float(np.mean(rr["c_by"][:10])), float(np.mean(rr["c_by"][35:]))
+    early, late = checks.timing_neutrality(P, Fg, rg, nq, c.entry(n_paths, seed), n_paths, seed)
     tilt = abs(early - late) / max(early, late)
     check("timing neutral when delta_f = delta_e = mu", tilt < 0.25,
           f"early {early:.1f}% vs late {late:.1f}% (tilt {tilt:.0%})")

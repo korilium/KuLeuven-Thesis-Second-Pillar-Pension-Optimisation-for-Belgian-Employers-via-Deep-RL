@@ -182,10 +182,9 @@ def lambda_equivalent(de_new, lam=None, de_ref=None):
         lambda'' = A / (A + B*exp(-de_ref*T)),  A = lam*exp(-de_new*T), B = 1-lam
     Report this alongside any delta_e result so it is not read as an independent
     economic mechanism."""
-    lam = BASE.LAMBDA if lam is None else lam
-    de_ref = BASE.DISC_EMP if de_ref is None else de_ref
-    A = lam * np.exp(-de_new * P.T); B = 1.0 - lam
-    return float(A / (A + B * np.exp(-de_ref * P.T)))
+    from pension.checks import lambda_equivalent
+    return lambda_equivalent(P, de_new, lam=BASE.LAMBDA if lam is None else lam,
+                             de_ref=BASE.DISC_EMP if de_ref is None else de_ref)
 
 
 def ensure_out(path=None):
