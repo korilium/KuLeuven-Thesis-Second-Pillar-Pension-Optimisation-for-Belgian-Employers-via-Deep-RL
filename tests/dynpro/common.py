@@ -38,7 +38,8 @@ LAB = {"LAMBDA": r"$\lambda$", "RR_TARGET": r"$RR^\star$", "RR_LEGAL": r"$RR_{\r
 # caller might set on dp. SATIATE is a bool and BETA is extraction-only, so neither
 # belongs in a +/-15% sweep, but both must still be reset -- leaving them out let a
 # scenario leak SATIATE=True into every later run.
-_RESTORE = PARAMS + ["DISC_EMP", "SIGMA_L", "SATIATE", "BETA", "DISC", "T", "W", "S0"]
+_RESTORE = PARAMS + ["DISC_EMP", "SIGMA_L", "SATIATE", "BETA", "DISC", "T", "W", "S0",
+                     "RATE_MODEL", "RATE_SEED", "SIGMA_R_RATES"]   # the rate-regime switch
 
 _BASE = {k: getattr(dp, k) for k in _RESTORE}
 

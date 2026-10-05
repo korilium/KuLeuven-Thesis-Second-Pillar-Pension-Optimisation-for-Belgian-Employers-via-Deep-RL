@@ -53,7 +53,7 @@ def calibrateVasicek(df10Y: pd.DataFrame):
     theta = -a / b     # long-term mean θ = -a / b
 
     sigma = sigma_eps / np.sqrt(dt) # volatility σ = std(ε) / sqrt(dt)
-    r0 = r[-1] # initial short rate (first observed yield)
+    r0 = r[-1] # initial rate: the most recent observed yield
 
     #diagnostics 
     n = len(r_t)
@@ -289,8 +289,8 @@ def nss_forward_deriv(T: np.ndarray, beta0, beta1, beta2, beta3, tau1, tau2) -> 
     """
     df/dT — first derivative of the forward rate.
  
-    Required by computeTheta:
-        θ(t) = df/dT + κ · f(t) + σ²/(2κ) · (1 − e^{−2κt})
+    Required by computeTheta (κ(θ(t) − r) drift convention):
+        θ(t) = f(t) + (df/dT)/κ + σ²/(2κ²) · (1 − e^{−2κt})
  
     df/dT = e^{−T/τ1} · [−β1/τ1 + β2 · (1/τ1 − T/τ1²)]
           + e^{−T/τ2} · [β3 · (1/τ2 − T/τ2²)]
@@ -458,7 +458,7 @@ def plotForwardCurve(
       Panel 3 — df/dT (smoothness check)
     """
  
-    os.makedirs("tests", exist_ok=True)
+    os.makedirs("olo/tests", exist_ok=True)
  
     t     = curve["t_grid"]
     f     = curve["f"]

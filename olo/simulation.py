@@ -14,6 +14,7 @@ def simulateVasicek(
     n_paths: int   = 1000,
     dt:      float = 1/12,
     seed:    int   = 42,
+    rng:     np.random.Generator = None,
 ) -> np.ndarray:
     """
     Simulate Vasicek short-rate paths using exact discretisation.
@@ -30,7 +31,9 @@ def simulateVasicek(
     T       : horizon in years
     n_paths : number of Monte Carlo paths
     dt      : timestep — must match calibration (1/12 for monthly)
-    seed    : random seed for reproducibility
+    seed    : random seed for reproducibility (legacy global-seed behaviour)
+    rng     : optional np.random.Generator; when given it supplies the shocks
+              and `seed` is ignored, so a caller can own the random stream
 
     Returns
     -------
@@ -38,7 +41,8 @@ def simulateVasicek(
             rows = timesteps, columns = simulation paths
     """
 
-    np.random.seed(seed)
+    if rng is None:
+        np.random.seed(seed)
     n_steps = int(T / dt)
 
     # ── Exact discretisation coefficients (computed once) ─────────────────
@@ -51,7 +55,8 @@ def simulateVasicek(
     paths[0, :] = r0
 
     # ── Simulate (vectorised across all paths) ────────────────────────────
-    eps = np.random.normal(0, 1, size=(n_steps, n_paths))
+    eps = (np.random.normal(0, 1, size=(n_steps, n_paths)) if rng is None
+           else rng.standard_normal((n_steps, n_paths)))
     for t in range(n_steps):
         paths[t+1, :] = paths[t, :] * e_kdt + drift + diff * eps[t, :]
 
@@ -141,6 +146,7 @@ def simulateHullWhite(
     n_paths: int   = 1000,
     dt:      float = 1/12,
     seed:    int   = 42,
+    rng:     np.random.Generator = None,
 ) -> np.ndarray:
     """
     Simulate Hull-White short-rate paths using EXACT step-wise discretisation
@@ -171,7 +177,9 @@ def simulateHullWhite(
     T       : horizon in years (40 for the pension horizon)
     n_paths : number of Monte Carlo paths
     dt      : timestep — must match calibration (1/12 for monthly)
-    seed    : random seed for reproducibility
+    seed    : random seed for reproducibility (legacy global-seed behaviour)
+    rng     : optional np.random.Generator; when given it supplies the shocks
+              and `seed` is ignored, so a caller can own the random stream
 
     Returns
     -------
@@ -188,7 +196,8 @@ def simulateHullWhite(
     drop-in mitigation.
     """
 
-    np.random.seed(seed)
+    if rng is None:
+        np.random.seed(seed)
     n_steps = int(round(T / dt))
     t_axis  = np.arange(n_steps + 1) * dt
 
@@ -206,7 +215,8 @@ def simulateHullWhite(
     paths[0, :] = alpha[0]
 
     # ── Simulate (vectorised across paths; only drift differs from Vasicek)
-    eps = np.random.normal(0, 1, size=(n_steps, n_paths))
+    eps = (np.random.normal(0, 1, size=(n_steps, n_paths)) if rng is None
+           else rng.standard_normal((n_steps, n_paths)))
     for t in range(n_steps):
         paths[t+1, :] = alpha[t+1] + (paths[t, :] - alpha[t]) * e_kdt + diff * eps[t, :]
 
@@ -289,79 +299,80 @@ def plotSimulationHW(
     print("Saved → olo/tests/hull_white_simulation.png")
 
 
-# ── Run (real data) ───────────────────────────────────────────────────────
+if __name__ == "__main__":
+    # ── Run (real data) ───────────────────────────────────────────────────────
 
 
-# ── Run ───────────────────────────────────────────────────────────────────
+    # ── Run ───────────────────────────────────────────────────────────────────
 
-##############
-#read in data#
-##############
+    ##############
+    #read in data#
+    ##############
 
-dfYield = extractDataYieldNBB(startPeriod="2000-01")
-
-
-
-#############
-# dataManip #
-#############
-
-df10Y = dfYield[dfYield["IROLOBE2_MATUR"] == "10Y"].copy().reset_index(drop=True)
-
-lastDate = dfYield["DATE"].max()
-dfCurrentYield = (
-    dfYield[dfYield["DATE"] == lastDate]
-    .copy()
-    .assign(MAT_NUM=lambda df: df["IROLOBE2_MATUR"].str.replace("Y", "").astype(int))
-    .sort_values("MAT_NUM")
-    .reset_index(drop=True)
-)
-
-yields = dfCurrentYield["YIELD"].values
-maturities = dfCurrentYield["MAT_NUM"].values
-
-#######################
-# vasicek simulations #
-#######################
-
-results = calibrateVasicek(df10Y)
-
-paths = simulateVasicek(
-    kappa   = results["kappa"],
-    theta   = results["theta"],
-    sigma   = results["sigma"],
-    r0      = results["r0"],
-    T       = 40,        # 40-year pension horizon
-    n_paths = 5000,
-    dt      = 1/12,      # monthly — matches calibration
-)
-
-print(f"Paths shape        : {paths.shape}")
-print(f"Mean terminal rate : {paths[-1,:].mean()*100:.4f} %")
-print(f"Std  terminal rate : {paths[-1,:].std()*100:.4f} %")
-print(f"Min  terminal rate : {paths[-1,:].min()*100:.4f} %")
-print(f"Max  terminal rate : {paths[-1,:].max()*100:.4f} %")
-
-plotSimulation(paths, results)
+    dfYield = extractDataYieldNBB(startPeriod="2000-01")
 
 
-os.getcwd()
+
+    #############
+    # dataManip #
+    #############
+
+    df10Y = dfYield[dfYield["IROLOBE2_MATUR"] == "10Y"].copy().reset_index(drop=True)
+
+    lastDate = dfYield["DATE"].max()
+    dfCurrentYield = (
+        dfYield[dfYield["DATE"] == lastDate]
+        .copy()
+        .assign(MAT_NUM=lambda df: df["IROLOBE2_MATUR"].str.replace("Y", "").astype(int))
+        .sort_values("MAT_NUM")
+        .reset_index(drop=True)
+    )
+
+    yields = dfCurrentYield["YIELD"].values
+    maturities = dfCurrentYield["MAT_NUM"].values
+
+    #######################
+    # vasicek simulations #
+    #######################
+
+    results = calibrateVasicek(df10Y)
+
+    paths = simulateVasicek(
+        kappa   = results["kappa"],
+        theta   = results["theta"],
+        sigma   = results["sigma"],
+        r0      = results["r0"],
+        T       = 40,        # 40-year pension horizon
+        n_paths = 5000,
+        dt      = 1/12,      # monthly — matches calibration
+    )
+
+    print(f"Paths shape        : {paths.shape}")
+    print(f"Mean terminal rate : {paths[-1,:].mean()*100:.4f} %")
+    print(f"Std  terminal rate : {paths[-1,:].std()*100:.4f} %")
+    print(f"Min  terminal rate : {paths[-1,:].min()*100:.4f} %")
+    print(f"Max  terminal rate : {paths[-1,:].max()*100:.4f} %")
+
+    plotSimulation(paths, results)
 
 
-from olo.calibration import calibrateVasicek, bootstrapForwardCurve, computeTheta
-VasicekResults = calibrateVasicek(df10Y)
-curve = bootstrapForwardCurve(maturities, yields)         # provides "params"
-#
-paths = simulateHullWhite(
-    curve   = curve,
-    kappa   = VasicekResults["kappa"],
-    sigma   = VasicekResults["sigma"],
-   T       = 40,
-    n_paths = 5000,
-    dt      = 1/12,
-)
-print(f"Paths shape        : {paths.shape}")
-print(f"r(0)               : {paths[0,0]*100:.4f} %  (= f(0,0) = β0+β1)")
-print(f"Mean terminal rate : {paths[-1,:].mean()*100:.4f} %")
-print(f"Std  terminal rate : {paths[-1,:].std()*100:.4f} %")
-plotSimulationHW(paths, curve, VasicekResults["kappa"], VasicekResults["sigma"])
+    os.getcwd()
+
+
+    from olo.calibration import calibrateVasicek, bootstrapForwardCurve, computeTheta
+    VasicekResults = calibrateVasicek(df10Y)
+    curve = bootstrapForwardCurve(maturities, yields)         # provides "params"
+    #
+    paths = simulateHullWhite(
+        curve   = curve,
+        kappa   = VasicekResults["kappa"],
+        sigma   = VasicekResults["sigma"],
+        T       = 40,
+        n_paths = 5000,
+        dt      = 1/12,
+    )
+    print(f"Paths shape        : {paths.shape}")
+    print(f"r(0)               : {paths[0,0]*100:.4f} %  (= f(0,0) = β0+β1)")
+    print(f"Mean terminal rate : {paths[-1,:].mean()*100:.4f} %")
+    print(f"Std  terminal rate : {paths[-1,:].std()*100:.4f} %")
+    plotSimulationHW(paths, curve, VasicekResults["kappa"], VasicekResults["sigma"])

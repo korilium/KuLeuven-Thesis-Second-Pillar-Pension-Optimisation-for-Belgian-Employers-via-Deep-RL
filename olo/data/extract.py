@@ -49,11 +49,39 @@ def extractDataYieldNBB(startPeriod: str = "1993-03", endPeriod: str = date.toda
 
 
 
+def load_olo(startPeriod: str = "2000-01", cache: str = None, refresh: bool = False):
+    """
+    OLO data the economy needs, fetched from the NBB once and then read from a CSV
+    cache, so environments build offline and every run calibrates on the SAME data.
+    Delete the cache (or pass refresh=True) to pull a newer vintage.
+
+    Returns
+    -------
+    df10Y      : monthly 10Y OLO history (DATE, YIELD in %)
+    maturities : maturities (years) of the most recent cross-section
+    yields     : yields (%) of the most recent cross-section
+    """
+    import os
+    if cache is None:
+        cache = os.path.join(os.path.dirname(os.path.abspath(__file__)), "olo_yields.csv")
+    if refresh or not os.path.exists(cache):
+        extractDataYieldNBB(startPeriod=startPeriod).to_csv(cache, index=False)
+    dfYield = pd.read_csv(cache, parse_dates=["DATE"])
+
+    df10Y = (dfYield[dfYield["IROLOBE2_MATUR"] == "10Y"]
+             .sort_values("DATE").reset_index(drop=True))
+
+    lastDate = dfYield["DATE"].max()
+    dfCurrentYield = (
+        dfYield[dfYield["DATE"] == lastDate]
+        .copy()
+        .assign(MAT_NUM=lambda df: df["IROLOBE2_MATUR"].str.replace("Y", "").astype(int))
+        .sort_values("MAT_NUM")
+        .reset_index(drop=True)
+    )
+    return df10Y, dfCurrentYield["MAT_NUM"].values, dfCurrentYield["YIELD"].values
+
+
 # Example usage
-
-df = extractDataYieldNBB(startPeriod="2000-01")
-
-
-
-
-
+if __name__ == "__main__":
+    df = extractDataYieldNBB(startPeriod="2000-01")

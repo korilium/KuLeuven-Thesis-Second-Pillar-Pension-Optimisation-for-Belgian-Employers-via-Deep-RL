@@ -29,7 +29,8 @@ import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 from economy import (T, G, MU, W, DISC_EMP, DISC_ER, DISC, SIGMA_R, SIGMA_L,
                      GAMMA, LAMBDA, S0, ETA, ANNUITY, RR_LEGAL, SATIATE, RR_TARGET,
-                     BETA)
+                     BETA, RATE_MODEL, RATE_SEED, SIGMA_R_RATES)
+import economy as _economy      # draw_rate_scenarios: the rate engine is loaded only on use
 
 
 def u(x):
@@ -229,9 +230,49 @@ def _soft_readout(Qstack, ag, beta):
 
 
 # --- backward induction (mode = 'optimize' | 'evaluate') ------------------
+def certainty_equivalent(rates):
+    """Constant-rate parameters that summarise a rate scenario for the DP.
+
+    The backward induction lives on (t, F, rho); following path-wise rates would
+    add the short rate AND the 24-month WAP window to the state. Instead the DP
+    sees the regime through its moments:
+        G, MU    -> scenario means of G_t and mu_t,
+        SIGMA_L  -> dispersion of G_t around its mean (guarantee-rate risk),
+        SIGMA_R  -> SIGMA_R_RATES and the dispersion of mu_t, added in quadrature.
+    A crude moment match, not an equivalence: the forward simulate() then scores
+    the resulting policy against the true path-wise rates."""
+    Gs, mus = np.asarray(rates["G"]), np.asarray(rates["mu"])
+    return dict(G=float(Gs.mean()), MU=float(mus.mean()),
+                SIGMA_L=float(Gs.std()),
+                SIGMA_R=float(np.sqrt(SIGMA_R_RATES ** 2 + mus.var())))
+
+
 def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
-          hazard=tenure_hazard, beta=None, betas=None):
+          hazard=tenure_hazard, beta=None, betas=None, rates=None):
     """Backward induction for the committed (churn-aware) objective.
+
+    `rates`: None (default) solves the constant-rate model with the module's G, MU,
+    SIGMA_R, SIGMA_L -- the original oracle, whatever RATE_MODEL says. A scenario
+    dict from economy.draw_rate_scenarios solves the CERTAINTY-EQUIVALENT model
+    instead (see certainty_equivalent); the overrides are applied for this call
+    only and the module globals are restored on the way out.
+"""
+    if rates is not None:
+        ce = certainty_equivalent(rates)
+        saved = {k: globals()[k] for k in ce}
+        try:
+            globals().update(ce)
+            out = solve(mode, plan_rule, Fg, rg, ag, n_quad, hazard, beta, betas, rates=None)
+        finally:
+            globals().update(saved)
+        out["ce"] = ce
+        return out
+    return _solve(mode, plan_rule, Fg, rg, ag, n_quad, hazard, beta, betas)
+
+
+def _solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
+           hazard=tenure_hazard, beta=None, betas=None):
+    """The constant-rate backward induction (see solve).
 
     `hazard`: leaving is a hazard on the horizon, not a state variable. At each
     step the continuation is the branch-blend
@@ -331,7 +372,7 @@ def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
 
 # --- forward evaluation of a policy (the committed scoring model) ---------
 def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
-            seed=7, hazard=tenure_hazard, track=False, visits=False):
+            seed=7, hazard=tenure_hazard, track=False, visits=False, rates=None):
     """Canonical forward Monte-Carlo of a reduced policy a*(t,F,rho) under the
     committed model: Belgian churn (immediate-vesting, paid-up leavers), a split
     discount (employee at DISC_EMP, employer at DISC_ER), and the service-pro-rated
@@ -351,7 +392,33 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
     nearest grid node (in log-rho, matching the grid), with states off the grid
     clipped to the edge exactly as bilinear() does. This is what distinguishes a
     grid-mean (every cell weighted equally) from a path-weighted average.
+
+    Rates. With RATE_MODEL == "constant" and rates=None this is the original
+    constant-rate model, line for line: the reserve earns MU + SIGMA_R*zR, the
+    liability grows at G + SIGMA_L*zL (vertical). Otherwise the rates come from
+    `rates` (a dict from economy.draw_rate_scenarios, n_paths columns) or, if
+    None, are drawn for RATE_MODEL with RATE_SEED, and per path:
+      * the reserve earns the book yield:  R <- (R + c) * exp(mu[t] + SIGMA_R_RATES*zR);
+      * the liability is HORIZONTAL: the opening L0 is locked at G[0] and each
+        contribution at the G[t] of its payment year, until retirement. L is the
+        sum of these vintages, so F = R/L and rho = S/L keep their meaning and
+        the same (F, rho) policy is read off unchanged. No SIGMA_L shock: the
+        guarantee risk is now G_t itself;
+      * leavers go paid-up as before: L freezes, R compounds at the path's book
+        yield without the excess-return shock.
+    The draw order (zR, zL, leave) is the same in both branches, so a degenerate
+    scenario (G == G, mu == MU) with SIGMA_L = 0 reproduces the constant branch.
+    The output then also carries G_by_t / mu_by_t (path means), regime_B (share
+    of paths with L_T > R_T), the terminal R_T / L_T per path, and the scenario
+    itself under "rates".
     """
+    use_rates = rates is not None or RATE_MODEL != "constant"
+    if use_rates and rates is None:
+        rates = _economy.draw_rate_scenarios(n_paths, seed=RATE_SEED, model=RATE_MODEL)
+    if use_rates:
+        Gr, mur = np.asarray(rates["G"]), np.asarray(rates["mu"])
+        assert Gr.shape[0] >= T and Gr.shape[1] == n_paths, \
+            f"rates must cover T={T} years x n_paths={n_paths}, got {Gr.shape}"
     lrg = np.log(rg)
     rng = np.random.default_rng(seed)
     n = n_paths
@@ -364,6 +431,10 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
     a_by_t = np.full(T, np.nan); rho_med = np.zeros(T)
     frac = np.zeros(T); c_by = np.zeros(T)
     visit = np.zeros((T, len(Fg), len(rg))) if visits else None
+    if use_rates:
+        # horizontal vintages: slot 0 = opening liability, slot t+1 = year-t contribution
+        Lv = np.zeros((T + 1, n)); Lv[0] = L
+        lock = np.zeros((T + 1, n)); lock[0] = Gr[0]
     for t in range(T):
         F = R / L; rho = S / L
         a = np.clip(bilinear(Fg, lrg, policy[t], F, np.log(rho)), lo, hi)
@@ -384,8 +455,14 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
         # in force: contribute and carry the asset shock. Paid-up: the reserve compounds at the
         # LOCKED credited return with no further shock, matching paidup_service -- freezing the
         # contract freezes its risk. L freezes on both counts once absent.
-        R = np.where(present, (R + c) * np.exp(MU + SIGMA_R * zR), R * np.exp(MU))
-        L = np.where(present, (L + c) * np.exp(G + SIGMA_L * zL), L)
+        if not use_rates:
+            R = np.where(present, (R + c) * np.exp(MU + SIGMA_R * zR), R * np.exp(MU))
+            L = np.where(present, (L + c) * np.exp(G + SIGMA_L * zL), L)
+        else:
+            R = np.where(present, (R + c) * np.exp(mur[t] + SIGMA_R_RATES * zR), R * np.exp(mur[t]))
+            Lv[t + 1] = c; lock[t + 1] = Gr[t]
+            Lv[:t + 2] = np.where(present, Lv[:t + 2] * np.exp(lock[:t + 2]), Lv[:t + 2])
+            L = Lv[:t + 2].sum(axis=0)
         S = S * (1.0 + W)
         lv = present & (rng.random(n) < hazard(t))
         leave_t = np.where(lv, t + 1, leave_t); present = present & ~lv
@@ -410,6 +487,9 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
         out.update(a_by_t=a_by_t, rho_med=rho_med)
     if visits:
         out["visits"] = visit
+    if use_rates:
+        out.update(G_by_t=Gr[:T].mean(axis=1), mu_by_t=mur[:T].mean(axis=1),
+                   regime_B=float((L > R).mean()), R_T=R, L_T=L, rates=rates)
     return out
 
 
