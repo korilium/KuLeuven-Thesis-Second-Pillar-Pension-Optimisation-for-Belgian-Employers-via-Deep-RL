@@ -38,13 +38,24 @@ def test_timing_neutral_at_short_rate_equal_mu(p, entry):
     Fg, rg = dp.make_F_grid(n=73), dp.make_rho_grid(n=71)
     early, late = checks.timing_neutrality(p.replace(EMPLOYER_NUMERAIRE="retirement"),
                                            Fg, rg, 5, entry, 2000, 3)
-    assert abs(early - late) / max(early, late) < 0.25, (early, late)
+    assert abs(early - late) / max(early, late) < 0.08, (early, late)   # measured 1.7% (REVIEW M6)
+
+
+def test_legacy_drift_tilts_towards_early_funding(p, entry):
+    """REVIEW M6: without the -sigma^2/2 correction the reserve's mean return is
+    MU + SIGMA_R^2/2 > SHORT_RATE, so funding early pays; measured early 7.9% vs
+    late 6.7% of salary."""
+    import pension.dp as dp
+    Fg, rg = dp.make_F_grid(n=73), dp.make_rho_grid(n=71)
+    early, late = checks.timing_neutrality(
+        p.replace(EMPLOYER_NUMERAIRE="retirement", DRIFT_CORRECTION=False), Fg, rg, 5, entry, 2000, 3)
+    assert (early - late) / early > 0.10, (early, late)
 
 
 def test_accrual_accuracy_vasicek(p):
     """(e) for the canonical model; the robustness models are in test_rates."""
     for t, d in checks.accrual_accuracy(p.replace(RATE_MODEL="vasicek"), n=2000).items():
-        assert abs(d["rel_err"]) < 4 * d["rel_se"] + 1e-3, (t, d)
+        assert abs(d["rel_err"]) < 4 * d["rel_se"] + 1e-5, (t, d)   # REVIEW M12: no 10 bp floor
 
 
 def test_headline_runs(p, grid, entry):

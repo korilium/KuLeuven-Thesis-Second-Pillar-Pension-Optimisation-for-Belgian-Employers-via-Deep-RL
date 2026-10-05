@@ -17,12 +17,30 @@ def test_wap_formula_bounds_and_rounding():
     assert wap_formula(0.0310) == pytest.approx(0.0275)     # 0.85*3.10% = 2.635% -> 2.75%
 
 
-@pytest.mark.parametrize("model", ["hull_white", "vasicek", "vasicek_short"])
-def test_wap_rates_of_scenarios(p, model):
-    st = checks.wap_scenario_stats(p, model, n=500)
+@pytest.mark.parametrize("model", ["hull_white", "vasicek", "vasicek_short", "hull_white_p"])
+@pytest.mark.parametrize("year_start,G0", [("january", 0.0275), ("t0", 0.025)])
+def test_wap_rates_of_scenarios(p, model, year_start, G0):
+    """Year 0's fixing is observed, so identical on every path: under "january" it is
+    the 1 January 2027 rate (formula on Jun 2025 - May 2026: 2.75%; the FSMA
+    published 2.50%), under "t0" the rate in force at the last observation (2026)."""
+    st = checks.wap_scenario_stats(p.replace(YEAR_START=year_start), model, n=500)
     assert st["min"] >= 0.0175 - 1e-12 and st["max"] <= 0.0375 + 1e-12
     assert st["grid_err"] < 1e-9
-    assert st["G0"] == pytest.approx(0.025) and st["G0_spread"] == 0.0   # today's fixing, observed
+    assert st["G0"] == pytest.approx(G0) and st["G0_spread"] == 0.0
+    assert st["G0"] == st["G0_observed"]
+
+
+def test_january_years_are_calendar_years(p):
+    """Year 0 starts on the first 1 January after the last observation; the t0
+    alignment is the legacy one (no pre-roll)."""
+    from pension.economy import draw_rate_scenarios, premonths, rate_calibration
+    t_obs = rate_calibration()["t0"]
+    assert premonths(p.replace(YEAR_START="t0")) == 0
+    sc = draw_rate_scenarios(50, model="vasicek", p=p)
+    assert sc["t0"].month == 1 and sc["t0"].year == t_obs.year + (t_obs.month > 1)
+    assert premonths(p) == (13 - t_obs.month) % 12
+    with pytest.raises(ValueError):
+        premonths(p.replace(YEAR_START="september"))
 
 
 def test_degenerate_scenario_is_the_constant_model(p, grid, entry):
@@ -44,7 +62,7 @@ def test_vasicek_short_scenarios(p):
     import numpy as np
     from pension.economy import draw_rate_scenarios, rate_calibration, vasicek_short_params
     from pension.rates.pricing import vasicekBondPrice
-    q = p.replace(RATE_MODEL="vasicek_short")
+    q = p.replace(RATE_MODEL="vasicek_short", YEAR_START="t0")     # year 0 = the last observation
     sc = draw_rate_scenarios(300, p=q)
     vp = vasicek_short_params(q)
     assert np.allclose(sc["r"][0], vp["r0"])
@@ -94,7 +112,7 @@ def test_hw_p_hits_the_10y_volatility(p):
 def test_closed_form_accrual_matches_monte_carlo(p, model, long_rate):
     acc = checks.accrual_accuracy(p.replace(RATE_MODEL=model, LONG_RATE_P=long_rate), n=2000)
     for t, d in acc.items():
-        assert abs(d["rel_err"]) < 4 * d["rel_se"] + 1e-3, (t, d)
+        assert abs(d["rel_err"]) < 4 * d["rel_se"] + 1e-5, (t, d)   # REVIEW M12: no 10 bp floor
 
 
 def test_no_real_world_accrual_for_q_models(p):
@@ -102,3 +120,17 @@ def test_no_real_world_accrual_for_q_models(p):
     for model in ("hull_white", "constant"):
         with pytest.raises(ValueError):
             closed_form_accrual(0, 0.03, p.replace(RATE_MODEL=model))
+
+
+def test_long_rate_is_the_short_rate_under_vasicek(p):
+    """REVIEW M1: LONG_RATE_P is the long-run short rate in every model; under
+    vasicek the 10Y reverts to LONG_RATE_P + spread, so E^P[r_t] -> LONG_RATE_P."""
+    import numpy as np
+    from pension.economy import draw_rate_scenarios, vasicek_params
+    q = p.replace(RATE_MODEL="vasicek", LONG_RATE_P=0.02)
+    vp = vasicek_params(q)
+    assert vp["theta"] == pytest.approx(0.02 + vp["spread"])
+    r = draw_rate_scenarios(4000, p=q)["r"]
+    t = q.T
+    expect = 0.02 + (r[0].mean() - 0.02) * np.exp(-vp["kappa"] * t)
+    assert abs(r[t].mean() - expect) < 4 * r[t].std(ddof=1) / np.sqrt(4000)

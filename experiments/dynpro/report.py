@@ -1,4 +1,4 @@
-"""Printed simulation report for the DynPro committed model.
+"""Printed simulation report for the committed model (pension.dp).
 
 Runs simulations and prints the numbers -- no pass/fail verdicts; read the
 quantities and judge them. Complements experiments/dynpro/*_suite.py, which produce
@@ -11,10 +11,10 @@ these numbers are directly comparable with the suites'.
 Run:
     python experiments/dynpro/report.py            # everything
     python experiments/dynpro/report.py cohort     # one section
-    python experiments/dynpro/report.py --rates=hull_white   # under a rate model (also: vasicek)
+    python experiments/dynpro/report.py --rates=vasicek   # under a rate model (also: hull_white_p)
 
 Under a rate model dp.solve is certainty-equivalent and dp.simulate path-wise
-(see DynPro.RATE_MODEL); the mu sweep in diagnostics is then skipped, since mu
+(see Params.RATE_MODEL); the mu sweep in diagnostics is then skipped, since mu
 is a path-wise book yield rather than a parameter.
 """
 import numpy as np

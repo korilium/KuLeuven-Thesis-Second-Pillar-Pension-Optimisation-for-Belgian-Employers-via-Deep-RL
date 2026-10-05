@@ -8,8 +8,8 @@ params.py -- every parameter of the model, as ONE immutable object.
 A Params is passed explicitly to every model function, so a run is fully
 described by its Params: nothing is read from mutable module state, a sweep can
 never leak into the next run, and two economies can live side by side (one per
-RL environment instance, one per worker process). `key()` is a stable hashable
-identity used to memoise scenarios and solves.
+RL environment instance, one per worker process). A Params is hashable, so it
+can key a cache directly.
 
 Field names are the historical global names, so objective.py (which reads
 p.ETA, p.LAMBDA, ...) and the thesis notation carry over unchanged.
@@ -42,7 +42,9 @@ class Params:
     # --- discounting ----------------------------------------------------------
     DISC_EMP: float = 0.03      # EMPLOYEE discount: values future retirement income at the risk-free/OLO rate
     DISC_ER: float = 0.05       # EMPLOYER discount: firm cost of capital (contributions + shortfall)
-    DISC: float = 0.05          # single numeraire of the tabular rung (= DISC_ER), legacy alias
+    DISC: float = 0.05          # single numeraire of the tabular rung (= DISC_ER), legacy alias.
+                                # DISC, SIGMA, N_EVAL are TABULAR DEFAULTS: read once, at import, into
+                                # economy's module globals; changing them on a Params does nothing
 
     # --- shocks ---------------------------------------------------------------
     SIGMA_R: float = 0.05       # asset (reserve) shock
@@ -84,12 +86,24 @@ class Params:
     BOOK_SPREAD: float = 0.0       # book yield over the 10Y OLO (credit/illiquidity pickup, net of costs)
     SIGMA_R_RATES: float = 0.05    # excess-return noise on top of the book yield (= SIGMA_R, so both
                                    # regimes carry the same asset risk); 0 = pure book-yield crediting
-    LONG_RATE_P: Optional[float] = None   # long-run REAL-WORLD level, the one anchor of the P-models:
-                                   # vasicek: theta, the long-run 10Y level (None: OLS estimate);
+    LONG_RATE_P: Optional[float] = None   # long-run REAL-WORLD SHORT rate, the one anchor of the P-models
+                                   # (same meaning in every model, REVIEW M1):
+                                   # vasicek: the 10Y reverts to LONG_RATE_P + spread (None: OLS theta);
                                    # hull_white_p: sets its market price of risk (None: phi = 0);
                                    # vasicek_short: theta_P (None: the OLS estimate)
     SPREAD_10Y_SHORT: Optional[float] = None   # vasicek: the short rate is r = y10 - this spread;
                                    # None: the historical mean (10Y - 1Y) of the OLO data
+    DRIFT_CORRECTION: bool = True  # True: shocked growth is e^{m - s^2/2 + s z}, so the MEAN growth is
+                                   # e^m (reserve: m = MU or mu_t; vertical liability: m = G); False
+                                   # (legacy): e^{m + s z}, mean e^{m + s^2/2} (REVIEW M6)
+    CE_MOMENTS: str = "conditional"  # the DP's certainty-equivalent shocks in rate mode: "conditional":
+                                   # SIGMA_L = 0, SIGMA_R = SIGMA_R_RATES (G_t, mu_t are known at the start
+                                   # of year t, so their dispersion is no one-year shock); "levels"
+                                   # (legacy): the pooled dispersion of the levels (REVIEW M10)
+    YEAR_START: str = "january"    # "january": model years are calendar years from the first 1 January
+                                   # after the last OLO observation, so each year holds the WAP rate
+                                   # fixed on its 1 January; "t0" (legacy): years start at the last
+                                   # observation (REVIEW C1)
     RATE_CE_PATHS: int = 5000      # scenarios behind the certainty-equivalent moments of solve()
 
     # --- the employer's numeraire ----------------------------------------------
@@ -109,16 +123,5 @@ class Params:
         """A copy with some fields changed; unknown names are an error."""
         return dataclasses.replace(self, **changes)
 
-    def key(self) -> tuple:
-        """Stable, hashable identity of these parameters (for memoisation)."""
-        return dataclasses.astuple(self)
 
-    def diff(self, other: "Params" = None) -> dict:
-        """The fields that differ from `other` (default: DEFAULT) -- for labels and logs."""
-        other = DEFAULT if other is None else other
-        return {f.name: getattr(self, f.name) for f in dataclasses.fields(self)
-                if getattr(self, f.name) != getattr(other, f.name)}
-
-
-FIELDS = tuple(f.name for f in dataclasses.fields(Params))
 DEFAULT = Params()

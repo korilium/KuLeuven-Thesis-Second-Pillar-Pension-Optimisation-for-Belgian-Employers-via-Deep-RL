@@ -42,4 +42,4 @@ def test_timing_neutral_when_discounts_equal_mu(p, entry):
     import pension.dp as dp
     Fg, rg = dp.make_F_grid(n=73), dp.make_rho_grid(n=71)
     early, late = checks.timing_neutrality(p, Fg, rg, 5, entry, N, SEED)
-    assert abs(early - late) / max(early, late) < 0.25, (early, late)
+    assert abs(early - late) / max(early, late) < 0.08, (early, late)   # measured 1.7% (REVIEW M6)

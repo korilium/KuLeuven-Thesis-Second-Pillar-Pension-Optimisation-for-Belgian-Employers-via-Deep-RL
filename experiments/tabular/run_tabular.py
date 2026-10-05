@@ -1,7 +1,7 @@
 """Regression suite for the tabular MC pension toy.
 
 Each named config is a COMPLETE economy. The suite applies it to the
-basicEnv module namespace (where all functions read their globals),
+pension.envs.tabular module namespace (where all functions read their globals),
 re-draws the frozen shock batch, runs benchmark + agent + validation
 per plan, and writes log/plots/arrays to results/tabular/<config>/.
 
@@ -52,10 +52,10 @@ TRAIN = {
 
 
 def apply_config(cfg):
-    """Write the economy into basicEnv's namespace and re-draw the batch.
+    """Write the economy into pension.envs.tabular's namespace and re-draw the batch.
 
     All env functions (run_episode, run_batch, mc_control, ...) read
-    module-level globals of basicEnv, so the update must land THERE,
+    module-level globals of pension.envs.tabular, so the update must land THERE,
     not in this test module."""
     env.__dict__.update(cfg)
     env.batch = env.draw_shock_batch()
@@ -116,10 +116,10 @@ def run_config(cfg_name, out_root=RESULTS):
     """Full pipeline for one named configuration. Returns True on PASS."""
     apply_config(CONFIGS[cfg_name])
 
-    # tripwire: the config must actually have reached basicEnv
+    # tripwire: the config must actually have reached pension.envs.tabular
     for k, v in CONFIGS[cfg_name].items():
         assert getattr(env, k) == v, \
-            f"{cfg_name}: {k} did not reach basicEnv — check apply_config"
+            f"{cfg_name}: {k} did not reach pension.envs.tabular — check apply_config"
 
     train_cfg = TRAIN[env.SIGMA]
     out_dir = os.path.join(out_root, cfg_name)

@@ -1,7 +1,7 @@
 """
-dp_oracle_rr.py -- Rung-2 benchmark: DP oracle over (t, F, rho).
+pension/dp.py -- Rung-2 benchmark: DP oracle over (t, F, rho).
 
-Employee objective (option E reduced to A): mortality-weighted lifecycle CRRA over the
+Employee objective: mortality-weighted lifecycle CRRA over the
 ANNUITISED total replacement rate  RR_total = RR_LEGAL + max(F,1)/(ANNUITY*rho),  judged
 against a total-adequacy target RR_TARGET:
         V_employee = target * ANNUITY * u(RR_total / target)   (lifetime).
@@ -64,11 +64,14 @@ def u(x, p=None):
 # --- transitions ----------------------------------------------------------
 def F_next(F, l, zR, zL, p=None):
     p = _params(p)
-    return (F + l) / (1.0 + l) * np.exp((p.MU - p.G) + p.SIGMA_R * zR - p.SIGMA_L * zL)
+    k = p.DRIFT_CORRECTION / 2                       # mean growth e^MU, e^G (REVIEW M6)
+    return (F + l) / (1.0 + l) * np.exp((p.MU - k * p.SIGMA_R ** 2) - (p.G - k * p.SIGMA_L ** 2)
+                                        + p.SIGMA_R * zR - p.SIGMA_L * zL)
 
 def rho_next(rho, l, zL, p=None):
     p = _params(p)
-    return (1.0 + p.W) * rho / ((1.0 + l) * np.exp(p.G + p.SIGMA_L * zL))
+    g = p.G - p.DRIFT_CORRECTION * p.SIGMA_L ** 2 / 2
+    return (1.0 + p.W) * rho / ((1.0 + l) * np.exp(g + p.SIGMA_L * zL))
 
 
 def gauss_hermite_2d(n=15):
@@ -264,12 +267,23 @@ def certainty_equivalent(rates, p=None):
     add the short rate AND the 24-month WAP window to the state. Instead the DP
     sees the regime through its moments:
         G, MU    -> scenario means of G_t and mu_t,
-        SIGMA_L  -> dispersion of G_t around its mean (guarantee-rate risk),
-        SIGMA_R  -> SIGMA_R_RATES and the dispersion of mu_t, added in quadrature.
-    A crude moment match, not an equivalence: the forward simulate() then scores
-    the resulting policy against the true path-wise rates."""
+        SIGMA_L, SIGMA_R -> the one-year shocks, per p.CE_MOMENTS:
+          "conditional" (default): SIGMA_L = 0 and SIGMA_R = SIGMA_R_RATES. G_t is
+            fixed on 1 January and mu_t is the book yield up to then, so a year's
+            liability growth is known at its start (horizontal ledger) and the
+            reserve's only one-year shock is the excess-return noise;
+          "levels" (legacy): SIGMA_L = the pooled dispersion of the levels of G_t,
+            SIGMA_R = SIGMA_R_RATES and the dispersion of mu_t in quadrature --
+            level uncertainty used as an iid shock (REVIEW M10).
+    The CE DP keeps a VERTICAL ledger at the mean G: a moment match, not an
+    equivalence. The forward simulate() scores the resulting policy against the
+    true path-wise rates and the horizontal ledger."""
     p = _params(p)
     Gs, mus = np.asarray(rates["G"]), np.asarray(rates["mu"])
+    if p.CE_MOMENTS == "conditional":
+        return dict(G=float(Gs.mean()), MU=float(mus.mean()), SIGMA_L=0.0, SIGMA_R=float(p.SIGMA_R_RATES))
+    if p.CE_MOMENTS != "levels":
+        raise ValueError(f"CE_MOMENTS must be 'conditional' or 'levels', got {p.CE_MOMENTS!r}")
     return dict(G=float(Gs.mean()), MU=float(mus.mean()),
                 SIGMA_L=float(Gs.std()),
                 SIGMA_R=float(np.sqrt(p.SIGMA_R_RATES ** 2 + mus.var())))
@@ -289,7 +303,7 @@ def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
 
     `rates` follows the RATE_MODEL switch, exactly like simulate():
       * None with RATE_MODEL == "constant" (default): the original constant-rate
-        oracle with the module's G, MU, SIGMA_R, SIGMA_L;
+        oracle with p's G, MU, SIGMA_R, SIGMA_L;
       * None with a rate model: RATE_CE_PATHS scenarios of that model are drawn
         (RATE_SEED, memoised) and the CERTAINTY-EQUIVALENT model is solved;
       * a scenario dict from economy.draw_rate_scenarios: certainty-equivalent
@@ -311,6 +325,8 @@ def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
     p = _params(p)
     if isinstance(rates, str) and rates == "constant":
         rates = None
+    elif rates is not None:
+        _economy.check_scenario(rates, p)
     elif rates is None and p.RATE_MODEL != "constant":
         rates = _economy.draw_rate_scenarios(p.RATE_CE_PATHS, seed=p.RATE_SEED,
                                              model=p.RATE_MODEL, horizon=p.T, p=p)
@@ -357,6 +373,7 @@ def _solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
     forward is deliberately sub-optimal and the value gap to `policy` is the
     price of that smoothness. Only meaningful in 'optimize' mode.
     """
+    p = _params(p)
     if Fg is None: Fg = make_F_grid(n=145)
     if rg is None: rg = make_rho_grid(n=91)
     if ag is None: ag = make_a_grid(n=31)
@@ -367,7 +384,6 @@ def _solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
     zR, zL, wq = gauss_hermite_2d(n_quad)
     lrg = np.log(rg)
     NF, NR, Q = len(Fg), len(rg), len(wq)
-    p = _params(p)
     obj = _objective(objective, p); w_er = obj.weights(p)[1]
     if prem is None:                                     # deterministic premium factor per year
         prem = numeraire.premium_schedule(p)
@@ -486,6 +502,8 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
     if rates is None and p.RATE_MODEL != "constant":
         rates = _economy.draw_rate_scenarios(n_paths, seed=p.RATE_SEED, model=p.RATE_MODEL,
                                              horizon=p.T, p=p)
+    elif rates is not None:
+        _economy.check_scenario(rates, p)
     exo = Exogenous.draw(p, n_paths, seed, rates)
     state = State.initial(p, exo, R0, L0, S0 if S0 is not None else rg[-1])
     ST = state.S * (1.0 + p.W) ** p.T
@@ -529,20 +547,26 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
 
 
 class _Diagnostics:
-    """Per-year cohort statistics collected by simulate(): participation and mean
-    contribution always; the mean action and median rho with track=True; the
-    (T, NF, NR) occupancy of the (F, rho) grid with visits=True."""
+    """Per-year cohort statistics collected by simulate(): participation, mean
+    contribution and the share of in-force policy look-ups clamped to the edge of
+    the (F, rho) grid (REVIEW m10) always; the mean action and median rho with
+    track=True; the (T, NF, NR) occupancy of the (F, rho) grid with visits=True."""
 
     def __init__(self, T, Fg, lrg, track, visits):
         self.Fg, self.lrg, self.track, self.visits = Fg, lrg, track, visits
         self.frac = np.zeros(T); self.c_by = np.zeros(T)
         self.a_by_t = np.full(T, np.nan); self.rho_med = np.zeros(T)
         self.visit = np.zeros((T, len(Fg), len(lrg))) if visits else None
+        self.n_clip = 0; self.n_look = 0
 
     def record(self, t, a, present, F, rho, p):
         any_ = present.any()
         self.frac[t] = present.mean()
         self.c_by[t] = (a[present] * p.GAMMA).mean() * 100 if any_ else 0.0
+        Fp, lrp = F[present], np.log(rho[present])
+        self.n_look += Fp.size
+        self.n_clip += int(((Fp < self.Fg[0]) | (Fp > self.Fg[-1]) |
+                            (lrp < self.lrg[0]) | (lrp > self.lrg[-1])).sum())
         if self.visits and any_:
             Fg, lrg = self.Fg, self.lrg
             iF = np.abs(Fg[:, None] - np.clip(F[present], Fg[0], Fg[-1])[None, :]).argmin(axis=0)
@@ -553,7 +577,7 @@ class _Diagnostics:
             self.rho_med[t] = np.median(rho[present]) if any_ else np.nan
 
     def extras(self):
-        out = {}
+        out = dict(clipped=self.n_clip / self.n_look if self.n_look else 0.0)
         if self.track:
             out.update(a_by_t=self.a_by_t, rho_med=self.rho_med)
         if self.visits:

@@ -7,14 +7,14 @@ WAP.py -- the statutory WAP/LPC return guarantee rate G_t (art. 24 §3 WAP, law 
 The FSMA fixes the rate on 1 January from the average 10Y OLO yield over the 24
 months preceding 1 June of the previous year, rounded to the nearest 25 bp. The
 share was 65% in 2016-2017, 75% in 2018-2019 and 85% from 2020 on. On the NBB
-10Y series (olo/data/olo_yields.csv) the 85% rule reproduces every published rate
+10Y series (pension/rates/data/olo_yields.csv) the 85% rule reproduces every published rate
 from 2016 to 2026 (1.75% to 2024, 2.50% for 2025 and 2026); it gives 2.75% for
 2027 where the FSMA published 2.50%, i.e. one notch off -- most likely a different
 reference series on the FSMA side.
 
 Under the HORIZONTAL method (Branch 21 insurance) a contribution keeps the rate in
-force when it was paid until retirement; that bookkeeping lives in the reserve
-simulation (pension/dp.simulate), not here. This module only produces the rate.
+force when it was paid until retirement; that bookkeeping lives in the liability
+ledger (pension.dynamics.HorizontalLedger), not here. This module only produces the rate.
 """
 
 import numpy as np

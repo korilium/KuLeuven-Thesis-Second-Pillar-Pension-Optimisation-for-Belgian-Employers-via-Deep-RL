@@ -76,7 +76,9 @@ def part_a():
     show = [1, 2, 5, 10, 20, 30]
     blocks["data"] = "\n".join([
         f"- 10Y series: {len(df10Y)} monthly observations, {df10Y['DATE'].iloc[0]:%b %Y} to "
-        f"{t0:%b %Y}; the last one, {pct(hist[-1])}, is month 0 of the model.",
+        f"{t0:%b %Y}; the last one, {pct(hist[-1])}, is month 0 of the simulation. Model year 0 "
+        f"starts {economy.premonths(p)} months later, on {t0 + pd.DateOffset(months=economy.premonths(p)):%d %b %Y} "
+        f"(YEAR_START = \"{p.YEAR_START}\": model years are calendar years).",
         f"- Latest cross-section ({t0:%b %Y}), in % (used by the robustness models only):",
         "",
         table(["maturity"] + [f"{m}Y" for m in show],
@@ -97,25 +99,29 @@ def part_a():
 
     # --- the scenario block, rebuilt step by step exactly as economy._draw_rate_scenarios ---
     mpy = int(round(1 / p.RATE_DT))
-    y10_m = simulateVasicek(vp["kappa"], vp["theta"], vp["sigma"], vp["y0"], T=p.T, n_paths=N,
-                            dt=p.RATE_DT, rng=np.random.default_rng(p.RATE_SEED))
+    pre = economy.premonths(p)                          # months from the last observation to 1 January
+    y10_m = simulateVasicek(vp["kappa"], vp["theta"], vp["sigma"], vp["y0"], T=p.T + (pre > 0),
+                            n_paths=N, dt=p.RATE_DT, rng=np.random.default_rng(p.RATE_SEED))
     r_m = y10_m - vp["spread"]
     full = np.vstack([np.repeat(hist[:, None], N, axis=1), y10_m[1:]])
-    start = len(hist) - 1
+    obs = len(hist) - 1                                 # row of the last observation
+    start = obs + pre                                   # row where model year 0 starts
+    yearly = pre + mpy * np.arange(p.T + 1)
     G = wap.computeWAPRate(full, start, p.T, months_per_year=mpy)
     n_book = p.BOOK_DURATION * mpy
     rows_y = start + mpy * np.arange(p.T)
     cs = np.vstack([np.zeros((1, N)), np.cumsum(full, axis=0)])
     mu = (cs[rows_y + 1] - cs[rows_y + 1 - n_book]) / n_book + p.BOOK_SPREAD
-    acc = np.exp(np.add.reduceat(r_m[:-1] * p.RATE_DT, np.arange(0, p.T * mpy, mpy), axis=0))
+    acc = np.exp(np.add.reduceat(r_m[pre:pre + p.T * mpy] * p.RATE_DT, np.arange(0, p.T * mpy, mpy), axis=0))
     scen = economy.draw_rate_scenarios(N, p=p)
     assert np.array_equal(G, scen["G"]) and np.array_equal(mu, scen["mu"]), "rebuild != economy"
-    assert np.array_equal(acc, scen["acc"]) and np.array_equal(r_m[::mpy], scen["r"]), "rebuild != economy"
+    assert np.array_equal(acc, scen["acc"]) and np.array_equal(r_m[yearly], scen["r"]), "rebuild != economy"
 
-    month = lambda row: (t0 + pd.DateOffset(months=int(row - start)))
+    month = lambda row: (t0 + pd.DateOffset(months=int(row - obs)))
     blocks["paths"] = table(
         ["month", "date", "10Y y (modelled)", "short rate r = y - spread"],
-        [[m, f"{month(start + m):%b %Y}", pct(y10_m[m, J], 3), pct(r_m[m, J], 3)] for m in (0, 12, 24, 36)])
+        [[m, f"{month(obs + m):%b %Y}" + ("" if m < pre else f" (start of year {(m - pre) // mpy})"),
+          pct(y10_m[m, J], 3), pct(r_m[m, J], 3)] for m in sorted({0, pre, pre + 12, pre + 24})])
 
     wap_rows, book_rows = [], []
     for k in range(3):
@@ -158,7 +164,8 @@ def part_a():
     F, rho = s.F[0], s.rho[0]
     a = float(np.clip(dp.bilinear(Fg, np.log(rg), pol[0], np.array([F]), np.log([rho]))[0], 0, 1))
     c = a * p.GAMMA * s.S[0]
-    R1 = (s.R[0] + c) * np.exp(exo.mu[0, J] + p.SIGMA_R_RATES * exo.zR[0, J])
+    half = p.DRIFT_CORRECTION * p.SIGMA_R_RATES ** 2 / 2          # REVIEW M6: mean growth e^mu
+    R1 = (s.R[0] + c) * np.exp(exo.mu[0, J] - half + p.SIGMA_R_RATES * exo.zR[0, J])
     L1 = s.L[0] * np.exp(exo.G[0, J]) + c * np.exp(exo.G[0, J])
     # the closed-form accrual by hand (vasicek): y_t = r_t + spread
     tau = p.T
@@ -176,8 +183,9 @@ def part_a():
     blocks["step"] = "\n".join([
         f"- Entry: R = {R0[J]:.4f}, L = {L0[J]:.4f}, S = {S0[J]:.4f}, so F = {F:.4f}, rho = {rho:.3f}.",
         f"- Policy: a = a*(0, F, rho) = {a:.4f}, so c = a GAMMA S = {a:.4f} x {p.GAMMA} x {S0[J]:.3f} = {c:.4f}.",
-        f"- Reserve: R' = (R + c) e^(mu_0 + {p.SIGMA_R_RATES} zR) = ({R0[J]:.4f} + {c:.4f}) "
-        f"e^({pct(exo.mu[0, J], 3)} + {p.SIGMA_R_RATES} x {exo.zR[0, J]:+.4f}) = {R1:.4f}.",
+        f"- Reserve: R' = (R + c) e^(mu_0 - sigma^2/2 + sigma zR), sigma = {p.SIGMA_R_RATES} = "
+        f"({R0[J]:.4f} + {c:.4f}) e^({pct(exo.mu[0, J], 3)} - {pct(half, 3)} + {p.SIGMA_R_RATES} x "
+        f"{exo.zR[0, J]:+.4f}) = {R1:.4f}.",
         f"- Ledger: vintage 0 (opening L) and vintage 1 (this contribution), both locked at "
         f"G_0 = {pct(exo.G[0, J])}; L' = {L1:.4f}.",
         f"- Salary: S' = S (1 + W) = {s2.S[0]:.4f}; churn: u = {exo.u[0, J]:.4f} vs h(0) = "
@@ -259,7 +267,8 @@ def part_b(exo_j):
                 assert abs(dp.F_next(F, l, exo.zR[t, 0], exo.zL[t, 0], p) - s.F[0]) < 1e-12
                 assert abs(dp.rho_next(rho, l, exo.zL[t, 0], p) - s.rho[0]) < 1e-12
             rows.append([t + 1, f"{s.S[0]:.3f}", f"{c[0]:.4f}", f"{A:.4f}",
-                         f"e^({pct(mu, 2)} {sig * exo.zR[t, 0]:+.4f})", f"{s.R[0]:.4f}",
+                         f"e^({pct(mu, 2)} - {pct(p.DRIFT_CORRECTION * sig ** 2 / 2, 3)} "
+                         f"{sig * exo.zR[t, 0]:+.4f})", f"{s.R[0]:.4f}",
                          ledger_str(s, horizontal), f"{s.L[0]:.4f}", f"{s.F[0]:.4f}",
                          f"{s.rho[0]:.3f}", f"{reward:+.6f}"])
         return rows
@@ -308,13 +317,13 @@ def walkthrough_blocks():
 # =====================================================================================
 PARAM_DOC = {   # unit, meaning, used by, inert under the canonical configuration
     "T": ("years", "career length", "everything", "no"),
-    "G": ("1/yr", "WAP guarantee rate (constant model)", "dynamics (vertical ledger), dp", "vasicek: yes (CE sets it)"),
-    "MU": ("1/yr", "credited log-return (constant model)", "dynamics, dp, paidup_service", "vasicek: yes (CE sets it)"),
+    "G": ("1/yr", "WAP guarantee rate (constant model): mean growth of the vertical ledger", "dynamics (vertical ledger), dp", "vasicek: yes (CE sets it)"),
+    "MU": ("1/yr", "mean credited return, E[growth] = e^MU (constant model; median with DRIFT_CORRECTION off)", "dynamics, dp, paidup_service", "vasicek: yes (CE sets it)"),
     "W": ("1/yr", "salary growth", "dynamics, objective contribution leg, dp", "no"),
     "S0": ("salary", "starting salary (scale-free)", "nothing in the DP/env (tabular via economy)", "yes"),
     "DISC_EMP": ("1/yr", "employee discount rate", "numeraire (discounted only)", "yes"),
     "DISC_ER": ("1/yr", "employer discount rate", "numeraire (discounted only)", "yes"),
-    "DISC": ("1/yr", "tabular rung's discount (legacy copy)", "nothing (tabular reads economy.DISC)", "yes"),
+    "DISC": ("1/yr", "tabular default, read once at import into economy.DISC", "nothing after import (tabular reads economy.DISC)", "yes"),
     "SIGMA_R": ("1/sqrt(yr)", "asset shock (constant model)", "dynamics, dp", "vasicek: yes (CE sets it)"),
     "SIGMA_L": ("1/sqrt(yr)", "guarantee shock (vertical ledger)", "dynamics, dp", "vasicek: yes (CE sets it)"),
     "SIGMA": ("1/sqrt(yr)", "tabular rung's shock (legacy copy)", "nothing (tabular reads economy.SIGMA)", "yes"),
@@ -333,9 +342,12 @@ PARAM_DOC = {   # unit, meaning, used by, inert under the canonical configuratio
     "BOOK_DURATION": ("years", "book-yield averaging window", "economy", "no"),
     "BOOK_SPREAD": ("1/yr", "book yield over the 10Y", "economy", "no"),
     "SIGMA_R_RATES": ("1/sqrt(yr)", "excess-return noise on the book yield", "dynamics, dp.certainty_equivalent", "no"),
-    "LONG_RATE_P": ("1/yr", "long-run P level (meaning differs per model, REVIEW M1)", "economy params helpers, accrual", "no"),
+    "LONG_RATE_P": ("1/yr", "long-run real-world short rate (every model; vasicek: theta = this + spread)", "economy params helpers, accrual", "no"),
     "SPREAD_10Y_SHORT": ("1/yr", "vasicek: r = y10 - spread (None: historical mean)", "economy.vasicek_params, accrual", "no"),
     "RATE_CE_PATHS": ("-", "scenarios behind the CE solve", "dp.solve", "no"),
+    "DRIFT_CORRECTION": ("bool", "shocked growth e^{m - s^2/2 + s z} (mean e^m); False: legacy e^{m + s z} (REVIEW M6)", "dynamics.step, dp.F_next/rho_next", "no"),
+    "CE_MOMENTS": ("name", "CE shocks: 'conditional' (SIGMA_L = 0, SIGMA_R = SIGMA_R_RATES) | 'levels' (legacy, REVIEW M10)", "dp.certainty_equivalent", "constant: yes"),
+    "YEAR_START": ("name", "'january': model years are calendar years | 't0' (legacy, REVIEW C1)", "economy, accrual (hull_white_p)", "constant: yes"),
     "EMPLOYER_NUMERAIRE": ("name", "valuation date: 'retirement' | 'discounted' (REVIEW m9)", "numeraire", "no"),
     "SHORT_RATE": ("1/yr", "short rate of the constant model", "numeraire, dynamics.Exogenous", "vasicek: yes"),
     "FINANCING_SPREAD": ("1/yr", "s: financing spread over the short rate", "numeraire, accrual", "no"),
@@ -486,10 +498,10 @@ BREAKPOINTS = {
         ("pension/dp.py", "cost += np.where(present, obj.contribution(a, t, p) * numeraire.premium_factor(t, r_t, p), 0.0)",
          "`numeraire.premium_factor(t, r_t, p)`, `obj.contribution(a, t, p)`", "factor e^{(r+s)(T-t)} (t = 0: table below); reward of a = 1 at t = 0: table below"),
         ("pension/dynamics.py", "c = a * p.GAMMA * state.S", "`c`, `state.S`", "c = a Γ S; 0 for paths that have left"),
-        ("pension/dynamics.py", "state.R = np.where(present, (state.R + c) * np.exp(mu + sig * exo.zR[t]), state.R * np.exp(mu))",
-         "`state.R` before/after, `mu`, `sig`", "in force: (R + c) e^{μ + σ_R z_R}; paid-up: R e^{μ}"),
-        ("pension/dynamics.py", "self.L = np.where(present, (self.L + c) * np.exp(p.G + p.SIGMA_L * exo.zL[t]), self.L)",
-         "`self.L`", "(L + c) e^{G + σ_L z_L}; frozen when absent"),
+        ("pension/dynamics.py", "state.R = np.where(present, (state.R + c) * np.exp(drift + sig * exo.zR[t]), state.R * np.exp(mu))",
+         "`state.R` before/after, `mu`, `sig`, `drift`", "in force: (R + c) e^{μ - σ_R²/2 + σ_R z_R} (mean e^μ); paid-up: R e^{μ}"),
+        ("pension/dynamics.py", "self.L = np.where(present, (self.L + c) * np.exp(g + p.SIGMA_L * exo.zL[t]), self.L)",
+         "`self.L`, `g`", "(L + c) e^{G - σ_L²/2 + σ_L z_L} (mean e^G); frozen when absent"),
         ("pension/dynamics.py", "lv = present & (exo.u[t] < hazard(t))", "`exo.u[t]`, `hazard(t)`, `lv`",
          "leaves iff u < h(t); `leave_t` becomes t + 1"),
         ("pension/dp.py", "end = settle(state, p)", "`state.F`, `state.rho`, `end`",
@@ -497,9 +509,9 @@ BREAKPOINTS = {
     ],
     "bp_vasicek": [
         ("pension/economy.py", 'r_m = y10_m - vp["spread"]', "`vp`, `y10_m[0]`, `r_m[0]`",
-         "`y10_m[0]` = last observed 10Y; `r_m = y10_m - spread`"),
+         "`y10_m[0]` = last observed 10Y; `r_m = y10_m - spread`; `pre` = months to the first 1 January"),
         ("pension/economy.py", "G_ = computeWAPRate(full, start, H, months_per_year=mpy)", "`G_[0]`, `G_[1]`",
-         "G_0 = 2.50% (observed window); later years on the 25 bp grid in [1.75%, 3.75%]"),
+         "G_0 = 2.75% (1 January 2027, observed window Jun 2024 - May 2026); later years on the 25 bp grid in [1.75%, 3.75%]"),
         ("pension/economy.py", "acc_ = np.exp(np.add.reduceat(", "`acc_[0]`", "exp(Σ of the 12 monthly r·dt)"),
         ("pension/dynamics.py", "acc = np.asarray(rates[\"acc\"])[:p.T] if \"acc\" in rates else np.exp(r)",
          "`r[0]`, `acc[0]`, `G[0]`, `mu[0]`", "the scenario's annual r, acc, G, μ for these paths"),
@@ -518,11 +530,11 @@ BREAKPOINTS = {
         ("pension/rates/calibration.py", "a, b   = coeffs", "`a`, `b`, `dt`", "kappa = -b/dt, theta = -a/b"),
         ("pension/economy.py", "_CALIBRATION = dict(", "`df10Y`, `short_label`", "computed once per process"),
         ("pension/economy.py", "return dict(kappa=vas[\"kappa\"], sigma=vas[\"sigma\"],", "`spread`, `p.LONG_RATE_P`",
-         "theta = LONG_RATE_P if set; spread = historical mean (10Y - 1Y) if SPREAD_10Y_SHORT is None"),
+         "theta = LONG_RATE_P + spread if set; spread = historical mean (10Y - 1Y) if SPREAD_10Y_SHORT is None"),
         ("pension/rates/simulation.py", "paths[t+1, :] = paths[t, :] * e_kdt + drift + diff * eps[t, :]",
          "`paths[t]`, `eps[t]`", "exact OU step"),
         ("pension/rates/wap.py", "G[k] = wap_formula(y[lo:end + 1].mean(axis=0))", "`k`, `lo`, `end`",
-         "window ends WAP_LAG months before the year start (REVIEW C1)"),
+         "window ends WAP_LAG = 8 months before the year's 1 January: May of the year before"),
         ("pension/dp.py", "prem = numeraire.premium_schedule(p, rates)", "`ce`, `prem[:3]`",
          "CE moments and the scenario-mean premium factor (walkthrough block `ce`)"),
         ("pension/dp.py", "joint=float(w_emp * benefit_paths.mean() - w_er * cost.mean()),", "`benefit_paths`, `cost`",
@@ -567,8 +579,8 @@ def debugging_blocks():
         ["year-0 premium factor, vasicek", "closed form at $r_0$", f"{A0v:.6f}"],
         ["year-0 premium reward at a = 1, vasicek", "same with $A(0,T;r_0)$", f"{rew1v:.6f}"],
         ["$l$ at F=1, ρ=20, a=0.5", "$a\\Gamma\\rho$", f"{l:.4f}"],
-        ["$F'$ at zR=0.3, zL=−0.2 (constant)", "$\\frac{F+l}{1+l}e^{(\\mu-G)+\\sigma_R z_R-\\sigma_L z_L}$", f"{Fn:.6f}"],
-        ["$\\rho'$ (same)", "$\\frac{(1+W)\\rho}{(1+l)e^{G+\\sigma_L z_L}}$", f"{rn:.6f}"],
+        ["$F'$ at zR=0.3, zL=−0.2 (constant)", "$\\frac{F+l}{1+l}e^{(\\mu-\\sigma_R^2/2)-(G-\\sigma_L^2/2)+\\sigma_R z_R-\\sigma_L z_L}$", f"{Fn:.6f}"],
+        ["$\\rho'$ (same)", "$\\frac{(1+W)\\rho}{(1+l)e^{G-\\sigma_L^2/2+\\sigma_L z_L}}$", f"{rn:.6f}"],
         ["paid-up roll-forward of F over 40 years", "$F\\,e^{\\mu m}$", f"{np.exp(p.MU * m):.6f}"],
         ["paid-up roll-forward of ρ over 40 years", "$\\rho\\,(1+W)^m$", f"{(1 + p.W) ** m:.6f}"],
     ])}
@@ -585,67 +597,83 @@ def review_blocks():
     n = 15000
     R0, L0, S0 = dp.new_plan_init(n, np.random.default_rng(7))
 
-    # C1 WAP lag (analysis only: WAP_LAG is patched in this process and restored)
-    base = economy._draw_rate_scenarios(2000, p.RATE_SEED, "vasicek", p.T, p)
+    # C1 WAP lag. Before: YEAR_START = "t0" (year 0 = the last observation, lag 8);
+    # the legal alignment there is lag 16 (WAP_LAG patched in this process and restored).
+    q0 = p.replace(YEAR_START="t0")
+    base = economy._draw_rate_scenarios(2000, p.RATE_SEED, "vasicek", p.T, q0)
     saved = wapmod.WAP_LAG
     try:
         wapmod.WAP_LAG = 16
-        alt = economy._draw_rate_scenarios(2000, p.RATE_SEED, "vasicek", p.T, p)
+        alt = economy._draw_rate_scenarios(2000, p.RATE_SEED, "vasicek", p.T, q0)
     finally:
         wapmod.WAP_LAG = saved
     d = alt["G"] - base["G"]
     t0 = economy.rate_calibration()["t0"]
+    jan = economy.draw_rate_scenarios(2000, p=p)
+    st = checks.wap_scenario_stats(p, "vasicek")
     blocks["wap_lag"] = "\n".join([
-        f"- t0 = {t0:%b %Y}; model year 0 runs {t0:%b %Y} to {(t0 + pd.DateOffset(months=11)):%b %Y}. "
-        f"WAP_LAG = {saved}: the window of model year k ends {saved} months before its start "
-        f"(year 0: {(t0 - pd.DateOffset(months=saved)):%b %Y}).",
-        f"- The rate legally in force at t0 is the calendar-{t0.year} rate, whose window ends in May "
-        f"{t0.year - 1}: {12 + t0.month - 5} months before t0.",
-        f"- On 2000 vasicek scenarios, the legal alignment (lag {12 + t0.month - 5}) changes G on "
-        f"{(d != 0).mean():.1%} of path-years (mean |dG| where different: {np.abs(d[d != 0]).mean() * 1e4:.1f} bp); "
-        f"year 1: {(d[1] != 0).mean():.0%} of paths, mean dG {d[1].mean() * 1e4:+.1f} bp; "
-        f"year 2: {(d[2] != 0).mean():.0%}, {d[2].mean() * 1e4:+.1f} bp.",
+        f"- Before (`YEAR_START = \"t0\"`): t0 = {t0:%b %Y}; model year 0 ran {t0:%b %Y} to "
+        f"{(t0 + pd.DateOffset(months=11)):%b %Y}, and its window ended {saved} months before t0 "
+        f"({(t0 - pd.DateOffset(months=saved)):%b %Y}). The rate legally in force at t0 is the "
+        f"calendar-{t0.year} rate, whose window ends in May {t0.year - 1}, {12 + t0.month - 5} months before t0. "
+        f"On 2000 vasicek scenarios the legal alignment changes G on {(d != 0).mean():.1%} of path-years "
+        f"(mean |dG| where different: {np.abs(d[d != 0]).mean() * 1e4:.1f} bp); year 1: {(d[1] != 0).mean():.0%} "
+        f"of paths, mean dG {d[1].mean() * 1e4:+.1f} bp.",
+        f"- After (`YEAR_START = \"january\"`, the default): model years are calendar years; year 0 starts "
+        f"{economy.premonths(p)} months after the last observation, on {jan['t0']:%d %b %Y}, and WAP_LAG = {saved} "
+        f"is then the statutory lag (window of year k: the 24 months to May of year k - 1). G_0 = "
+        f"{pct(st['G0'])} on every path, equal to the formula on the observed window ({pct(st['G0_observed'])}); "
+        f"the FSMA published 2.50% for 2027 (the known one-notch difference, `pension/rates/wap.py`).",
     ])
 
+    vp_old = economy.vasicek_params(p)
     vp = economy.vasicek_params(p.replace(LONG_RATE_P=0.0225))
-    blocks["long_rate"] = (f"LONG_RATE_P = 2.25% gives a long-run 10Y of 2.25% under vasicek, i.e. a long-run "
-                           f"short rate of {pct(0.0225 - vp['spread'])}; under hull_white_p and vasicek_short the "
-                           f"same value is the long-run SHORT rate. Within the horizon: e^(-kappa 10) = "
+    blocks["long_rate"] = (f"Before: LONG_RATE_P = 2.25% set the long-run 10Y under vasicek (long-run short rate "
+                           f"{pct(0.0225 - vp['spread'])}), but the long-run SHORT rate under hull_white_p and "
+                           f"vasicek_short. After: the long-run short rate in every model; under vasicek the 10Y "
+                           f"reverts to 2.25% + {vp['spread'] * 1e4:.1f} bp = {pct(vp['theta'])} (OLS theta "
+                           f"{pct(vp_old['theta'])}). Within the horizon: e^(-kappa 10) = "
                            f"{np.exp(-vp['kappa'] * 10):.2f}, e^(-kappa 45) = {np.exp(-vp['kappa'] * 45):.3f} "
                            f"(vasicek kappa {vp['kappa']:.4f}).")
 
     pol = dp.const_policy(0.4, p.T, len(Fg), len(rg))
-    r = dp.simulate(pol, Fg, rg, n_paths=200, rates=economy.draw_rate_scenarios(200, p=p), p=DEFAULT)
-    blocks["mismatch"] = (f"dp.simulate(p=<constant>, rates=<vasicek scenario>) runs without complaint "
-                          f"(joint {r['joint']:+.4f}): the dynamics follow the vasicek G_t, mu_t while the "
-                          f"premiums accrue at SHORT_RATE.")
+    try:
+        dp.simulate(pol, Fg, rg, n_paths=200, rates=economy.draw_rate_scenarios(200, p=p), p=DEFAULT)
+        msg = "runs without complaint"
+    except ValueError as err:
+        msg = f"raises `ValueError` (\"{str(err).split(';')[0]}\")"
+    blocks["mismatch"] = (f"Before: dp.simulate(p=<constant>, rates=<vasicek scenario>) ran, with the dynamics "
+                          f"on vasicek's G_t, mu_t and the premiums at SHORT_RATE. After: it {msg}.")
 
     sc = economy.draw_rate_scenarios(10, p=p)
-    blocks["cache"] = (f"economy.draw_rate_scenarios returns the cached dict itself: same object on re-call = "
-                       f"{sc is economy.draw_rate_scenarios(10, p=p)}; arrays writeable = {sc['G'].flags.writeable}.")
+    blocks["cache"] = (f"Before: the cached dict's arrays were writeable. After: same object on re-call = "
+                       f"{sc is economy.draw_rate_scenarios(10, p=p)}; arrays writeable = {sc['G'].flags.writeable}; "
+                       f"the key includes the data vintage; the cache holds at most "
+                       f"{economy._SCENARIO_CACHE_SIZE} entries.")
 
     rows = []
     Fn, rn = dp.make_F_grid(n=73), dp.make_rho_grid(n=71)
     e8 = dict(R0=R0[:8000], L0=L0[:8000], S0=S0[:8000])
-    for lab, q in (("SHORT_RATE = MU", DEFAULT),
-                   ("SHORT_RATE = MU + SIGMA_R^2/2", DEFAULT.replace(SHORT_RATE=DEFAULT.MU + DEFAULT.SIGMA_R**2 / 2))):
+    for lab, q in (("legacy (no correction), SHORT_RATE = MU", DEFAULT.replace(DRIFT_CORRECTION=False)),
+                   ("legacy (no correction), SHORT_RATE = MU + SIGMA_R^2/2",
+                    DEFAULT.replace(DRIFT_CORRECTION=False, SHORT_RATE=DEFAULT.MU + DEFAULT.SIGMA_R**2 / 2)),
+                   ("DRIFT_CORRECTION (default), SHORT_RATE = MU", DEFAULT)):
         # solved and simulated directly: checks.timing_neutrality resets SHORT_RATE to MU itself
         lo, hi = 0.02 / q.GAMMA, 0.15 / q.GAMMA
         pol = dp.solve(Fg=Fn, rg=rn, ag=np.linspace(lo, hi, 20), n_quad=5, p=q)["policy"]
         rr = dp.simulate(pol, Fn, rn, **e8, band=(lo, hi), n_paths=8000, seed=3, p=q)
         rows.append([lab, pct(q.SHORT_RATE, 3), f"{np.mean(rr['c_by'][:10]):.2f}%", f"{np.mean(rr['c_by'][35:]):.2f}%"])
-    blocks["convexity"] = table(["anchor", "short rate", "early (years 0-9)", "late (35-44)"], rows)
+    blocks["convexity"] = table(["convention, anchor", "short rate", "early (years 0-9)", "late (35-44)"], rows)
 
-    sol = dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=5, p=p); ce = sol["ce"]
-    prem = numeraire.premium_schedule(p, economy.draw_rate_scenarios(p.RATE_CE_PATHS, p=p))
-    sol0 = dp._solve(Fg=Fg, rg=rg, ag=ag, n_quad=5, p=p.replace(**dict(ce, SIGMA_L=0.0)), prem=prem)
     scn = economy.draw_rate_scenarios(n, p=p)
-    rws = []
-    for lab, pp in (("CE as implemented", sol["policy"]), ("CE with SIGMA_L = 0", sol0["policy"])):
-        rr = dp.simulate(pp, Fg, rg, R0=R0, L0=L0, S0=S0, n_paths=n, rates=scn, p=p)
+    rws, mom = [], []
+    for lab, q in (("CE_MOMENTS = \"levels\" (legacy)", p.replace(CE_MOMENTS="levels")),
+                   ("CE_MOMENTS = \"conditional\" (default)", p)):
+        sol = dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=5, p=q); ce = sol["ce"]
+        mom.append(f"{lab}: SIGMA_L {pct(ce['SIGMA_L'], 3)}, SIGMA_R {pct(ce['SIGMA_R'], 3)}")
+        rr = dp.simulate(sol["policy"], Fg, rg, R0=R0, L0=L0, S0=S0, n_paths=n, rates=scn, p=p)
         rws.append([lab, f"{rr['joint']:+.5f}", f"{rr['cost']:.4f}", f"{rr['sty']:.3f}", f"{rr['avg']:.2f}%"])
-    blocks["ce"] = (f"CE moments: G {pct(ce['G'], 3)}, MU {pct(ce['MU'], 3)}, SIGMA_L {pct(ce['SIGMA_L'], 3)}, "
-                    f"SIGMA_R {pct(ce['SIGMA_R'], 3)}.\n\n" +
+    blocks["ce"] = (f"CE moments: G {pct(ce['G'], 3)}, MU {pct(ce['MU'], 3)}; " + "; ".join(mom) + ".\n\n" +
                     table(["policy (scored on 15000 vasicek paths)", "joint", "cost", "stayer RR", "avg contribution"], rws))
 
     crow = []

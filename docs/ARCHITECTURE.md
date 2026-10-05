@@ -100,15 +100,15 @@ Data vintage: 321 monthly 10Y observations up to Sep 2026 (t0). Canonical vasice
    - `calibrateVasicekShort(df_1Y, df10Y)`: gives the historical mean (10Y − 1Y) spread among other things;
    - `bootstrapForwardCurve(...)`: the NSS curve, used by the Hull-White models only.
 
-   The result is cached in `_CALIBRATION` with no key (REVIEW M4).
-3. **Model parameters.** `economy.vasicek_params(p)` gives κ, σ, θ (`p.LONG_RATE_P` if set, else OLS), y_0 = the last observed 10Y, and the spread (`p.SPREAD_10Y_SHORT`, else the historical mean).
+   The result is cached in `_CALIBRATION`, keyed on the data vintage (`economy.data_vintage()`).
+3. **Model parameters.** `economy.vasicek_params(p)` gives κ, σ, θ (`p.LONG_RATE_P` + spread if set, else OLS), y_0 = the last observed 10Y, and the spread (`p.SPREAD_10Y_SHORT`, else the historical mean).
 4. **Rate paths.** `economy.draw_rate_scenarios(n, p=p)` calls `_draw_rate_scenarios`, which calls `rates.simulation.simulateVasicek(κ, θ, σ, y_0)`. That produces monthly 10Y paths y_m (exact discretisation, `np.random.default_rng(RATE_SEED)`, blocks of 10,000 paths). The short rate is r_m = y_m − spread.
-5. **Contract rates.** The observed 10Y history is prepended to the simulated months (row 0 of the simulation is t0, already observed). Then:
-   - `rates.wap.computeWAPRate(full, start, T)` gives G[k], the WAP rate of model year k: 0.85 × the 24-month mean, ending `WAP_LAG` months before the year starts, rounded to 25 bp, clipped to [1.75%, 3.75%]. See REVIEW C1 on the lag.
+5. **Contract rates.** The observed 10Y history is prepended to the simulated months (row 0 of the simulation is the last observation). Model years are calendar years (`YEAR_START = "january"`): year 0 starts `economy.premonths(p)` months later, on the next 1 January, and the simulation runs one extra year to cover that pre-roll. Then:
+   - `rates.wap.computeWAPRate(full, start, T)` gives G[k], the WAP rate of model year k: 0.85 × the mean of the 24 months to May of the year before (`WAP_LAG` = 8 months before 1 January), rounded to 25 bp, clipped to [1.75%, 3.75%].
    - A rolling mean over `BOOK_DURATION` years gives μ[k], the book yield.
-   - From r_m: r[t] = r_m[12t], and acc[t] = exp(Σ of the 12 monthly r·dt), the realised accrual.
+   - From r_m: r[t] = r_m at year t's 1 January, and acc[t] = exp(Σ of year t's 12 monthly r·dt), the realised accrual.
 
-   The result is cached in `_SCENARIOS` by a key of `Params` inputs.
+   The result is cached in `_SCENARIOS` (bounded) by a key of `Params` inputs and the data vintage; its arrays are read-only. `simulate` and `solve` refuse a scenario of another model (`economy.check_scenario`).
 6. **Careers.** `dynamics.Exogenous.draw(p, n, seed, rates)` draws the career noise from `default_rng(seed)`, per year z_R, z_L, u, and attaches G, μ, r, acc. `dynamics.State.initial(...)` opens a `HorizontalLedger`.
 7. **Years.** `dp.simulate` loops t = 0..T−1:
    - `bilinear` reads the policy at (F, log ρ);
@@ -131,11 +131,11 @@ A full worked instance with every intermediate number: `paper/explanations/model
 | C4 | the "discounted" valuation reproduces the pre-refactor model bit for bit | the old results stay reproducible | `tests/test_regression.py` (golden files from `8fbf451`) |
 | C5 | retirement-date valuation at λ′ = inception-date valuation at λ (constant rates) | the change of valuation date is a positive rescaling | `tests/test_numeraire.py::test_retirement_equals_discounted_at_lambda_prime` |
 | C6 | the horizontal ledger = its closed form, and = 9 rate buckets | the vintage bookkeeping is right | `tests/test_dynamics.py` |
-| C7 | the closed-form accrual = Monte Carlo of the realised accrual | the premium factor is the conditional expectation | `tests/test_numeraire.py::test_accrual_accuracy_vasicek`, `tests/test_rates.py` (tolerance: REVIEW M12) |
+| C7 | the closed-form accrual = Monte Carlo of the realised accrual | the premium factor is the conditional expectation | `tests/test_numeraire.py::test_accrual_accuracy_vasicek`, `tests/test_rates.py` (no floor beyond 4 standard errors + 0.1 bp) |
 
 **What the DP optimises in rate mode** (`dp.solve`): the certainty-equivalent model. It is a constant-rate DP on (t, F, ρ) with:
 - G, μ = the scenario means;
-- σ_L, σ_R from the scenario dispersion (REVIEW M10);
+- σ_L = 0, σ_R = `SIGMA_R_RATES` (`CE_MOMENTS = "conditional"`: G_t and μ_t are known at the start of each year; `"levels"` is the legacy level-dispersion match);
 - a vertical ledger;
 - one premium factor per year, equal to the scenario mean of A(t,T; r_t).
 
@@ -163,7 +163,7 @@ The rate and career streams are independent: different generators and different 
 | `RATE_MODEL` | measure of the paths | r_t | G_t | μ_t | A(t,T) | allowed valuation dates | status |
 |---|---|---|---|---|---|---|---|
 | `constant` | — (deterministic G, μ) | `SHORT_RATE` | `G` | `MU` | e^{(r+s)(T−t)} | retirement, discounted | DP-verifiable rung |
-| `vasicek` | P (OLS on the monthly 10Y history; θ overridable by `LONG_RATE_P`) | y10_t − `SPREAD_10Y_SHORT` | WAP filter of the simulated 10Y (history prepended) | book yield: rolling mean of the 10Y | closed form, Vasicek integral of y minus the spread | retirement, discounted | **canonical** |
+| `vasicek` | P (OLS on the monthly 10Y history; θ = `LONG_RATE_P` + spread if set) | y10_t − `SPREAD_10Y_SHORT` | WAP filter of the simulated 10Y (history prepended) | book yield: rolling mean of the 10Y | closed form, Vasicek integral of y minus the spread | retirement, discounted | **canonical** |
 | `hull_white_p` | P via a constant φ from `LONG_RATE_P` (`None` ⇒ φ = 0, Q drift) | instantaneous Hull-White short rate | WAP of the Q-repriced 10Y | book yield | closed form, Hull-White with α(t) and m | retirement, discounted | robustness |
 | `vasicek_short` | P (OLS on the 1Y) | the 1Y proxy | WAP of the affine 10Y (θ_Q, φ) plus a decaying offset | book yield | closed form, Vasicek | retirement, discounted | legacy |
 | `hull_white` | **Q** | Q short rate | WAP of the repriced 10Y | book yield | none (raises) | discounted only | legacy / regression |

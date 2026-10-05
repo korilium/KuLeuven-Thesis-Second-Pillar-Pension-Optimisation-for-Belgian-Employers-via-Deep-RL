@@ -51,6 +51,12 @@ def extractDataYieldNBB(startPeriod: str = "1993-03", endPeriod: str = date.toda
 
 
 
+def cache_path():
+    """The CSV cache of the NBB OLO yields."""
+    import os
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "olo_yields.csv")
+
+
 def load_olo(startPeriod: str = "2000-01", cache: str = None, refresh: bool = False):
     """
     OLO data the economy needs, fetched from the NBB once and then read from a CSV
@@ -65,7 +71,7 @@ def load_olo(startPeriod: str = "2000-01", cache: str = None, refresh: bool = Fa
     """
     import os
     if cache is None:
-        cache = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "olo_yields.csv")
+        cache = cache_path()
     if refresh or not os.path.exists(cache):
         extractDataYieldNBB(startPeriod=startPeriod).to_csv(cache, index=False)
     dfYield = pd.read_csv(cache, parse_dates=["DATE"])
@@ -90,7 +96,7 @@ def load_olo_short(cache: str = None):
     DATE and YIELD in %), on the same dates as the 10Y series of load_olo()."""
     load_olo(cache=cache)                       # make sure the cache exists
     if cache is None:
-        cache = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "olo_yields.csv")
+        cache = cache_path()
     dfYield = pd.read_csv(cache, parse_dates=["DATE"])
     mats = dfYield["IROLOBE2_MATUR"].unique()
     shortest = min(mats, key=lambda m: int(m.replace("Y", "")))

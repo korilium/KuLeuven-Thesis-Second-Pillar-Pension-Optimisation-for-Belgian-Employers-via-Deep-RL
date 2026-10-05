@@ -58,8 +58,8 @@ def _grids(g=None):
 _POL = {}
 
 def _policy(name, g=None):
-    """The banded optimum under objective `name` (memoised per grid and regime)."""
-    key = (name, tuple(sorted((g or {}).items())), c.P.RATE_MODEL)
+    """The banded optimum under objective `name` (memoised per grid and parameters)."""
+    key = (name, tuple(sorted((g or {}).items())), c.P)     # Params is hashable (REVIEW m8)
     if key not in _POL:
         Fg, rg, ag, nq = _grids(g)
         _POL[key] = c.solve(Fg, rg, ag, nq, objective=name)["policy"]

@@ -84,7 +84,9 @@ def timing_neutrality(p, Fg, rg, nq, entry, n_paths, seed, band_pct=(0.02, 0.15)
     contribution's cost and value grow alike: SHORT_RATE = MU = G under the
     retirement numeraire (premiums accrue at the rate R and L earn), DISC_ER =
     DISC_EMP = MU under the discounted one. The benefit/cost ratio is then flat in
-    t, so the schedule must be roughly level. Constant rates only."""
+    t, so the schedule must be roughly level -- provided the reserve's MEAN return is
+    MU, i.e. DRIFT_CORRECTION (REVIEW M6; without it the mean is MU + SIGMA_R^2/2
+    and early funding pays). Constant rates only."""
     lo, hi = band_pct[0] / p.GAMMA, band_pct[1] / p.GAMMA
     q = p.replace(SHORT_RATE=p.MU, G=p.MU) if p.EMPLOYER_NUMERAIRE == "retirement" \
         else p.replace(DISC_ER=p.MU, DISC_EMP=p.MU)
@@ -143,11 +145,20 @@ def horizontal_closed_form(p, G_before=0.03, G_after=0.0175, switch=20, a=0.4, S
 
 def wap_scenario_stats(p, model, n=2000):
     """min, max, distance from the 25 bp grid, and G_0 of the WAP rates of n
-    scenarios of `model`."""
-    G = draw_rate_scenarios(n, model=model, p=p)["G"]
+    scenarios of `model`; G0_observed is the statutory formula applied directly to
+    year 0's window of the OLO history (None if that window reaches past the last
+    observation, so G_0 is not yet known)."""
+    from pension.economy import premonths, rate_calibration
+    from pension.rates import wap
+    from pension.rates.wap import wap_formula
+    G = draw_rate_scenarios(n, model=model, p=p.replace(RATE_MODEL=model))["G"]
+    hist = rate_calibration()["hist10Y"]
+    end = len(hist) - 1 + premonths(p) - wap.WAP_LAG
+    G0_obs = (float(wap_formula(hist[end - wap.WAP_WINDOW + 1:end + 1].mean()))
+              if end <= len(hist) - 1 else None)
     return dict(min=float(G.min()), max=float(G.max()),
                 grid_err=float(np.abs(G / 0.0025 - np.round(G / 0.0025)).max()),
-                G0=float(G[0, 0]), G0_spread=float(np.ptp(G[0])))
+                G0=float(G[0, 0]), G0_spread=float(np.ptp(G[0])), G0_observed=G0_obs)
 
 
 FSMA_PUBLISHED = {2016: 1.75, 2017: 1.75, 2018: 1.75, 2019: 1.75, 2020: 1.75, 2021: 1.75,
@@ -220,18 +231,6 @@ def vasicek_short_fit(p=None):
                 **{"offset_" + k: v for k, v in sh["offset"].items()})
 
 
-def scenario_stats(p, model, n=2000):
-    """Distribution of the annual short rate r_t, the 10Y, G_t, mu_t and the
-    realised accrual of `model`'s scenarios at a few years: dict year -> stats."""
-    sc = draw_rate_scenarios(n, model=model, p=p)
-    out = {}
-    for t in (0, 1, 5, 10, 20, p.T - 1):
-        q = lambda x: (float(np.percentile(x, 5)), float(np.median(x)), float(np.percentile(x, 95)))
-        out[t] = dict(r=q(sc["r"][t]), y10=q(sc["y10"][t]), G=q(sc["G"][t]), mu=q(sc["mu"][t]),
-                      acc=q(sc["acc"][t]), r_neg=float((sc["r"][t] < 0).mean()))
-    return out
-
-
 # --- Hull-White under the real-world measure (RATE_MODEL = "hull_white_p") --------------
 def hw_p_link(n=200):
     """(a) With phi = 0 and the legacy sigma, hull_white_p's simulation IS
@@ -241,7 +240,7 @@ def hw_p_link(n=200):
     from pension.params import DEFAULT
     from pension.rates.pricing import reconstructFutureYield
     from pension.rates.simulation import simulateHullWhite
-    p = DEFAULT
+    p = DEFAULT.replace(YEAR_START="t0")                 # model year 0 = the curve date
     vas, curve = rate_calibration()["vasicek"], rate_calibration()["curve"]
     r_q = simulateHullWhite(curve, vas["kappa"], vas["sigma"], T=p.T, n_paths=n, dt=p.RATE_DT,
                             rng=np.random.default_rng(p.RATE_SEED))
@@ -260,6 +259,7 @@ def hw_p_t0_fit(p):
     from pension.economy import hull_white_p_params, rate_calibration
     from pension.rates.calibration import nss_yield
     from pension.rates.data import load_olo
+    p = p.replace(YEAR_START="t0")                       # read the model at the curve date itself
     hp = hull_white_p_params(p)
     sc = draw_rate_scenarios(50, model="hull_white_p", p=p)
     df10Y, mats, ylds = load_olo()
@@ -273,15 +273,17 @@ def hw_p_t0_fit(p):
 
 def hw_p_drift(p, n=4000, years=(1, 5, 10, 20, 30, 44)):
     """(c) Per year: the scenario mean of r_t (with its standard error) against
-    E^P[r_t] = alpha(t) + m (1 - e^{-kappa t})  (E^Q[r_t] = alpha(t))."""
-    from pension.economy import hull_white_p_params
+    E^P[r_t] = alpha(t + d) + m (1 - e^{-kappa (t + d)})  (E^Q[r_t] = alpha(t + d)),
+    d = economy.year_offset(p) the calendar time from the curve date to model year 0."""
+    from pension.economy import hull_white_p_params, year_offset
     from pension.rates.accrual import hull_white_alpha
     hp = hull_white_p_params(p)
     r = draw_rate_scenarios(n, model="hull_white_p", p=p)["r"]
+    d = year_offset(p)
     out = {}
     for t in years:
-        an = float(hull_white_alpha(t, hp["kappa"], hp["sigma"], hp["curve"])
-                   + hp["m"] * (1 - np.exp(-hp["kappa"] * t)))
+        an = float(hull_white_alpha(t + d, hp["kappa"], hp["sigma"], hp["curve"])
+                   + hp["m"] * (1 - np.exp(-hp["kappa"] * (t + d))))
         out[t] = dict(mc=float(r[t].mean()), se=float(r[t].std(ddof=1) / np.sqrt(n)), analytic=an)
     return out
 

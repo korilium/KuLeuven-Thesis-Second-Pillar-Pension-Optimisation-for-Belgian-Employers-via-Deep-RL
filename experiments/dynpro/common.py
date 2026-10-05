@@ -5,7 +5,7 @@ figure config and labels, and the current parameters of a sweep (P, update, rest
 The MODEL lives entirely in pension/dp.py -- parameters, transitions, grids,
 the churn-aware DP solver, and simulate() (the committed forward Monte-Carlo).
 Nothing economic is defined here; the names re-exported below are aliases into
-DynPro so the suites can keep calling c.simulate(...), c.grids(...) etc.
+pension.dp so the suites can keep calling c.simulate(...), c.grids(...) etc.
 """
 import contextlib
 import functools

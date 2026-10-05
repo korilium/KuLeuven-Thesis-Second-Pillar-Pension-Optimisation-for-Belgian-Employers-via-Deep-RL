@@ -98,7 +98,8 @@ class VerticalLedger:
         return self.L
 
     def book_and_grow(self, c, present, t, exo, p):
-        self.L = np.where(present, (self.L + c) * np.exp(p.G + p.SIGMA_L * exo.zL[t]), self.L)
+        g = p.G - p.DRIFT_CORRECTION * p.SIGMA_L ** 2 / 2       # mean growth e^G (REVIEW M6)
+        self.L = np.where(present, (self.L + c) * np.exp(g + p.SIGMA_L * exo.zL[t]), self.L)
 
 
 @dataclass
@@ -175,8 +176,10 @@ def step(state, a, exo, p, hazard):
         mu, sig = p.MU, p.SIGMA_R
     # in force: contribute and carry the asset shock. Paid-up: the reserve compounds at
     # the credited return with no further shock -- freezing the contract freezes its
-    # risk (this is what paidup_service assumes). L freezes once absent.
-    state.R = np.where(present, (state.R + c) * np.exp(mu + sig * exo.zR[t]), state.R * np.exp(mu))
+    # risk (this is what paidup_service assumes). L freezes once absent. With
+    # DRIFT_CORRECTION the shocked growth has mean e^mu, as the paid-up growth does.
+    drift = mu - p.DRIFT_CORRECTION * sig ** 2 / 2
+    state.R = np.where(present, (state.R + c) * np.exp(drift + sig * exo.zR[t]), state.R * np.exp(mu))
     state.ledger.book_and_grow(c, present, t, exo, p)
     state.S = state.S * (1.0 + p.W)
     lv = present & (exo.u[t] < hazard(t))

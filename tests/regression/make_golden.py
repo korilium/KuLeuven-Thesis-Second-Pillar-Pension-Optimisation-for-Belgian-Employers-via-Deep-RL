@@ -31,7 +31,8 @@ def run(dp, model, objective):
     """The outputs of one case, through the current API. (The files were recorded
     with the pre-refactor API, which set dp.RATE_MODEL as a module global; the
     case definitions -- and therefore the files -- are unchanged.)"""
-    p = dp.DEFAULT.replace(RATE_MODEL=model, EMPLOYER_NUMERAIRE="discounted")   # the recorded spec
+    p = dp.DEFAULT.replace(RATE_MODEL=model, EMPLOYER_NUMERAIRE="discounted",   # the recorded spec
+                           YEAR_START="t0", DRIFT_CORRECTION=False, CE_MOMENTS="levels")
     Fg, rg = dp.make_F_grid(n=GRID["nF"]), dp.make_rho_grid(n=GRID["nR"])
     ag = dp.make_a_grid(n=GRID["na"])
     out = {}

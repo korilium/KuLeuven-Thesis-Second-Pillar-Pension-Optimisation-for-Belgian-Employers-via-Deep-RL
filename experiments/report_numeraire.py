@@ -6,8 +6,25 @@
 """
 import sys
 
+import numpy as np
+
 from pension import checks
+from pension.economy import draw_rate_scenarios
 from pension.params import DEFAULT
+
+
+
+def scenario_stats(p, model, n=2000):
+    """Distribution of the annual short rate r_t, the 10Y, G_t, mu_t and the
+    realised accrual of `model`'s scenarios at a few years: dict year -> stats.
+    (A report helper, moved here from pension.checks: REVIEW m14.)"""
+    sc = draw_rate_scenarios(n, model=model, p=p)
+    out = {}
+    for t in (0, 1, 5, 10, 20, p.T - 1):
+        q = lambda x: (float(np.percentile(x, 5)), float(np.median(x)), float(np.percentile(x, 95)))
+        out[t] = dict(r=q(sc["r"][t]), y10=q(sc["y10"][t]), G=q(sc["G"][t]), mu=q(sc["mu"][t]),
+                      acc=q(sc["acc"][t]), r_neg=float((sc["r"][t] < 0).mean()))
+    return out
 
 
 def pct(x, d=2):
@@ -30,7 +47,7 @@ def stage1():
           f"{pct(f['observed_10y_t0'], 3)} -> {f['jump_t0'] * 1e4:+.1f} bp\n")
 
     p = DEFAULT.replace(RATE_MODEL="vasicek_short")
-    st = checks.scenario_stats(p, "vasicek_short")
+    st = scenario_stats(p, "vasicek_short")
     print("Scenarios (2000 paths): 5th / median / 95th percentile\n")
     print("| year | short rate r_t | P(r_t < 0) | 10Y | G_t | mu_t | annual accrual |")
     print("|---|---|---|---|---|---|---|")

@@ -39,26 +39,31 @@ def plan_age(rate0=0.03, step=0.01, band=10):
     return lambda t, S: (rate0 + step * (t // band)) * S
  
  
-# --- exogenous shocks -----------------------------------------------------
-def draw_shock_batch(n_paths=N_EVAL, seed=12345):
-    """One frozen batch of noise paths (SAA + common random numbers).
-    None at SIGMA = 0 -> deterministic single-episode evaluation."""
-    if SIGMA == 0.0:
-        return None
-    return np.random.default_rng(seed).standard_normal((n_paths, T))
- 
-batch = draw_shock_batch()
-
-
 # --- interest-rate scenarios ----------------------------------------------
 _CALIBRATION = None
+_CALIBRATION_VINTAGE = None
+
+
+def data_vintage():
+    """Identity of the OLO data the calibration was built from: the cache file's
+    path, size and modification time. Part of every scenario key, so a refreshed
+    CSV can never be served stale scenarios (and it invalidates the calibration)."""
+    import os
+    from pension.rates.data import cache_path
+    path = cache_path()
+    st = os.stat(path) if os.path.exists(path) else None
+    return (path, st.st_size, st.st_mtime_ns) if st else (path, None, None)
+
 
 def rate_calibration():
     """Calibrate once per process, from the cached NBB OLO data: Vasicek (kappa,
     sigma, theta, r0) on the monthly 10Y history and the NSS curve on the latest
     cross-section. The rate engine (pension.rates) is imported HERE, not at module
     level, so the constant-rate model never loads it."""
-    global _CALIBRATION
+    global _CALIBRATION, _CALIBRATION_VINTAGE
+    if _CALIBRATION is not None and _CALIBRATION_VINTAGE != data_vintage():
+        _CALIBRATION = None                              # the CSV changed: recalibrate
+        _SCENARIOS.clear()
     if _CALIBRATION is None:
         from pension.rates.data import load_olo, load_olo_short
         from pension.rates.calibration import (calibrateVasicek, bootstrapForwardCurve,
@@ -72,6 +77,7 @@ def rate_calibration():
             hist10Y=df10Y["YIELD"].values / 100.0,      # monthly, oldest first; last = model t0
             t0=df10Y["DATE"].iloc[-1],
         )
+        _CALIBRATION_VINTAGE = data_vintage()
     return _CALIBRATION
 
 
@@ -83,14 +89,16 @@ def draw_rate_scenarios(n_paths=2000, seed=None, model=None, horizon=None, p=Non
     pension contract uses:
         G[t]  -- the WAP guarantee rate fixed at the start of year t,
         mu[t] -- the book yield credited during year t.
-    Observed history is prepended, so G[0] is today's actual WAP fixing and the
-    book yield starts from the real portfolio, not from a model curve.
+    Observed history is prepended, so G[0] is the WAP rate fixed on year 0's
+    1 January (observed whenever its window has ended) and the book yield starts
+    from the real portfolio, not from a model curve. Model years are calendar years
+    under p.YEAR_START = "january" (see premonths).
 
     model = "hull_white": short rate fitted to today's OLO curve; the 10Y is
             reconstructed per path from the Hull-White bond price.
     model = "vasicek":    the CANONICAL stochastic model. The Vasicek process IS the
-            10Y yield, calibrated on its history under P (theta = p.LONG_RATE_P if
-            set); the short rate behind the accrual is r = y10 - spread
+            10Y yield, calibrated on its history under P (theta = p.LONG_RATE_P +
+            spread if set); the short rate behind the accrual is r = y10 - spread
             (vasicek_params). No curve fit.
     model = "vasicek_short": a real-world (P) Vasicek SHORT rate calibrated on the
             shortest OLO maturity (rates.calibration.calibrateVasicekShort); the
@@ -101,7 +109,7 @@ def draw_rate_scenarios(n_paths=2000, seed=None, model=None, horizon=None, p=Non
     model = "hull_white_p": Hull-White fitted to today's curve, simulated under the
             REAL-WORLD measure with a constant market price of risk set by
             p.LONG_RATE_P (None: phi = 0), and a short-rate sigma consistent with
-            the 10Y volatility (hull_white_p_params). Primary real-world model.
+            the 10Y volatility (hull_white_p_params). Robustness model.
     model = "constant":   G and MU broadcast -- the degenerate scenario of the
             original model (used for known-answer checks).
 
@@ -122,27 +130,47 @@ def draw_rate_scenarios(n_paths=2000, seed=None, model=None, horizon=None, p=Non
     # The key holds every input the scenario depends on (the WAP constants are
     # module constants of pension/rates/wap.py and are not swept). Callers must
     # treat the returned arrays as read-only.
-    key = (model, n_paths, seed, H, p.RATE_DT, p.BOOK_DURATION, p.BOOK_SPREAD) + \
+    vintage = None if model == "constant" else (rate_calibration(), _CALIBRATION_VINTAGE)[1]
+    key = (model, n_paths, seed, H, p.RATE_DT, p.BOOK_DURATION, p.BOOK_SPREAD, vintage,
+           None if model == "constant" else p.YEAR_START) + \
           ((p.G, p.MU, p.SHORT_RATE) if model == "constant" else ()) + \
           ((p.LONG_RATE_P,) if model in ("vasicek", "vasicek_short", "hull_white_p") else ()) + \
           ((p.SPREAD_10Y_SHORT,) if model == "vasicek" else ())
     if key not in _SCENARIOS:
-        _SCENARIOS[key] = _draw_rate_scenarios(n_paths, seed, model, H, p)
+        sc = _draw_rate_scenarios(n_paths, seed, model, H, p)
+        for v in sc.values():                            # shared across callers: read-only
+            if isinstance(v, np.ndarray):
+                v.flags.writeable = False
+        if len(_SCENARIOS) >= _SCENARIO_CACHE_SIZE:      # bounded: drop the oldest entry
+            _SCENARIOS.pop(next(iter(_SCENARIOS)))
+        _SCENARIOS[key] = sc
     return _SCENARIOS[key]
 
 _SCENARIOS = {}
+_SCENARIO_CACHE_SIZE = 64
+
+
+def check_scenario(rates, p):
+    """A scenario dict must come from p.RATE_MODEL (rates["model"]); otherwise the
+    dynamics would follow one model's G_t, mu_t while the premiums accrue under
+    another's short rate."""
+    model = rates.get("model") if isinstance(rates, dict) else None
+    if model is not None and model != p.RATE_MODEL:
+        raise ValueError(f"rate scenario of model {model!r} used with RATE_MODEL={p.RATE_MODEL!r}; "
+                         f"draw it with economy.draw_rate_scenarios(n, p=p)")
 
 
 def vasicek_params(p=None):
     """The parameters of the canonical "vasicek" model: kappa, sigma of the 10Y
-    (OLS), theta = p.LONG_RATE_P if set (else the OLS estimate), y0 = the last
-    observed 10Y, and the spread to the short rate, r = y10 - spread
-    (p.SPREAD_10Y_SHORT, or the historical mean 10Y - 1Y if None)."""
+    (OLS), y0 = the last observed 10Y, the spread to the short rate, r = y10 - spread
+    (p.SPREAD_10Y_SHORT, or the historical mean 10Y - 1Y if None), and theta, the
+    long-run 10Y: the OLS estimate, or p.LONG_RATE_P + spread if set -- LONG_RATE_P
+    is the long-run SHORT rate in every model (REVIEW M1)."""
     p = DEFAULT if p is None else p
     cal = rate_calibration(); vas = cal["vasicek"]
     spread = cal["short"]["fit"]["spread_obs"] if p.SPREAD_10Y_SHORT is None else p.SPREAD_10Y_SHORT
     return dict(kappa=vas["kappa"], sigma=vas["sigma"],
-                theta=vas["theta"] if p.LONG_RATE_P is None else p.LONG_RATE_P,
+                theta=vas["theta"] if p.LONG_RATE_P is None else p.LONG_RATE_P + spread,
                 y0=vas["r0"], spread=spread)
 
 
@@ -208,38 +236,42 @@ def _draw_rate_scenarios(n_paths, seed, model, H, p, chunk=10000):
     from pension.rates.simulation import simulateVasicek, simulateHullWhite
     from pension.rates.pricing import reconstructFutureYield, vasicekBondPrice
     from pension.rates.wap import computeWAPRate
+    assert abs(p.RATE_DT - 1 / 12) < 1e-12, \
+        "RATE_DT must be 1/12: the OLO data and the calibration are monthly"
     cal = rate_calibration(); vas = cal["vasicek"]
     rng = np.random.default_rng(seed)
     mpy = int(round(1 / p.RATE_DT))
     hist = cal["hist10Y"]
-    start = len(hist) - 1                                # row of model year 0
+    pre = premonths(p)                                   # months from the last observation to year 0
+    start = len(hist) - 1 + pre                          # row (in `full`) where model year 0 starts
     n_book = p.BOOK_DURATION * mpy
-    assert start + 1 >= n_book, "OLO history shorter than BOOK_DURATION"
+    assert len(hist) >= n_book, "OLO history shorter than BOOK_DURATION"
     rows = start + mpy * np.arange(H)                    # start month of each year
-    yearly = np.arange(H + 1) * mpy
+    yearly = pre + np.arange(H + 1) * mpy                # rows of the simulation at the year starts
+    T_sim = H if pre == 0 else H + 1                     # enough months to cover the pre-roll
 
     parts = []
     for lo in range(0, n_paths, chunk):
         n = min(chunk, n_paths - lo)
         if model == "hull_white":
-            r_m = simulateHullWhite(cal["curve"], vas["kappa"], vas["sigma"], T=H,
+            r_m = simulateHullWhite(cal["curve"], vas["kappa"], vas["sigma"], T=T_sim,
                                     n_paths=n, dt=p.RATE_DT, rng=rng)
             y10_m = reconstructFutureYield(r_m, vas["kappa"], vas["sigma"], cal["curve"],
                                            tau=10.0, dt=p.RATE_DT)
         elif model == "vasicek":
             vp = vasicek_params(p)
-            y10_m = simulateVasicek(vp["kappa"], vp["theta"], vp["sigma"], vp["y0"], T=H,
+            y10_m = simulateVasicek(vp["kappa"], vp["theta"], vp["sigma"], vp["y0"], T=T_sim,
                                     n_paths=n, dt=p.RATE_DT, rng=rng)
             r_m = y10_m - vp["spread"]                   # the short rate behind the accrual
         elif model == "vasicek_short":
             vs = vasicek_short_params(p)
-            r_m = simulateVasicek(vs["kappa"], vs["theta_P"], vs["sigma"], vs["r0"], T=H,
+            r_m = simulateVasicek(vs["kappa"], vs["theta_P"], vs["sigma"], vs["r0"], T=T_sim,
                                   n_paths=n, dt=p.RATE_DT, rng=rng)
             off = vs["e_t0"] * vs["monthly_decay"] ** np.arange(r_m.shape[0])
             y10_m = -np.log(vasicekBondPrice(r_m, vs["kappa"], vs["theta_Q"], vs["sigma"],
                                              vs["tau"])) / vs["tau"] + off[:, None]
         elif model == "hull_white_p":
-            r_m, y10_m = hull_white_paths(hull_white_p_params(p), H, n, p.RATE_DT, rng)
+            r_m, y10_m = hull_white_paths(hull_white_p_params(p), T_sim, n, p.RATE_DT, rng)
         else:
             raise ValueError(f"unknown RATE_MODEL {model!r}")
 
@@ -249,8 +281,33 @@ def _draw_rate_scenarios(n_paths, seed, model, H, p, chunk=10000):
         G_ = computeWAPRate(full, start, H, months_per_year=mpy)
         cs = np.vstack([np.zeros((1, n)), np.cumsum(full, axis=0)])
         mu_ = (cs[rows + 1] - cs[rows + 1 - n_book]) / n_book + p.BOOK_SPREAD
-        # realised accrual of each model year: exp(sum of the 12 monthly r * dt)
-        acc_ = np.exp(np.add.reduceat(r_m[:-1] * p.RATE_DT, np.arange(0, H * mpy, mpy), axis=0))
+        # realised accrual of each model year: exp(sum of its 12 monthly r * dt)
+        acc_ = np.exp(np.add.reduceat(r_m[pre:pre + H * mpy] * p.RATE_DT,
+                                      np.arange(0, H * mpy, mpy), axis=0))
         parts.append((G_, mu_, y10_m[yearly], r_m[yearly], acc_))
     G_, mu_, y10_, r_, acc_ = (np.hstack(x) for x in zip(*parts))
-    return dict(model=model, G=G_, mu=mu_, y10=y10_, r=r_, acc=acc_, t0=cal["t0"])
+    import pandas as pd
+    return dict(model=model, G=G_, mu=mu_, y10=y10_, r=r_, acc=acc_,
+                t0=cal["t0"] + pd.DateOffset(months=pre), t_obs=cal["t0"])
+
+
+def premonths(p=None):
+    """Months between the last OLO observation and the start of model year 0.
+    YEAR_START = "january" (default): model years are calendar years, year 0 starts
+    on the first 1 January after the last observation (0 if that observation is a
+    January), so each year holds the WAP rate fixed on its 1 January from the 24
+    months up to May of the year before (wap.WAP_LAG = 8). "t0" (legacy): year 0
+    starts at the last observation itself."""
+    p = DEFAULT if p is None else p
+    if p.YEAR_START == "t0":
+        return 0
+    if p.YEAR_START != "january":
+        raise ValueError(f"YEAR_START must be 'january' or 't0', got {p.YEAR_START!r}")
+    return (13 - rate_calibration()["t0"].month) % 12
+
+
+def year_offset(p=None):
+    """Calendar time (years) from the curve date (the last observation) to the start
+    of model year 0 -- the shift between model year t and the time axis of a
+    curve-fitted model (hull_white_p's alpha(t))."""
+    return premonths(p) / 12.0

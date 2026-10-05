@@ -11,10 +11,13 @@ Figures (-> figs/lambda/):
   crowding_out              crowding.png            a* against the first-pillar floor, and against lambda
   frontier_entry_robustness lambda_frontier_dist.png the frontier under two entry-state assumptions
 
-Every lambda sweep here stops around 0.62. Above that the optimum is pinned at the
-top of the action grid, so the curves are flat and a wider grid only resolves a
-horizontal line -- measured: path-weighted a* is 0.349 at every lambda from 0.60
-to 0.80, and employer cost 0.559 at 0.6 against 0.560 at 0.8.
+Every lambda sweep here covers about 0.25-0.75. Measured under the canonical
+objective (retirement-date money, DRIFT_CORRECTION, constant rates; REVIEW M13):
+below lambda ~0.25 the optimum funds nothing (path-weighted a* 0.000), and from
+~0.70 it is pinned at the top of the action grid, so the curves are flat and a
+wider grid only resolves a horizontal line -- path-weighted a* is 0.347 at 0.70
+and 0.349 at 0.80 and 0.90, employer cost 2.860 at 0.70 against 2.875 at 0.80.
+(Under the old discounted objective the same stretch was lambda 0.15-0.62.)
 
 Run:  python lambda_dial_suite.py [threshold|pareto|crowding|entrydist]
 """
@@ -26,14 +29,13 @@ OUT = f"{c.OUT}/lambda"   # this suite writes only here
 
 # ============ 1. funding threshold in lambda (legal baseline) ============
 @c.restores
-def lambda_threshold(lambdas=np.linspace(0.15, 0.62, 16), nF=121, nR=91, na=25, nq=5,
+def lambda_threshold(lambdas=np.linspace(0.25, 0.75, 16), nF=121, nR=91, na=25, nq=5,
                      n_paths=15000, seed=7):
     """Optimal funding against the employee weight.
 
-    The sweep stops at 0.62 on purpose. Above lambda ~= 0.6 the optimum is pinned
-    at the top of the action grid, so path-weighted a* is flat (measured: 0.349 at
-    every lambda from 0.60 to 0.80) and a uniform 0.2-0.8 grid spent its top third
-    resolving a horizontal line."""
+    The sweep stops at 0.75 on purpose. From lambda ~= 0.70 the optimum is pinned
+    at the top of the action grid, so path-weighted a* is flat (measured: 0.347 at
+    0.70, 0.349 at 0.80 and 0.90), and below ~0.25 it funds nothing."""
     Fg, rg, _ = c.grids(nF, nR, na)
     rng = np.random.default_rng(seed); R0, L0, S0 = c.new_plan_init(n_paths, rng)
     gm, pw = [], []
@@ -63,8 +65,8 @@ def lambda_threshold(lambdas=np.linspace(0.15, 0.62, 16), nF=121, nR=91, na=25, 
 
 # ============ 2. Pareto frontier + naive-plan reference points ============
 @c.restores
-def pareto_frontier(lambdas=np.array([0.10, 0.18, 0.24, 0.30, 0.34, 0.38, 0.42,
-                                      0.46, 0.50, 0.54, 0.58, 0.65]),
+def pareto_frontier(lambdas=np.array([0.22, 0.28, 0.32, 0.36, 0.40, 0.44, 0.48,
+                                      0.52, 0.56, 0.60, 0.65, 0.72]),
                     naive_a=(0.2, 0.5, 1.0), nF=121, nR=91, na=31, nq=5,
                     n_paths=30000, seed=7):
     """Employer cost against employee value, traced by sweeping lambda.
@@ -72,11 +74,11 @@ def pareto_frontier(lambdas=np.array([0.10, 0.18, 0.24, 0.30, 0.34, 0.38, 0.42,
     Both axes are lambda-FREE -- simulate's `benefit` and `cost` contain no LAMBDA
     -- so sweeping it traces the locus of optima rather than re-scoring one policy.
 
-    The grid is concentrated on 0.10-0.65 because the frontier is censored at both
-    ends: below ~0.15 the optimum funds nothing, and from ~0.6 it is pinned at the
-    top of the action grid (measured cost 0.559 at lambda=0.6 against 0.560 at
-    0.8). A uniform 0.05-0.98 grid put half its points in those two clumps, and the
-    annotations then overprinted inside them."""
+    The grid is concentrated on 0.22-0.72 because the frontier is censored at both
+    ends: below ~0.25 the optimum funds nothing, and from ~0.70 it is pinned at the
+    top of the action grid (measured cost 2.860 at lambda=0.70 against 2.875 at
+    0.80). A uniform grid puts many of its points in those two clumps, and the
+    annotations then overprint inside them."""
     Fg, rg, ag = c.grids(nF, nR, na)
     fr_ben, fr_cost, fr_avg, fr_sty, fr_lea = [], [], [], [], []
     for lam in lambdas:
@@ -192,7 +194,7 @@ def crowding_out(RLs=np.array([0.0, 0.10, 0.20, 0.25, 0.30, 0.35, 0.45, 0.60]),
 
 # ============ 4. frontier robustness to the entry-state assumption ============
 @c.restores
-def frontier_entry_robustness(lambdas=np.array([0.15, 0.25, 0.35, 0.45, 0.55, 0.62]),
+def frontier_entry_robustness(lambdas=np.array([0.30, 0.38, 0.46, 0.54, 0.62, 0.70]),
                               nF=121, nR=91, na=25, nq=5, n_paths=30000, seed=7):
     print("[frontier_entry_robustness] new-plan cohort vs the placeholder entry spread")
     Fg, rg, ag = c.grids(nF, nR, na)

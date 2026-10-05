@@ -10,7 +10,7 @@ Every table between `gen` markers is generated from the code by `python experime
 | `pension/objective.py` | none; `OBJECTIVES` is a module-level registry (a dict, mutable by design: add entries to register an objective) |
 | `pension/numeraire.py` | none; lazily imports `rates.accrual` |
 | `pension/dynamics.py` | `step` mutates and returns the `State` it is given (arrays are rebound; `HorizontalLedger` vintages are written in place) |
-| `pension/economy.py` | **process-level caches**: `_CALIBRATION` (no key) and `_SCENARIOS` (keyed by `Params` inputs, unbounded, arrays shared and writeable: REVIEW M3, M4, m7). Module constants `T, G, …, N_EVAL` copied from `DEFAULT` for the tabular rung; `batch` is drawn at import (unused, REVIEW m3) |
+| `pension/economy.py` | **process-level caches**: `_CALIBRATION` (keyed on the data vintage) and `_SCENARIOS` (keyed by `Params` inputs and the vintage, at most `_SCENARIO_CACHE_SIZE` entries, arrays read-only). Module constants `T, G, …, N_EVAL` copied from `DEFAULT` for the tabular rung |
 | `pension/dp.py` | none (pure functions of their arguments, apart from reading the economy caches) |
 | `pension/checks.py` | none (measures and returns) |
 | `pension/envs/pension_env.py` | an env instance holds its state, its RNG and a lazily drawn scenario pool |
@@ -58,8 +58,8 @@ when the employer's money is valued: the timing around the objective.
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
-| `premium_factor(t, r_t, p)` | The factor on a premium paid in year t: A(t, T) given the short rate r_t (scalar or one per path) under "retirement", e^{-DISC_ER t} under "discounted". | dp.py, envs/pension_env.py, exp/walkthrough.py |
-| `premium_schedule(p, rates=None)` | One deterministic factor per year t = 0..T-1, for the DP's Bellman flow. Without a scenario: the constant-rate (or discounted) factor. With a scenario (the certainty-equivalent solve): the scenario MEAN of A(t, T; r_t... | checks.py, dp.py, exp/walkthrough.py |
+| `premium_factor(t, r_t, p)` | The factor on a premium paid in year t: A(t, T) given the short rate r_t (scalar or one per path) under "retirement", e^{-DISC_ER t} under "discounted". | dp.py, envs/pension_env.py, exp/walkthrough.py, tests/test_mechanisms.py |
+| `premium_schedule(p, rates=None)` | One deterministic factor per year t = 0..T-1, for the DP's Bellman flow. Without a scenario: the constant-rate (or discounted) factor. With a scenario (the certainty-equivalent solve): the scenario MEAN of A(t, T; r_t... | checks.py, dp.py, exp/walkthrough.py, tests/test_mechanisms.py |
 | `retirement(p)` |  | dynamics.py |
 | `terminal_factors(p)` | (employee, employer) factors on the terminal legs. | checks.py, dp.py, envs/pension_env.py |
 
@@ -82,16 +82,19 @@ the economic scenario (exogenous world).
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
+| `check_scenario(rates, p)` | A scenario dict must come from p.RATE_MODEL (rates["model"]); otherwise the dynamics would follow one model's G_t, mu_t while the premiums accrue under another's short rate. | dp.py |
+| `data_vintage()` | Identity of the OLO data the calibration was built from: the cache file's path, size and modification time. Part of every scenario key, so a refreshed CSV can never be served stale scenarios (and it invalidates the ca... |  |
 | `draw_rate_scenarios(n_paths=2000, seed=None, model=None, horizon=None, p=None)` | Annual rate scenarios for the reserve/liability simulation. | checks.py, dp.py, envs/pension_env.py, exp/dynpro/rates_suite.py, exp/report_numeraire.py, exp/walkthrough.py ... |
-| `draw_shock_batch(n_paths=2000, seed=12345)` | One frozen batch of noise paths (SAA + common random numbers). None at SIGMA = 0 -> deterministic single-episode evaluation. | envs/tabular.py, exp/tabular/run_tabular.py |
 | `hull_white_p_params(p=None, legacy_sigma=False, phi=None)` | The parameters hull_white_p simulates with. | checks.py, exp/report_numeraire.py, rates/accrual.py |
 | `hull_white_paths(hp, H, n, dt, rng)` | Monthly short-rate paths and the repriced 10Y for Hull-White parameters hp (shared by hull_white and hull_white_p: only kappa, sigma and phi differ). | checks.py |
 | `plan_age(rate0=0.03, step=0.01, band=10)` |  | envs/tabular.py, exp/tabular/run_tabular.py |
 | `plan_fixed(rate=0.05)` |  | envs/tabular.py, exp/tabular/run_tabular.py |
 | `plan_step(rate_low=0.04, rate_high=0.1, ceiling=1.5)` |  | envs/tabular.py, exp/tabular/run_tabular.py |
+| `premonths(p=None)` | Months between the last OLO observation and the start of model year 0. YEAR_START = "january" (default): model years are calendar years, year 0 starts on the first 1 January after the last observation (0 if that obser... | checks.py, exp/walkthrough.py, tests/test_rates.py |
 | `rate_calibration()` | Calibrate once per process, from the cached NBB OLO data: Vasicek (kappa, sigma, theta, r0) on the monthly 10Y history and the NSS curve on the latest cross-section. The rate engine (pension.rates) is imported HERE, n... | checks.py, exp/walkthrough.py, tests/test_rates.py |
-| `vasicek_params(p=None)` | The parameters of the canonical "vasicek" model: kappa, sigma of the 10Y (OLS), theta = p.LONG_RATE_P if set (else the OLS estimate), y0 = the last observed 10Y, and the spread to the short rate, r = y10 - spread (p.S... | exp/report_numeraire.py, exp/walkthrough.py, rates/accrual.py |
+| `vasicek_params(p=None)` | The parameters of the canonical "vasicek" model: kappa, sigma of the 10Y (OLS), y0 = the last observed 10Y, the spread to the short rate, r = y10 - spread (p.SPREAD_10Y_SHORT, or the historical mean 10Y - 1Y if None),... | exp/report_numeraire.py, exp/walkthrough.py, rates/accrual.py, tests/test_mechanisms.py, tests/test_rates.py |
 | `vasicek_short_params(p=None)` | The parameters vasicek_short simulates with: kappa, sigma, theta_Q and the t0 offset as calibrated; theta_P = p.LONG_RATE_P if set (else the OLS estimate), with phi = (theta_P - theta_Q) kappa / sigma recomputed from ... | checks.py, exp/report_numeraire.py, rates/accrual.py, tests/test_rates.py |
+| `year_offset(p=None)` | Calendar time (years) from the curve date (the last observation) to the start of model year 0 -- the shift between model year t and the time axis of a curve-fitted model (hull_white_p's alpha(t)). | checks.py, rates/accrual.py |
 
 ### `pension.dp` (pension/dp.py)
 
@@ -135,7 +138,7 @@ the known-answer checks of the model, as functions that MEASURE.
 | `face_value_premiums(p, Fg, rg, entry, n_paths, seed, a=0.4)` | (c) SHORT_RATE = s = 0: every premium factor of the retirement numeraire is exactly 1, i.e. premiums count at face value (per unit of final salary). The same face value is the discounted objective at DISC_ER = DISC_EM... | exp/report_numeraire.py, tests/test_numeraire.py |
 | `headline(p, Fg, rg, nq, entry, n_paths, seed, band_pct=(0.02, 0.15), na=20, score_p=None)` | (f) The banded optimum under p, scored under score_p (default p): employer cost, joint value, median stayer / leaver total RR, mean contribution (% of salary) by decade. | exp/report_numeraire.py, tests/test_numeraire.py |
 | `horizontal_closed_form(p, G_before=0.03, G_after=0.0175, switch=20, a=0.4, S0=20.0)` | One career, no churn, no shocks, with G stepping G_before -> G_after at year `switch`. Returns (relative error of the horizontal ledger against L_T = L0 e^{G_0 T} + sum_s c_s e^{G_s (T-s)}, and how far the VERTICAL me... | exp/dynpro/rates_suite.py, tests/test_dynamics.py |
-| `hw_p_drift(p, n=4000, years=(1, 5, 10, 20, 30, 44))` | (c) Per year: the scenario mean of r_t (with its standard error) against E^P[r_t] = alpha(t) + m (1 - e^{-kappa t})  (E^Q[r_t] = alpha(t)). | exp/report_numeraire.py, tests/test_rates.py |
+| `hw_p_drift(p, n=4000, years=(1, 5, 10, 20, 30, 44))` | (c) Per year: the scenario mean of r_t (with its standard error) against E^P[r_t] = alpha(t + d) + m (1 - e^{-kappa (t + d)})  (E^Q[r_t] = alpha(t + d)), d = economy.year_offset(p) the calendar time from the curve dat... | exp/report_numeraire.py, tests/test_rates.py |
 | `hw_p_link(n=200)` | (a) With phi = 0 and the legacy sigma, hull_white_p's simulation IS hull_white's: max /difference/ of the monthly short rate and 10Y (must be 0), and of the annual r against the hull_white scenarios (same seed). | exp/report_numeraire.py, tests/test_rates.py |
 | `hw_p_t0_fit(p)` | (b) The model 10Y at t0 against the NSS 10Y (equal: exact fit to today's curve) and against the last observed 10Y (the NSS fitting error). | exp/report_numeraire.py, tests/test_rates.py |
 | `lambda_equivalent(p, de_new, lam=None, de_ref=None)` | The LAMBDA that reproduces (lam, de_new) at the reference DISC_EMP:     lambda'' = A / (A + B*exp(-de_ref*T)),  A = lam*exp(-de_new*T), B = 1-lam. delta_e only multiplies the employee leg by exp(-delta_e*T), so it is ... | exp/dynpro/common.py, exp/dynpro/contribution_schedule_suite.py |
@@ -147,11 +150,10 @@ the known-answer checks of the model, as functions that MEASURE.
 | `numeraire_equivalence(p, Fg, rg, ag, nq, lam, r, de)` | (b) Constant rates. The retirement objective with SHORT_RATE = r, s = 0 at lambda' and the discounted objective with DISC_ER = r, DISC_EMP = de at lambda differ by the positive factor e^{-rT} (1 - lam) / (1 - lambda')... | exp/report_numeraire.py, tests/test_numeraire.py |
 | `reduced_form_gap(p, n=200, seed=0)` | (a) Max /F, rho from dynamics.step - dp.F_next / rho_next/ over one year, constant rates (0 up to floating point). | exp/report_numeraire.py, tests/test_numeraire.py |
 | `scale_invariance(p, Fg, rg, ag, nq, n_paths, seed, k=5.0)` | Max relative change in RR when (R, L, S) are all scaled by k. The model is homogeneous of degree 0, so this must be ~0. | exp/dynpro/scenario_suite.py, tests/test_invariants.py |
-| `scenario_stats(p, model, n=2000)` | Distribution of the annual short rate r_t, the 10Y, G_t, mu_t and the realised accrual of `model`'s scenarios at a few years: dict year -> stats. | exp/report_numeraire.py |
 | `timing_neutrality(p, Fg, rg, nq, entry, n_paths, seed, band_pct=(0.02, 0.15), na=20)` | (early, late) mean contribution (% of salary, years 0-9 and 35-44) when a contribution's cost and value grow alike: SHORT_RATE = MU = G under the retirement numeraire (premiums accrue at the rate R and L earn), DISC_E... | exp/dynpro/scenario_suite.py, exp/report_numeraire.py, tests/test_invariants.py, tests/test_numeraire.py |
 | `vasicek_short_fit(p=None)` | Calibration and fit of the P-measure Vasicek short rate: the maturity used as short-rate proxy, kappa, theta_P (OLS, and the one simulated: p.LONG_RATE_P if set), sigma, the significance of the mean reversion, theta_Q... | exp/report_numeraire.py, tests/test_rates.py |
 | `vol_target(p, n=500, years=10)` | (d) Std of the model's monthly 10Y changes (first `years` years, pooled) against the historical std of monthly 10Y changes; for hull_white_p and for hull_white (legacy sigma). Also B(10)/10, hull_white's understatemen... | exp/report_numeraire.py, tests/test_rates.py |
-| `wap_scenario_stats(p, model, n=2000)` | min, max, distance from the 25 bp grid, and G_0 of the WAP rates of n scenarios of `model`. | exp/dynpro/rates_suite.py, tests/test_rates.py |
+| `wap_scenario_stats(p, model, n=2000)` | min, max, distance from the 25 bp grid, and G_0 of the WAP rates of n scenarios of `model`; G0_observed is the statutory formula applied directly to year 0's window of the OLO history (None if that window reaches past... | exp/dynpro/rates_suite.py, exp/walkthrough.py, tests/test_rates.py |
 | `wap_vs_fsma(years={2016: 1.75, 2017: 1.75, 2018: 1.75, 2019: 1.75, 2020: 1.75, 2021: 1.75, 2022: 1...)` | {year: (WAP rate from the statutory formula on the cached NBB data, rate published by the FSMA)}, in %. 2027 is left out on purpose: the formula gives 2.75% against 2.50% published (see pension/rates/wap.py). | exp/dynpro/rates_suite.py, tests/test_rates.py |
 
 ### `pension.envs.pension_env` (pension/envs/pension_env.py)
@@ -171,7 +173,7 @@ the funding problem as a gymnasium environment (the RL rung).
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
 | `check_batch_consistency(plan, n_check=5, seed=99)` | run_batch must agree with run_episode path-by-path. | exp/tabular/run_tabular.py |
-| `draw_shock_batch(n_paths=2000, seed=12345)` | One frozen batch of noise paths (SAA + common random numbers). None at SIGMA = 0 -> deterministic single-episode evaluation. | economy.py, exp/tabular/run_tabular.py |
+| `draw_shock_batch(n_paths=2000, seed=12345)` | One frozen batch of noise paths (SAA + common random numbers). None at SIGMA = 0 -> deterministic single-episode evaluation. | exp/tabular/run_tabular.py |
 | `evaluate_policy(policy, plan)` | Replay a fixed policy and return unscaled economic metrics. policy: array of 0/1 actions of length T. | exp/tabular/run_tabular.py |
 | `gap_benchmark(plan, batch=None)` | Certified optimal policy under linearity, with self-check. Environment-driven: every number comes from run_episode. | exp/tabular/run_tabular.py |
 | `local_search_benchmark(plan, batch=None, extra_seeds=4, seed=0)` | Optimal against all 1- and 2-year deviations. Assumes nothing about linearity or monotonicity. Successor benchmark for when gap_benchmark's linearity flag goes false. | exp/tabular/run_tabular.py |
@@ -189,6 +191,7 @@ the funding problem as a gymnasium environment (the RL rung).
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
+| `cache_path()` | The CSV cache of the NBB OLO yields. | economy.py |
 | `extractDataYieldNBB(startPeriod: str = '1993-03', endPeriod: str = '2026-10') -> pandas.core.frame.DataFrame` |  |  |
 | `load_olo(startPeriod: str = '2000-01', cache: str = None, refresh: bool = False)` | OLO data the economy needs, fetched from the NBB once and then read from a CSV cache, so environments build offline and every run calibrates on the SAME data. Delete the cache (or pass refresh=True) to pull a newer vi... | checks.py, economy.py, exp/olo/plots.py, exp/olo/validation.py, exp/walkthrough.py |
 | `load_olo_short(cache: str = None)` | The monthly history of the SHORTEST OLO maturity in the data -- the short-rate proxy of RATE_MODEL="vasicek_short". Returns (maturity label, DataFrame with DATE and YIELD in %), on the same dates as the 10Y series of ... | economy.py |
@@ -234,7 +237,7 @@ the statutory WAP/LPC return guarantee rate G_t (art.
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
 | `computeWAPRate(y10_monthly, start_row, n_years, months_per_year=12)` | Annual WAP guarantee rate per path from a monthly 10Y yield series. | checks.py, economy.py, exp/walkthrough.py |
-| `wap_formula(avg10y)` | The statutory map from a 24-month average 10Y yield (decimal) to G (decimal). | exp/walkthrough.py, tests/test_rates.py |
+| `wap_formula(avg10y)` | The statutory map from a 24-month average 10Y yield (decimal) to G (decimal). | checks.py, exp/walkthrough.py, tests/test_rates.py |
 
 ### `pension.rates.accrual` (pension/rates/accrual.py)
 
@@ -242,7 +245,7 @@ the real-world accrual factor of a premium paid at t until retirement T.
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
-| `closed_form_accrual(t, r_t, p, s=0.0)` | A(t, T) for p.RATE_MODEL in {"vasicek", "vasicek_short", "hull_white_p"}; r_t (the SHORT rate at t) scalar or array (one per path). T = p.T; the financing spread s is added per year. | checks.py, exp/walkthrough.py, numeraire.py, tests/test_rates.py |
+| `closed_form_accrual(t, r_t, p, s=0.0)` | A(t, T) for p.RATE_MODEL in {"vasicek", "vasicek_short", "hull_white_p"}; r_t (the SHORT rate at t) scalar or array (one per path). T = p.T; the financing spread s is added per year. | checks.py, exp/walkthrough.py, numeraire.py, tests/test_mechanisms.py, tests/test_rates.py |
 | `hull_white_alpha(t, kappa, sigma, curve)` | alpha(t) = f(0,t) + sigma^2/(2 kappa^2) (1 - e^{-kappa t})^2. | checks.py |
 | `hull_white_alpha_integral(t, T, kappa, sigma, curve)` | int_t^T alpha(u) du, analytic. |  |
 
@@ -256,13 +259,13 @@ the real-world accrual factor of a premium paid at t until retirement T.
 | field | default | unit | meaning | used by | inert (canonical) |
 |---|---|---|---|---|---|
 | `T` | `45` | years | career length | everything | no |
-| `G` | `0.03` | 1/yr | WAP guarantee rate (constant model) | dynamics (vertical ledger), dp | vasicek: yes (CE sets it) |
-| `MU` | `0.03` | 1/yr | credited log-return (constant model) | dynamics, dp, paidup_service | vasicek: yes (CE sets it) |
+| `G` | `0.03` | 1/yr | WAP guarantee rate (constant model): mean growth of the vertical ledger | dynamics (vertical ledger), dp | vasicek: yes (CE sets it) |
+| `MU` | `0.03` | 1/yr | mean credited return, E[growth] = e^MU (constant model; median with DRIFT_CORRECTION off) | dynamics, dp, paidup_service | vasicek: yes (CE sets it) |
 | `W` | `0.025` | 1/yr | salary growth | dynamics, objective contribution leg, dp | no |
 | `S0` | `1.0` | salary | starting salary (scale-free) | nothing in the DP/env (tabular via economy) | yes |
 | `DISC_EMP` | `0.03` | 1/yr | employee discount rate | numeraire (discounted only) | yes |
 | `DISC_ER` | `0.05` | 1/yr | employer discount rate | numeraire (discounted only) | yes |
-| `DISC` | `0.05` | 1/yr | tabular rung's discount (legacy copy) | nothing (tabular reads economy.DISC) | yes |
+| `DISC` | `0.05` | 1/yr | tabular default, read once at import into economy.DISC | nothing after import (tabular reads economy.DISC) | yes |
 | `SIGMA_R` | `0.05` | 1/sqrt(yr) | asset shock (constant model) | dynamics, dp | vasicek: yes (CE sets it) |
 | `SIGMA_L` | `0.02` | 1/sqrt(yr) | guarantee shock (vertical ledger) | dynamics, dp | vasicek: yes (CE sets it) |
 | `SIGMA` | `0.05` | 1/sqrt(yr) | tabular rung's shock (legacy copy) | nothing (tabular reads economy.SIGMA) | yes |
@@ -281,8 +284,11 @@ the real-world accrual factor of a premium paid at t until retirement T.
 | `BOOK_DURATION` | `8` | years | book-yield averaging window | economy | no |
 | `BOOK_SPREAD` | `0.0` | 1/yr | book yield over the 10Y | economy | no |
 | `SIGMA_R_RATES` | `0.05` | 1/sqrt(yr) | excess-return noise on the book yield | dynamics, dp.certainty_equivalent | no |
-| `LONG_RATE_P` | `None` | 1/yr | long-run P level (meaning differs per model, REVIEW M1) | economy params helpers, accrual | no |
+| `LONG_RATE_P` | `None` | 1/yr | long-run real-world short rate (every model; vasicek: theta = this + spread) | economy params helpers, accrual | no |
 | `SPREAD_10Y_SHORT` | `None` | 1/yr | vasicek: r = y10 - spread (None: historical mean) | economy.vasicek_params, accrual | no |
+| `DRIFT_CORRECTION` | `True` | bool | shocked growth e^{m - s^2/2 + s z} (mean e^m); False: legacy e^{m + s z} (REVIEW M6) | dynamics.step, dp.F_next/rho_next | no |
+| `CE_MOMENTS` | `'conditional'` | name | CE shocks: 'conditional' (SIGMA_L = 0, SIGMA_R = SIGMA_R_RATES) | 'levels' (legacy, REVIEW M10) | dp.certainty_equivalent | constant: yes |
+| `YEAR_START` | `'january'` | name | 'january': model years are calendar years | 't0' (legacy, REVIEW C1) | economy, accrual (hull_white_p) | constant: yes |
 | `RATE_CE_PATHS` | `5000` | - | scenarios behind the CE solve | dp.solve | no |
 | `EMPLOYER_NUMERAIRE` | `'retirement'` | name | valuation date: 'retirement' | 'discounted' (REVIEW m9) | numeraire | no |
 | `SHORT_RATE` | `0.03` | 1/yr | short rate of the constant model | numeraire, dynamics.Exogenous | vasicek: yes |
@@ -308,21 +314,21 @@ Each entry combines four parts: an employee leg, a shortfall cost, a contributio
 
 ## Checks (`pension.checks`)
 
-Each check returns what it measures; the tests assert on it. "Tolerance" is the first `assert` of each test that calls the check. Weak tolerances are discussed in REVIEW M12.
+Each check returns what it measures; the tests assert on it. "Tolerance" is the first `assert` of each test that calls the check. The tolerances were tightened in the REVIEW fix round (M12).
 
 <!-- gen:checks -->
 | check | what it measures (known answer) | tolerance (first assert) | asserted in |
 |---|---|---|---|
-| `accrual_accuracy` | (e) Per payment year t: the Monte Carlo mean of the realised accrual to T, prod_{u >= t} acc_u (monthly r * dt sums), against the mean of the closed-form conditional A(t, T; r_t) over the same paths (tower property). Reported as the relative error of the paired difference and its standard error. | `assert abs(d["rel_err"]) < 4 * d["rel_se"] + 1e-3`<br>`assert abs(d["rel_err"]) < 4 * d["rel_se"] + 1e-3` | `test_numeraire.py::test_accrual_accuracy_vasicek`<br>`test_rates.py::test_closed_form_accrual_matches_monte_carlo` |
-| `cross_scores` | J[i, j]: the policy optimised under objective i (policies: {name: policy}), scored under objective j; and floor[j], the score of the constant floor_a policy. An objective's own policy must be best in its column. | `assert np.all(margin <= 0.01)` | `test_objective.py::test_each_objective_prefers_its_own_policy` |
+| `accrual_accuracy` | (e) Per payment year t: the Monte Carlo mean of the realised accrual to T, prod_{u >= t} acc_u (monthly r * dt sums), against the mean of the closed-form conditional A(t, T; r_t) over the same paths (tower property). Reported as the relative error of the paired difference and its standard error. | `assert abs(d["rel_err"]) < 4 * d["rel_se"] + 1e-5`<br>`assert abs(d["rel_err"]) < 4 * d["rel_se"] + 1e-5` | `test_numeraire.py::test_accrual_accuracy_vasicek`<br>`test_rates.py::test_closed_form_accrual_matches_monte_carlo` |
+| `cross_scores` | J[i, j]: the policy optimised under objective i (policies: {name: policy}), scored under objective j; and floor[j], the score of the constant floor_a policy. An objective's own policy must be best in its column. | `assert np.all(margin <= 0.01)`<br>`assert np.all(margin <= 0.002)` | `test_objective.py::test_each_objective_prefers_its_own_policy`<br>`test_objective.py::test_each_objective_prefers_its_own_policy_protocol_grid` |
 | `degenerate_rates_gap` | A rate scenario with G_t = G, mu_t = MU (SIGMA_L = 0) against the constant model: max gap in joint value and RR -- must be ~0. | `assert checks.degenerate_rates_gap(p, grid["Fg"], grid["rg"], entry, 2000, 7) < 1e-10` | `test_rates.py::test_degenerate_scenario_is_the_constant_model` |
-| `diagonal_margin` | Per column j: how far the best OTHER policy is above j's own optimum (<= 0 means the diagonal wins), as a fraction of j's gain over the floor (relative_to="gain") or of ∣J_jj∣ ("value"). The gain normalisation is ill-conditioned when an objective barely beats the floor (it amplifies grid error); the value normalisation is not. Returns (margins, best other index). | `assert np.all(margin <= 0.01)` | `test_objective.py::test_each_objective_prefers_its_own_policy` |
+| `diagonal_margin` | Per column j: how far the best OTHER policy is above j's own optimum (<= 0 means the diagonal wins), as a fraction of j's gain over the floor (relative_to="gain") or of ∣J_jj∣ ("value"). The gain normalisation is ill-conditioned when an objective barely beats the floor (it amplifies grid error); the value normalisation is not. Returns (margins, best other index). | `assert np.all(margin <= 0.01)`<br>`assert np.all(margin <= 0.002)` | `test_objective.py::test_each_objective_prefers_its_own_policy`<br>`test_objective.py::test_each_objective_prefers_its_own_policy_protocol_grid` |
 | `env_contract` | (a) ∣mean PensionEnv episode return - simulate()["joint"]∣ on the same paths, with the solved policy (0 up to floating point). | `assert checks.env_contract(p.replace(EMPLOYER_NUMERAIRE=num), grid["Fg"], grid["rg"], grid["ag"], grid["nq"], small, 200, 7) < 1e-12` | `test_numeraire.py::test_env_contract_both_numeraires` |
 | `eta_log_limit` | (∣u - log∣ at eta=1, ∣u(eta=1) - u(eta=1+eps)∣): u is log at eta=1 and continuous there. | `assert to_log < 1e-12 and jump < 1e-3` | `test_invariants.py::test_eta_one_is_log` |
 | `face_value_premiums` | (c) SHORT_RATE = s = 0: every premium factor of the retirement numeraire is exactly 1, i.e. premiums count at face value (per unit of final salary). The same face value is the discounted objective at DISC_ER = DISC_EMP = 0, so the two must give the same cost and joint value. Returns (max ∣factor - 1∣, max ∣difference∣ in cost and joint). | `assert f == 0.0 and d < 1e-12` | `test_numeraire.py::test_face_value_premiums` |
 | `headline` | (f) The banded optimum under p, scored under score_p (default p): employer cost, joint value, median stayer / leaver total RR, mean contribution (% of salary) by decade. | `assert len(h["by_decade"]) == 5 and h["cost"] > 0` | `test_numeraire.py::test_headline_runs` |
 | `horizontal_closed_form` | One career, no churn, no shocks, with G stepping G_before -> G_after at year `switch`. Returns (relative error of the horizontal ledger against L_T = L0 e^{G_0 T} + sum_s c_s e^{G_s (T-s)}, and how far the VERTICAL method -- every euro at the current rate -- would land from it). | `assert rel < 1e-12 and abs(vertical_gap) > 0.05` | `test_dynamics.py::test_horizontal_ledger_closed_form` |
-| `hw_p_drift` | (c) Per year: the scenario mean of r_t (with its standard error) against E^P[r_t] = alpha(t) + m (1 - e^{-kappa t})  (E^Q[r_t] = alpha(t)). | `assert abs(d["mc"] - d["analytic"]) < 4 * d["se"]` | `test_rates.py::test_hw_p_real_world_drift` |
+| `hw_p_drift` | (c) Per year: the scenario mean of r_t (with its standard error) against E^P[r_t] = alpha(t + d) + m (1 - e^{-kappa (t + d)})  (E^Q[r_t] = alpha(t + d)), d = economy.year_offset(p) the calendar time from the curve date to model year 0. | `assert abs(d["mc"] - d["analytic"]) < 4 * d["se"]` | `test_rates.py::test_hw_p_real_world_drift` |
 | `hw_p_link` | (a) With phi = 0 and the legacy sigma, hull_white_p's simulation IS hull_white's: max ∣difference∣ of the monthly short rate and 10Y (must be 0), and of the annual r against the hull_white scenarios (same seed). | `assert checks.hw_p_link(n=50) == dict(r=0.0, y10=0.0, scenario_r=0.0)` | `test_rates.py::test_hw_p_reproduces_hull_white_at_phi_zero_and_legacy_sigma` |
 | `hw_p_t0_fit` | (b) The model 10Y at t0 against the NSS 10Y (equal: exact fit to today's curve) and against the last observed 10Y (the NSS fitting error). | `assert abs(f["model_10y_t0"] - f["nss_10y"]) < 1e-12 and abs(f["r0"] - f["f00"]) < 1e-12` | `test_rates.py::test_hw_p_fits_todays_curve` |
 | `lambda_equivalent` | The LAMBDA that reproduces (lam, de_new) at the reference DISC_EMP:     lambda'' = A / (A + B*exp(-de_ref*T)),  A = lam*exp(-de_new*T), B = 1-lam. delta_e only multiplies the employee leg by exp(-delta_e*T), so it is a LAMBDA change up to a positive rescale of the objective. |  | via other checks |
@@ -334,10 +340,9 @@ Each check returns what it measures; the tests assert on it. "Tolerance" is the 
 | `numeraire_equivalence` | (b) Constant rates. The retirement objective with SHORT_RATE = r, s = 0 at lambda' and the discounted objective with DISC_ER = r, DISC_EMP = de at lambda differ by the positive factor e^{-rT} (1 - lam) / (1 - lambda'), so the policy must coincide. Returns (max ∣policy difference∣, max relative deviation of V_old / V_new from that factor, lambda'). | `assert dpol < 1e-6 and dV < 1e-10` | `test_numeraire.py::test_retirement_equals_discounted_at_lambda_prime` |
 | `reduced_form_gap` | (a) Max ∣F, rho from dynamics.step - dp.F_next / rho_next∣ over one year, constant rates (0 up to floating point). | `assert checks.reduced_form_gap(p) < 1e-12` | `test_numeraire.py::test_reduced_form_matches_step` |
 | `scale_invariance` | Max relative change in RR when (R, L, S) are all scaled by k. The model is homogeneous of degree 0, so this must be ~0. | `assert checks.scale_invariance(p, grid["Fg"], grid["rg"], grid["ag"], grid["nq"], N, SEED) < 1e-12` | `test_invariants.py::test_scale_invariance` |
-| `scenario_stats` | Distribution of the annual short rate r_t, the 10Y, G_t, mu_t and the realised accrual of `model`'s scenarios at a few years: dict year -> stats. |  | **none** |
-| `timing_neutrality` | (early, late) mean contribution (% of salary, years 0-9 and 35-44) when a contribution's cost and value grow alike: SHORT_RATE = MU = G under the retirement numeraire (premiums accrue at the rate R and L earn), DISC_ER = DISC_EMP = MU under the discounted one. The benefit/cost ratio is then flat in t, so the schedule must be roughly level. Constant rates only. | `assert abs(early - late) / max(early, late) < 0.25`<br>`assert abs(early - late) / max(early, late) < 0.25` | `test_invariants.py::test_timing_neutral_when_discounts_equal_mu`<br>`test_numeraire.py::test_timing_neutral_at_short_rate_equal_mu` |
+| `timing_neutrality` | (early, late) mean contribution (% of salary, years 0-9 and 35-44) when a contribution's cost and value grow alike: SHORT_RATE = MU = G under the retirement numeraire (premiums accrue at the rate R and L earn), DISC_ER = DISC_EMP = MU under the discounted one. The benefit/cost ratio is then flat in t, so the schedule must be roughly level -- provided the reserve's MEAN return is MU, i.e. DRIFT_CORRECTION (REVIEW M6; without it the mean is MU + SIGMA_R^2/2 and early funding pays). Constant rates only. | `assert abs(early - late) / max(early, late) < 0.08`<br>`assert abs(early - late) / max(early, late) < 0.08`<br>`assert (early - late) / early > 0.10` | `test_invariants.py::test_timing_neutral_when_discounts_equal_mu`<br>`test_numeraire.py::test_timing_neutral_at_short_rate_equal_mu`<br>`test_numeraire.py::test_legacy_drift_tilts_towards_early_funding` |
 | `vasicek_short_fit` | Calibration and fit of the P-measure Vasicek short rate: the maturity used as short-rate proxy, kappa, theta_P (OLS, and the one simulated: p.LONG_RATE_P if set), sigma, the significance of the mean reversion, theta_Q and phi, the in-sample fit of the reconstructed 10Y from the observed short rate (RMSE, bias -- zero by construction --, correlation, RMSE over the last 24 months), the jump at t0, and the AR(1) decay of the t0 offset (phi_e, its standard error, half-life, and whether the kappa fallback is used). | `assert f["maturity"] == "1Y"`<br>`assert f1["theta_P"] == 0.0225 and f0["theta_P"] == f0["theta_P_ols"]` | `test_rates.py::test_vasicek_short_calibration`<br>`test_rates.py::test_vasicek_short_long_rate_anchor` |
 | `vol_target` | (d) Std of the model's monthly 10Y changes (first `years` years, pooled) against the historical std of monthly 10Y changes; for hull_white_p and for hull_white (legacy sigma). Also B(10)/10, hull_white's understatement factor. | `assert abs(v["hull_white_p"] / v["historical"] - 1) < 0.05` | `test_rates.py::test_hw_p_hits_the_10y_volatility` |
-| `wap_scenario_stats` | min, max, distance from the 25 bp grid, and G_0 of the WAP rates of n scenarios of `model`. | `assert st["min"] >= 0.0175 - 1e-12 and st["max"] <= 0.0375 + 1e-12` | `test_rates.py::test_wap_rates_of_scenarios` |
+| `wap_scenario_stats` | min, max, distance from the 25 bp grid, and G_0 of the WAP rates of n scenarios of `model`; G0_observed is the statutory formula applied directly to year 0's window of the OLO history (None if that window reaches past the last observation, so G_0 is not yet known). | `assert st["min"] >= 0.0175 - 1e-12 and st["max"] <= 0.0375 + 1e-12` | `test_rates.py::test_wap_rates_of_scenarios` |
 | `wap_vs_fsma` | {year: (WAP rate from the statutory formula on the cached NBB data, rate published by the FSMA)}, in %. 2027 is left out on purpose: the formula gives 2.75% against 2.50% published (see pension/rates/wap.py). | `assert abs(ours - published) < 1e-9` | `test_rates.py::test_wap_formula_reproduces_fsma_rates` |
 <!-- /gen -->

@@ -133,17 +133,17 @@ def _matched(fr, m):
 
 # ============ 1. the table ============
 # The frontier is DOUBLY CENSORED by the contribution band, so a uniform lambda grid
-# wastes most of its points. Measured at the committed calibration:
-#     lambda <= 0.15  pinned at the band FLOOR    (cost 0.0750, styRR 0.507)
-#     lambda >= 0.60  pinned at the band CEILING  (cost 0.5606, styRR 0.981)
-# Everything that varies happens in between, and every market design lands at a cost
-# of 0.11-0.30, i.e. around lambda 0.28-0.48. A uniform 0.1-0.95 grid put 7 of 10
-# points on the two flat stretches and left 4 to cover the whole informative range.
-# The grid below is concentrated there instead, with 0.15 and 0.60 kept as brackets.
+# wastes most of its points. Measured under the canonical objective (retirement-date
+# money, DRIFT_CORRECTION, constant rates; protocol grid, 15000 paths; REVIEW M13):
+#     lambda <= 0.30  pinned at the band FLOOR    (cost 0.3855, styRR 0.506, 2.0% of salary)
+#     lambda >= 0.72  pinned at the band CEILING  (cost 2.8766, styRR 0.974, 15.0%)
+# with the interior between (lambda 0.40: 3.2% of salary, 0.50: 7.3%, 0.60: 12.6%).
+# (Under the old discounted objective the same stretch was lambda 0.15-0.60.)
+# The grid below covers the interior, with 0.30 and 0.72 kept as brackets.
 # Interpolation between the points CHORDS a concave frontier, so every matched figure
 # stays conservative: the optimum is at least this much better, never less.
-FRONTIER_LAMBDAS = (0.15, 0.18, 0.21, 0.24, 0.27, 0.30, 0.33, 0.36, 0.39, 0.42,
-                    0.45, 0.48, 0.51, 0.54, 0.57, 0.60)
+FRONTIER_LAMBDAS = (0.30, 0.33, 0.36, 0.39, 0.42, 0.45, 0.48, 0.51, 0.54, 0.57,
+                    0.60, 0.63, 0.66, 0.69, 0.72)
 
 
 def table(lambdas=FRONTIER_LAMBDAS, **g):

@@ -72,10 +72,12 @@ def closed_form_accrual(t, r_t, p, s=0.0):
         kappa, sigma = vp["kappa"], vp["sigma"]
         mean = vp["theta_P"] * tau + (r_t - vp["theta_P"]) * _B(kappa, tau)
     elif p.RATE_MODEL == "hull_white_p":
+        from pension.economy import year_offset
         hp = hull_white_p_params(p)
         kappa, sigma, m = hp["kappa"], hp["sigma"], hp["m"]
-        x_t = r_t - hull_white_alpha(t, kappa, sigma, hp["curve"])
-        mean = hull_white_alpha_integral(t, p.T, kappa, sigma, hp["curve"]) \
+        d = year_offset(p)                               # model year t is curve time t + d
+        x_t = r_t - hull_white_alpha(t + d, kappa, sigma, hp["curve"])
+        mean = hull_white_alpha_integral(t + d, p.T + d, kappa, sigma, hp["curve"]) \
             + m * tau + (x_t - m) * _B(kappa, tau)
     else:
         raise ValueError(f"no real-world accrual for RATE_MODEL={p.RATE_MODEL!r}: use "

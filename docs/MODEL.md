@@ -8,12 +8,12 @@ All money is expressed **per unit of final salary** $S_T$, and in **retirement-d
 
 | symbol | meaning | unit | code |
 |---|---|---|---|
-| $t = 0,\dots,T-1$ | model year (year 0 starts at t0, the last OLO observation) | years | loop index |
+| $t = 0,\dots,T-1$ | model year: a calendar year, year 0 starting on the first 1 January after the last OLO observation (`YEAR_START = "january"`; `"t0"`: at the observation itself, legacy) | years | loop index |
 | $R_t$, $L_t$, $S_t$ | reserve, guaranteed reserve (WAP liability), salary | money | `State.R`, `State.L`, `State.S` |
 | $F_t = R_t/L_t$, $\rho_t = S_t/L_t$ | funding ratio, salary-to-liability ratio | – | `State.F`, `State.rho` |
 | $a_t\in[0,1]$ | funding decision, share of capacity | – | action |
 | $c_t = a_t\,\Gamma\,S_t$ | premium | money | `step` |
-| $\mu_t$, $G_t$ | credited log-return, WAP guarantee rate | 1/yr | `Exogenous.mu`, `.G` (constant: `MU`, `G`) |
+| $\mu_t$, $G_t$ | credited return (mean log-growth $e^{\mu}$), WAP guarantee rate | 1/yr | `Exogenous.mu`, `.G` (constant: `MU`, `G`) |
 | $r_t$, $s$ | short rate, financing spread | 1/yr | `Exogenous.r` (constant: `SHORT_RATE`), `FINANCING_SPREAD` |
 | $z_R$, $z_L$ | asset and guarantee shocks, $N(0,1)$ | – | `Exogenous.zR`, `.zL` |
 | $\tau$ | year of leaving ($T$ if the member stays) | years | `State.leave_t` |
@@ -79,7 +79,7 @@ $$
 Canonical vasicek: $\kappa$ = 0.1104, $\theta$ = 2.23% (OLS; `LONG_RATE_P` = None), $\sigma$ = 0.61%, $y_0$ = 4.12%, spread = 128.4 bp.
 <!-- /gen -->
 
-`LONG_RATE_P` replaces θ, the asymptotic mean of the **10Y**, so the implied long-run short rate is θ − spread. In the other real-world models `LONG_RATE_P` is a short rate (REVIEW M1).
+`LONG_RATE_P` is the long-run real-world **short** rate in every model. Under vasicek it sets θ = `LONG_RATE_P` + spread, the asymptotic mean of the 10Y (`None`: the OLS θ, so the long-run short rate is θ − spread).
 
 ## 3. Why the retirement date
 
@@ -102,15 +102,15 @@ For every path, with $a_t = 0$ once the member has left:
 | | in force | paid-up (after leaving) |
 |---|---|---|
 | premium | $c_t = a_t\Gamma S_t$ | 0 |
-| reserve | $R_{t+1} = (R_t + c_t)\,e^{\mu_t + \sigma z_R}$ | $R_{t+1} = R_t\,e^{\mu_t}$ (no shock) |
+| reserve | $R_{t+1} = (R_t + c_t)\,e^{\mu_t - \sigma^2/2 + \sigma z_R}$ | $R_{t+1} = R_t\,e^{\mu_t}$ (no shock) |
 | liability | see the ledgers | frozen: $L_{t+1}=L_t$ |
 | salary | $S_{t+1} = (1+W)S_t$ | same |
 | churn | leaves with probability $h(t)$: $u_t < h(t)$ | – |
 
-$\sigma$ is `SIGMA_R` at constant rates and `SIGMA_R_RATES` under a rate model. In force, the mean growth of $R$ is $\mu + \sigma^2/2$; paid-up it is $\mu$ (REVIEW M6).
+$\sigma$ is `SIGMA_R` at constant rates and `SIGMA_R_RATES` under a rate model. The $-\sigma^2/2$ (`DRIFT_CORRECTION`, default) makes $\mu$ the mean growth of $R$ both in force and paid-up: $\mathbb E[e^{\mu - \sigma^2/2 + \sigma z}] = e^{\mu}$. With `DRIFT_CORRECTION = False` (legacy) the in-force mean is $\mu + \sigma^2/2$.
 
 **Ledgers.**
-- **Vertical** (constant rates): $L_{t+1} = (L_t + c_t)\,e^{G + \sigma_L z_L}$.
+- **Vertical** (constant rates): $L_{t+1} = (L_t + c_t)\,e^{G - \sigma_L^2/2 + \sigma_L z_L}$ (mean growth $e^G$; legacy without the $-\sigma_L^2/2$).
 - **Horizontal** (rate models, the Branch-21 method): each premium is a vintage locked at the $G_t$ of its year. The opening liability is locked at $G_0$.
 $$
 L_{t+1} = \sum_{v\le t} L^{(v)}_t e^{G_v} + c_t e^{G_t},\qquad L = \sum_v L^{(v)}.
@@ -121,9 +121,9 @@ $$
 
 **When it suffices.** Dividing the vertical, constant-rate year by $L$, with $l = a\Gamma\rho$:
 $$
-F' = \frac{F + l}{1+l}\,e^{(\mu-G) + \sigma_R z_R - \sigma_L z_L},
+F' = \frac{F + l}{1+l}\,e^{(\mu-\sigma_R^2/2) - (G-\sigma_L^2/2) + \sigma_R z_R - \sigma_L z_L},
 \qquad
-\rho' = \frac{(1+W)\rho}{(1+l)\,e^{G+\sigma_L z_L}}
+\rho' = \frac{(1+W)\rho}{(1+l)\,e^{G-\sigma_L^2/2+\sigma_L z_L}}
 $$
 (`dp.F_next`, `dp.rho_next`; contract C2).
 - The premium cost $a\Gamma(1+W)^{-(T-t)}A(t,T)$ depends only on $(a,t)$.
@@ -160,12 +160,12 @@ $$
 - **Churn blend:** a leaver still pays year $t$; the freeze applies from $t+1$.
 - **Paid-up value:** $\Phi_\tau(F,\rho)$ (`paidup_service`) is closed-form, since nothing random remains: $F\to Fe^{\mu m}$, $\rho\to\rho(1+W)^m$ with $m = T-\tau$, valued against $\text{target}_\tau$.
 - **Quadrature:** a tensor-product Gauss-Hermite rule over $(z_R,z_L)$ (`gauss_hermite_2d`, default 5×5; converged, REVIEW m11).
-- **Interpolation:** `bilinear` over $(F,\log\rho)$; off-grid points are clipped to the edge (REVIEW m10).
+- **Interpolation:** `bilinear` over $(F,\log\rho)$; off-grid points are clipped to the edge; `simulate()["clipped"]` reports the share of in-force look-ups that were.
 - **Policy extraction:** the argmax, or with `BETA > 0` a softmax over actions with temperature relative to the local Q-range (`_soft_readout`). $V$ is $\max_a Q$ either way.
 
 **Rate mode: certainty equivalent.** The state cannot carry $r_t$, the WAP window or the vintage mix. `solve` draws `RATE_CE_PATHS` scenarios and solves the constant-rate DP with:
 - $G, \mu$ = the scenario means;
-- $\sigma_L$ = the std of $G_t$, and $\sigma_R = \sqrt{\sigma_{R,rates}^2 + \text{var}(\mu_t)}$ (REVIEW M10);
+- $\sigma_L = 0$ and $\sigma_R = \sigma_{R,rates}$ (`CE_MOMENTS = "conditional"`, default): $G_t$ is fixed on 1 January and $\mu_t$ is the book yield up to then, so neither is a shock within the year. (`"levels"`, legacy: $\sigma_L$ = the std of the levels of $G_t$, $\sigma_R = \sqrt{\sigma_{R,rates}^2 + \text{var}(\mu_t)}$);
 - a vertical ledger;
 - $\pi_t$ = the scenario mean of $A(t,T;r_t)$.
 
