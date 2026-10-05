@@ -1,7 +1,5 @@
-import os
 import numpy as np
-import matplotlib.pyplot as plt
-from olo.calibration import nss_yield, nss_forward    # already in your module
+from pension.rates.calibration import nss_yield, nss_forward
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -129,22 +127,3 @@ def computeCumulativeDiscountFactors(paths, dt=1/12):
     D = np.ones_like(paths)
     D[1:, :] = np.exp(-np.cumsum(paths[:-1, :] * dt, axis=0))
     return D
-
-
-# ── Runner notes (fixes for the script you had) ───────────────────────────
-# Three bugs in the previous runner:
-#   1. `curve` was never built — call bootstrapForwardCurve first.
-#   2. `actual_maturities` / `actual_yields` were undefined — use maturities/yields.
-#   3. the t=0 Hull-White curve was drawn at the Vasicek r0 (the 10Y level); it
-#      must be drawn at the instantaneous short rate f(0,0)=β0+β1, at which point
-#      it overlays the OLO market curve EXACTLY (that's the no-arbitrage property).
-#
-# from olo.calibration import bootstrapForwardCurve, calibrateVasicek
-# results = calibrateVasicek(df10Y)
-# curve   = bootstrapForwardCurve(maturities, yields)     # provides "params"
-# k, s    = results["kappa"], results["sigma"]
-# f00     = curve["params"][0] + curve["params"][1]       # f(0,0) = β0+β1
-#
-# yields_hw = [-np.log(hullWhiteBondPrice(f00, t=0, kappa=k, sigma=s,
-#                                         tau=tau, curve=curve)) / tau * 100
-#              for tau in maturities]          # ← overlays the OLO market line

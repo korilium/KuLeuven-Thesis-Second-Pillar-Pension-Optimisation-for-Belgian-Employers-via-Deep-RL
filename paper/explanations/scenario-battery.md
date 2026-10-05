@@ -1,11 +1,11 @@
 # The Scenario Battery — What Each Regime Is, and Why It Was Chosen
 
-`tests/dynpro/scenario_suite.py` runs a fixed set of named parameter regimes rather
+`experiments/dynpro/scenario_suite.py` runs a fixed set of named parameter regimes rather
 than a sweep. This note explains the selection: what each group tests, why those
 particular configurations, and what the model actually does in each.
 
 A final section covers the market-plan benchmark in
-`tests/dynpro/benchmark_suite.py`, which runs on the same protocol.
+`experiments/dynpro/benchmark_suite.py`, which runs on the same protocol.
 
 All numbers below come from `scenario_suite.py table` on the committed calibration
 (`MU = G = DISC_EMP = 0.03`, `DISC_ER = 0.05`, `BETA = 0.01`, `SATIATE = False`)

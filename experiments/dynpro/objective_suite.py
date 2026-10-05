@@ -1,6 +1,6 @@
 """Objective suite: how the value function shapes the optimal funding policy.
 
-Every objective in Envs/objective.py (OBJECTIVES) is solved on the common
+Every objective in pension/objective.py (OBJECTIVES) is solved on the common
 protocol (common.GRID / N_PATHS / SEED / BAND_PCT, new-plan entry cohort, the
 --rates regime) and compared on what it DOES, not on its value: values of
 different objectives are in different units, policies and outcomes are not.
@@ -32,7 +32,7 @@ Run:  python objective_suite.py [checks|maps|schedules|frontier|cross] [--rates=
 import numpy as np
 import common as c
 import benchmark_suite as _bm
-from objective import OBJECTIVES
+from pension.objective import OBJECTIVES
 
 OUT = f"{c.OUT}/objectives"   # this suite writes only here
 

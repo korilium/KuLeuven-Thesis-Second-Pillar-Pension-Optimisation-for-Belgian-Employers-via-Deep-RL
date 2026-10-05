@@ -1,8 +1,8 @@
-"""Presentation/sweep harness for the tests/dynpro suites (sensitivity_suite.py,
-contribution_schedule_suite.py, lambda_dial_suite.py): sys.path wiring to Envs/,
+"""Presentation/sweep harness for the experiments/dynpro suites (sensitivity_suite.py,
+contribution_schedule_suite.py, lambda_dial_suite.py): the model import,
 figure config and labels, and baseline/restore bookkeeping for parameter sweeps.
 
-The MODEL lives entirely in Envs/DynPro.py -- parameters, transitions, grids,
+The MODEL lives entirely in pension/dp.py -- parameters, transitions, grids,
 the churn-aware DP solver, and simulate() (the committed forward Monte-Carlo).
 Nothing economic is defined here; the names re-exported below are aliases into
 DynPro so the suites can keep calling c.simulate(...), c.grids(...) etc.
@@ -16,8 +16,7 @@ import matplotlib as mpl
 mpl.use("Agg")
 import matplotlib.pyplot as plt
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "Envs"))
-import DynPro as dp
+import pension.dp as dp
 
 
 # --- the rate regime of this run -----------------------------------------------
@@ -77,7 +76,9 @@ def rate_overrides(ov):
     return out
 
 
-OUT = "figs" if RATES == "constant" else f"figs/rates_{RATES}"; DPI = 150
+# figures live in <repo>/results/figs, wherever the suite is launched from
+_FIGS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "results", "figs")
+OUT = _FIGS if RATES == "constant" else os.path.join(_FIGS, f"rates_{RATES}"); DPI = 150
 mpl.rcParams.update({"figure.facecolor": "white", "savefig.facecolor": "white", "font.size": 10,
                      "axes.spines.top": False, "axes.spines.right": False})
 
@@ -217,5 +218,5 @@ def solve(Fg, rg, ag, nq=5, beta=None, betas=None, objective=None):
     """The committed (churn-aware, paid-up service-pro-rated) policy oracle.
     `betas` additionally returns soft (signal) readouts of the same Q-values;
     it leaves V and the hard policy untouched -- see dp.solve. `objective` picks
-    the value function (None follows dp.OBJECTIVE; see Envs/objective.py)."""
+    the value function (None follows dp.OBJECTIVE; see pension/objective.py)."""
     return dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq, beta=beta, betas=betas, objective=objective)

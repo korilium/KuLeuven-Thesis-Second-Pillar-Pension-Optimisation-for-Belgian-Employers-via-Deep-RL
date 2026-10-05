@@ -63,7 +63,7 @@ def load_olo(startPeriod: str = "2000-01", cache: str = None, refresh: bool = Fa
     """
     import os
     if cache is None:
-        cache = os.path.join(os.path.dirname(os.path.abspath(__file__)), "olo_yields.csv")
+        cache = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "olo_yields.csv")
     if refresh or not os.path.exists(cache):
         extractDataYieldNBB(startPeriod=startPeriod).to_csv(cache, index=False)
     dfYield = pd.read_csv(cache, parse_dates=["DATE"])

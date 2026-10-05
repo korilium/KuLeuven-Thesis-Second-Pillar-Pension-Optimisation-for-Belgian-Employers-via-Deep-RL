@@ -2,7 +2,7 @@
 
 The constant-rate model holds G and MU fixed. Here both come from ONE simulated
 10Y OLO path per scenario (economy.draw_rate_scenarios), Hull-White or Vasicek:
-G_t is the statutory WAP filter of that path (liability/WAP.py), applied
+G_t is the statutory WAP filter of that path (pension/rates/wap.py), applied
 HORIZONTALLY to the liability, and mu_t is the insurer's book yield on the
 reserve. The switch is dp.RATE_MODEL; "constant" is the original model, so every
 other suite is untouched and this one can flip back to it at will.

@@ -47,8 +47,7 @@ def run(dp, model, objective):
 
 
 if __name__ == "__main__":
-    sys.path.insert(0, os.path.join(HERE, "..", "..", "Envs"))
-    import DynPro as dp
+    import pension.dp as dp
     for model, objective in CASES:
         np.savez_compressed(path(model, objective), **run(dp, model, objective))
         print("recorded", model, objective)

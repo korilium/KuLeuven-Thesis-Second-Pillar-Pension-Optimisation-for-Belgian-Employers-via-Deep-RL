@@ -14,7 +14,7 @@ reference series on the FSMA side.
 
 Under the HORIZONTAL method (Branch 21 insurance) a contribution keeps the rate in
 force when it was paid until retirement; that bookkeeping lives in the reserve
-simulation (Envs/DynPro.simulate), not here. This module only produces the rate.
+simulation (pension/dp.simulate), not here. This module only produces the rate.
 """
 
 import numpy as np

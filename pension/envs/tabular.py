@@ -48,17 +48,17 @@ contributions — both need Monte Carlo averaging at the stochastic rung.
 """
  
 # ---------------------------------------------------------------------------
-# Parameters -- sourced from economy.py (the shared economic scenario).
+# Parameters -- sourced from pension.economy (the shared economic scenario).
 # They are imported as module globals on purpose: every function below reads
-# them as bare globals, and testBasicEnv.apply_config() rebinds them here via
-# env.__dict__.update(cfg) to swap in a whole economy per config.
+# them as bare globals, and experiments/tabular/run_tabular.apply_config() rebinds
+# them here via env.__dict__.update(cfg) to swap in a whole economy per config.
 # ---------------------------------------------------------------------------
-import sys as _sys
-_sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from economy import T, G, MU, LAMBDA, S0, W, DISC, SIGMA, N_EVAL
-from economy import plan_fixed, plan_step, plan_age
+from pension.economy import T, G, MU, LAMBDA, S0, W, DISC, SIGMA, N_EVAL
+from pension.economy import plan_fixed, plan_step, plan_age
 
 ALPHA = 0.02    # WEIGHT DECAY (agent hyperparameter, not part of the economy)
+
+_RESULTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "results", "tabular")
 
 
 #stochastic paths
@@ -328,7 +328,7 @@ def evaluate_policy(policy, plan):
 # Diagnostics
 # ---------------------------------------------------------------------------
  
-def plot_results(result, path="tests/mc_basic.png"):
+def plot_results(result, path=os.path.join(_RESULTS, "mc_basic.png")):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -434,7 +434,7 @@ if __name__ == "__main__":
                   f"gaps there: {np.round(gaps[diff], 8)}")
 
         # 4. per-plan diagnostic plot
-        plot_results(result, path=f"tests/mc_{name}.png")
+        plot_results(result, path=os.path.join(_RESULTS, f"mc_{name}.png"))
 
         # 5. unscaled economics of the benchmark policy
         table[name] = evaluate_policy(bench_policy, plan)

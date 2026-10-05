@@ -1,17 +1,17 @@
 """Printed simulation report for the DynPro committed model.
 
 Runs simulations and prints the numbers -- no pass/fail verdicts; read the
-quantities and judge them. Complements tests/dynpro/*_suite.py, which produce
+quantities and judge them. Complements experiments/dynpro/*_suite.py, which produce
 figures; this file produces numbers and stays fast.
 
 All Monte-Carlo goes through dp.simulate() (the shared committed engine: Belgian
 churn, split discount, service-pro-rated target) rather than a local rollout, so
 these numbers are directly comparable with the suites'.
 
-Run from this directory:
-    python testSuiteDP.py            # everything
-    python testSuiteDP.py cohort     # one section
-    python testSuiteDP.py --rates=hull_white   # under a rate model (also: vasicek)
+Run:
+    python experiments/dynpro/report.py            # everything
+    python experiments/dynpro/report.py cohort     # one section
+    python experiments/dynpro/report.py --rates=hull_white   # under a rate model (also: vasicek)
 
 Under a rate model dp.solve is certainty-equivalent and dp.simulate path-wise
 (see DynPro.RATE_MODEL); the mu sweep in diagnostics is then skipped, since mu
@@ -19,7 +19,7 @@ is a path-wise book yield rather than a parameter.
 """
 import numpy as np
 
-import DynPro as dp
+import pension.dp as dp
 
 
 

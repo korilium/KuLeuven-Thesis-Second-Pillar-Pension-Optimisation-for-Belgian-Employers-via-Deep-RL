@@ -3,11 +3,11 @@
 Each named config is a COMPLETE economy. The suite applies it to the
 basicEnv module namespace (where all functions read their globals),
 re-draws the frozen shock batch, runs benchmark + agent + validation
-per plan, and writes log/plots/arrays to tests/<config>/.
+per plan, and writes log/plots/arrays to results/tabular/<config>/.
 
 Usage:
-    python testBasicEnv.py                  # run all configs
-    python testBasicEnv.py rung1_stoch      # run one (or several) by name
+    python experiments/tabular/run_tabular.py                  # run all configs
+    python experiments/tabular/run_tabular.py rung1_stoch      # run one (or several) by name
 """
 
 import os
@@ -15,7 +15,9 @@ import sys
 
 import numpy as np
 
-import Envs.tabMonCarAgent.basicEnv as env
+import pension.envs.tabular as env
+
+RESULTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "results", "tabular")
 
 # ---------------------------------------------------------------------------
 # Named environment configurations
@@ -110,7 +112,7 @@ def validate_agent(result, bench_policy, plan, train_cfg):
             "match": match, "mismatch_years": mism}
 
 
-def run_config(cfg_name, out_root="tests"):
+def run_config(cfg_name, out_root=RESULTS):
     """Full pipeline for one named configuration. Returns True on PASS."""
     apply_config(CONFIGS[cfg_name])
 

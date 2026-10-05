@@ -10,7 +10,7 @@ environment (coreEnv) and the DP oracle (dp_oracle). Holds only:
  
 No episode stepping, no reward accounting, no learning, no benchmarks --
 those consume these primitives downstream. No module-level internal imports:
-the rate engine (olo/, liability/) is imported lazily, only when a stochastic
+the rate engine (pension.rates) is imported lazily, only when a stochastic
 rate model is actually drawn.
 """
  
@@ -116,27 +116,19 @@ batch = draw_shock_batch()
 # --- interest-rate scenarios ----------------------------------------------
 _CALIBRATION = None
 
-def _repo_on_path():
-    """Make the repo root importable (olo/, liability/) from any working directory."""
-    import os, sys
-    root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-    if os.path.abspath(root) not in map(os.path.abspath, sys.path):
-        sys.path.insert(0, root)
-
 def rate_calibration():
     """Calibrate once per process, from the cached NBB OLO data: Vasicek (kappa,
     sigma, theta, r0) on the monthly 10Y history and the NSS curve on the latest
-    cross-section. The olo package is imported HERE, not at module level, so
-    economy.py still imports nothing and the constant-rate model never needs it."""
+    cross-section. The rate engine (pension.rates) is imported HERE, not at module
+    level, so the constant-rate model never loads it."""
     global _CALIBRATION
     if _CALIBRATION is None:
-        _repo_on_path()
-        from olo.data.extract import load_olo
-        from olo.calibration import calibrateVasicek, bootstrapForwardCurve
+        from pension.rates.data import load_olo
+        from pension.rates.calibration import calibrateVasicek, bootstrapForwardCurve
         df10Y, maturities, yields = load_olo()
         _CALIBRATION = dict(
-            vasicek=calibrateVasicek(df10Y),
-            curve=bootstrapForwardCurve(maturities, yields),
+            vasicek=calibrateVasicek(df10Y, verbose=False),
+            curve=bootstrapForwardCurve(maturities, yields, verbose=False),
             hist10Y=df10Y["YIELD"].values / 100.0,      # monthly, oldest first; last = model t0
             t0=df10Y["DATE"].iloc[-1],
         )
@@ -187,10 +179,9 @@ def _draw_rate_scenarios(n_paths, seed, model, H, chunk=10000):
         return dict(model=model, G=G_, mu=mu_, y10=np.full((H + 1, n_paths), np.nan),
                     r=np.full((H + 1, n_paths), np.nan), t0=None)
 
-    _repo_on_path()
-    from olo.simulation import simulateVasicek, simulateHullWhite
-    from olo.pricing import reconstructFutureYield
-    from liability.WAP import computeWAPRate
+    from pension.rates.simulation import simulateVasicek, simulateHullWhite
+    from pension.rates.pricing import reconstructFutureYield
+    from pension.rates.wap import computeWAPRate
     cal = rate_calibration(); vas = cal["vasicek"]
     rng = np.random.default_rng(seed)
     mpy = int(round(1 / RATE_DT))

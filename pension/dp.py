@@ -26,14 +26,13 @@ import numpy as np
 # setattr(dp, "LAMBDA", x); see tests/dynpro/common.restore) to vary one
 # parameter at a time. Rebinding dp.X does not touch economy.X, so patching the
 # oracle never silently moves the tabular environment.
-import os as _os, sys as _sys
-_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
-from economy import (T, G, MU, W, DISC_EMP, DISC_ER, DISC, SIGMA_R, SIGMA_L,
+import sys as _sys
+from pension.economy import (T, G, MU, W, DISC_EMP, DISC_ER, DISC, SIGMA_R, SIGMA_L,
                      GAMMA, LAMBDA, S0, ETA, ANNUITY, RR_LEGAL, SATIATE, RR_TARGET,
                      BETA, RATE_MODEL, RATE_SEED, SIGMA_R_RATES, RATE_CE_PATHS, OBJECTIVE)
-import economy as _economy      # draw_rate_scenarios: the rate engine is loaded only on use
-import objective as _objective_mod
-from objective import OBJECTIVES, Objective
+import pension.economy as _economy      # draw_rate_scenarios: the rate engine is loaded only on use
+import pension.objective as _objective_mod
+from pension.objective import OBJECTIVES, Objective
 
 # The parameter namespace handed to the objective: THIS module, so an objective reads
 # dp.ETA, dp.LAMBDA, ... at call time and every setattr(dp, ...) sweep reaches it.

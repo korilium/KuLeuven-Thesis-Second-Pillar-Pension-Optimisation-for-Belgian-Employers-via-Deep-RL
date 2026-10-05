@@ -19,8 +19,7 @@ RTOL = 1e-12
 def _current(model, objective):
     """The same case through the CURRENT API. This adapter is the one place that
     follows the refactor; the recorded files never change."""
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Envs"))
-    import DynPro as dp
+    import pension.dp as dp
     saved = dp.RATE_MODEL
     try:
         return golden.run(dp, model, objective)

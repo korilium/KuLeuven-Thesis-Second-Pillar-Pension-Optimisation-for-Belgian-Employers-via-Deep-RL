@@ -11,22 +11,26 @@
       "justMyCode": true
     },
     {
-      "name": "DynPro: testSuiteDP cohort",
+      "name": "DynPro: report cohort",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/Envs/testSuiteDP.py",
-      "args": ["cohort"],
-      "cwd": "${workspaceFolder}/Envs",
+      "program": "${workspaceFolder}/experiments/dynpro/report.py",
+      "args": [
+        "cohort"
+      ],
+      "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "justMyCode": true
     },
     {
-      "name": "DynPro: testSuiteDP diagnostics",
+      "name": "DynPro: report diagnostics",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/Envs/testSuiteDP.py",
-      "args": ["diagnostics"],
-      "cwd": "${workspaceFolder}/Envs",
+      "program": "${workspaceFolder}/experiments/dynpro/report.py",
+      "args": [
+        "diagnostics"
+      ],
+      "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "justMyCode": true
     },
@@ -34,9 +38,25 @@
       "name": "DynPro: suite section (prompts for name)",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/tests/dynpro/${input:suiteFile}",
-      "args": ["${input:section}"],
-      "cwd": "${workspaceFolder}/tests/dynpro",
+      "program": "${workspaceFolder}/experiments/dynpro/${input:suiteFile}",
+      "args": [
+        "${input:section}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "pytest: all fast tests",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "-q",
+        "-m",
+        "not slow"
+      ],
+      "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "justMyCode": true
     }
@@ -49,7 +69,11 @@
       "options": [
         "contribution_schedule_suite.py",
         "sensitivity_suite.py",
-        "lambda_dial_suite.py"
+        "lambda_dial_suite.py",
+        "scenario_suite.py",
+        "benchmark_suite.py",
+        "rates_suite.py",
+        "objective_suite.py"
       ],
       "default": "contribution_schedule_suite.py"
     },
