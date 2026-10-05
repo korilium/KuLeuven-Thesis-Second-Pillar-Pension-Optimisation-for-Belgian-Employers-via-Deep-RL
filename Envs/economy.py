@@ -48,6 +48,10 @@ RR_TARGET = 0.70            # total-adequacy target across all pillars (OECD/EU 
 # GAMMA/ETA/ANNUITY/RR_* and the DISC_EMP/DISC_ER split are Rung-2 concepts; the
 # binary-action tabular model simply does not read them.
 
+OBJECTIVE = "baseline"      # the value function DynPro optimises and scores: a name in
+                            # objective.OBJECTIVES (Envs/objective.py). "baseline" is the
+                            # committed CRRA-employee / linear-employer / lambda-weighted model.
+
 BETA = 0.01      # policy-EXTRACTION temperature, RELATIVE to the local Q-spread:
                 # 0 = hard argmax (the true optimum); > 0 = soft signal readout that blends
                 # actions lying within BETA of the state's full value range

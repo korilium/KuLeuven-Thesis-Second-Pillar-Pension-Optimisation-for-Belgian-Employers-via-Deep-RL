@@ -100,7 +100,8 @@ LAB = {"LAMBDA": r"$\lambda$", "RR_TARGET": r"$RR^\star$", "RR_LEGAL": r"$RR_{\r
 # belongs in a +/-15% sweep, but both must still be reset -- leaving them out let a
 # scenario leak SATIATE=True into every later run.
 _RESTORE = _PARAMS_ALL + ["SIGMA_R_RATES", "DISC_EMP", "SIGMA_L", "SATIATE", "BETA", "DISC", "T", "W", "S0",
-                     "RATE_MODEL", "RATE_SEED"]   # the rate-regime switch
+                     "RATE_MODEL", "RATE_SEED",   # the rate-regime switch
+                     "OBJECTIVE"]                 # the value-function switch (objective.py)
 
 _BASE = {k: getattr(dp, k) for k in _RESTORE}
 
@@ -212,8 +213,9 @@ def iso_rr(Fg, rg, total=True):
     return dp.RR_LEGAL + rr2 if total else rr2
 
 
-def solve(Fg, rg, ag, nq=5, beta=None, betas=None):
+def solve(Fg, rg, ag, nq=5, beta=None, betas=None, objective=None):
     """The committed (churn-aware, paid-up service-pro-rated) policy oracle.
     `betas` additionally returns soft (signal) readouts of the same Q-values;
-    it leaves V and the hard policy untouched -- see dp.solve."""
-    return dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq, beta=beta, betas=betas)
+    it leaves V and the hard policy untouched -- see dp.solve. `objective` picks
+    the value function (None follows dp.OBJECTIVE; see Envs/objective.py)."""
+    return dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq, beta=beta, betas=betas, objective=objective)
