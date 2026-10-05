@@ -2,6 +2,7 @@
 
     python experiments/report_numeraire.py stage1    # the real-world short-rate model
     python experiments/report_numeraire.py stage1b   # Hull-White under P, side by side
+    python experiments/report_numeraire.py stage3    # verification of the retirement numeraire
 """
 import sys
 
@@ -106,5 +107,59 @@ def stage1b(n=2000, n_acc=20000):
                                           for v in e.values()) + " |")
 
 
+def stage3(n_paths=15000, n_env=300, n_acc=20000):
+    import numpy as np
+    import pension.dp as dp
+    from pension.economy import vasicek_params
+    Fg, rg, ag = dp.grids(nF=73, nR=71, na=20); nq = 5
+    R0, L0, S0 = dp.new_plan_init(n_paths, np.random.default_rng(7))
+    entry = dict(R0=R0, L0=L0, S0=S0)
+    small = {k: v[:n_env] for k, v in entry.items()}
+    new, old = DEFAULT, DEFAULT.replace(EMPLOYER_NUMERAIRE="discounted")
+
+    print("(a) contracts\n")
+    print("| check | result |\n|---|---|")
+    for lab, p in (("constant, retirement", new), ("constant, discounted", old),
+                   ("vasicek, retirement", new.replace(RATE_MODEL="vasicek"))):
+        d = checks.env_contract(p, Fg, rg, ag, nq, small, n_env, 7)
+        print(f"| env return vs simulate joint, {lab} ({n_env} careers) | {d:.1e} |")
+    print(f"| dynamics.step vs dp.F_next / rho_next | {checks.reduced_form_gap(new):.1e} |")
+
+    print("\n(b) retirement at lambda' vs discounted at lambda (constant rates)\n")
+    print("| lambda | r = SHORT_RATE = DISC_ER | DISC_EMP | lambda' | max |policy diff| | max |V ratio - factor| / factor |")
+    print("|---|---|---|---|---|---|")
+    for lam, r, de in ((0.5, 0.03, 0.03), (0.5, 0.05, 0.03), (0.3, 0.02, 0.04), (0.7, 0.04, 0.01), (0.5, 0.0, 0.03)):
+        dpol, dV, lp = checks.numeraire_equivalence(new, Fg, rg, ag, nq, lam, r, de)
+        print(f"| {lam} | {pct(r)} | {pct(de)} | {lp:.4f} | {dpol:.1e} | {dV:.1e} |")
+
+    f, d = checks.face_value_premiums(new, Fg, rg, entry, n_paths, 7)
+    print(f"\n(c) SHORT_RATE = s = 0: max |premium or terminal factor - 1| = {f:.1e}; "
+          f"cost/joint vs discounted at DISC_ER = DISC_EMP = 0: max difference {d:.1e}")
+
+    early, late = checks.timing_neutrality(new, Fg, rg, nq, entry, n_paths, 7)
+    print(f"\n(d) SHORT_RATE = MU = G: early (years 0-9) {early:.1f}% vs late (35-44) {late:.1f}% "
+          f"of salary, tilt {abs(early - late) / max(early, late):.0%}")
+
+    print(f"\n(e) accrual, vasicek (spread {vasicek_params(new)['spread'] * 1e4:.1f} bp), {n_acc} paths: "
+          "MC mean of the realised accrual to T vs closed-form A(t,T), relative error (se) in bp\n")
+    e = checks.accrual_accuracy(new.replace(RATE_MODEL="vasicek"), n=n_acc)
+    print("| t | " + " | ".join(str(t) for t in e) + " |\n|---|" + "---|" * len(e))
+    print("| A(t,T) closed form | " + " | ".join(f"{v['closed']:.4f}" for v in e.values()) + " |")
+    print("| rel. error (se) | " + " | ".join(f"{v['rel_err'] * 1e4:+.1f} ({v['rel_se'] * 1e4:.1f})" for v in e.values()) + " |")
+
+    print("\n(f) headline, constant rates, banded 2-15% optimum, new-plan cohort\n")
+    rows = [("old default (discounted), scored discounted", old, old),
+            ("new default (retirement), scored retirement", new, new),
+            ("old-default policy, scored retirement", old, new),
+            ("new-default policy, scored discounted", new, old)]
+    print("| policy / scoring | employer cost | joint | stayer RR | leaver RR | contribution % by decade (0-9, 10-19, 20-29, 30-39, 40-44) |")
+    print("|---|---|---|---|---|---|")
+    for lab, pp, ps in rows:
+        h = checks.headline(pp, Fg, rg, nq, entry, n_paths, 7, score_p=ps)
+        print(f"| {lab} | {h['cost']:.4f} | {h['joint']:+.4f} | {h['sty']:.3f} | {h['lea']:.3f} | "
+              + " / ".join(f"{x:.1f}" for x in h["by_decade"]) + " |")
+    print("\nvasicek (rate mode): not run -- no headline in rate mode until LONG_RATE_P is set.")
+
+
 if __name__ == "__main__":
-    {"stage1": stage1, "stage1b": stage1b}[sys.argv[1] if len(sys.argv) > 1 else "stage1"]()
+    {"stage1": stage1, "stage1b": stage1b, "stage3": stage3}[sys.argv[1] if len(sys.argv) > 1 else "stage1"]()

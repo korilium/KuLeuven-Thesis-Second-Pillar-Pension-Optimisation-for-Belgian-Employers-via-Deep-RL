@@ -317,3 +317,98 @@ def accrual_accuracy(p, n=4000, years=(0, 5, 10, 20, 30, 40, 44)):
                       rel_err=float(d.mean() / closed.mean()),
                       rel_se=float(d.std(ddof=1) / np.sqrt(n) / closed.mean()))
     return out
+
+
+# --- the employer's numeraire (stage 3) ---------------------------------------------------
+def env_contract(p, Fg, rg, ag, nq, entry, n_paths, seed, objective=None):
+    """(a) |mean PensionEnv episode return - simulate()["joint"]| on the same paths,
+    with the solved policy (0 up to floating point)."""
+    from pension.dynamics import Exogenous
+    from pension.envs.pension_env import DPPolicyAgent, PensionEnv
+    rates = None if p.RATE_MODEL == "constant" else draw_rate_scenarios(n_paths, p=p)
+    pol = dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq, objective=objective, p=p)["policy"]
+    sim = dp.simulate(pol, Fg, rg, **entry, n_paths=n_paths, seed=seed, rates=rates,
+                      objective=objective, p=p)
+    exo = Exogenous.draw(p, n_paths, seed, rates)
+    env, agent = PensionEnv(p=p, objective=objective), DPPolicyAgent(pol, Fg, rg, p.T)
+    R0, L0, S0 = (np.broadcast_to(np.asarray(entry[k], float), (n_paths,)) for k in ("R0", "L0", "S0"))
+    rets = []
+    for i in range(n_paths):
+        obs, _ = env.reset(options=dict(exogenous=exo.paths(i), entry=(R0[i], L0[i], S0[i])))
+        total, done = 0.0, False
+        while not done:
+            obs, r, done, _, _ = env.step(agent(obs))
+            total += r
+        rets.append(total)
+    return float(abs(np.mean(rets) - sim["joint"]))
+
+
+def reduced_form_gap(p, n=200, seed=0):
+    """(a) Max |F, rho from dynamics.step - dp.F_next / rho_next| over one year,
+    constant rates (0 up to floating point)."""
+    from pension.dynamics import Exogenous, State, step
+    rng = np.random.default_rng(seed)
+    exo = Exogenous.draw(p.replace(RATE_MODEL="constant"), n, seed)
+    s = State.initial(p, exo, rng.uniform(0.5, 2, n), np.ones(n), rng.uniform(1, 30, n))
+    F, rho, a = s.F, s.rho, rng.random(n)
+    s, _ = step(s, a, exo, p, lambda t: 0.0)
+    l = a * p.GAMMA * rho
+    return float(max(np.abs(s.F - dp.F_next(F, l, exo.zR[0], exo.zL[0], p)).max(),
+                     np.abs(s.rho - dp.rho_next(rho, l, exo.zL[0], p)).max()))
+
+
+def lambda_prime(lam, r, de, T):
+    """The retirement-numeraire weight equivalent to the discounted objective at
+    (lam, DISC_ER = r, DISC_EMP = de):
+        lambda' = lam e^{-de T} / (lam e^{-de T} + (1 - lam) e^{-r T})."""
+    A = lam * np.exp(-de * T)
+    return float(A / (A + (1 - lam) * np.exp(-r * T)))
+
+
+def numeraire_equivalence(p, Fg, rg, ag, nq, lam, r, de):
+    """(b) Constant rates. The retirement objective with SHORT_RATE = r, s = 0 at
+    lambda' and the discounted objective with DISC_ER = r, DISC_EMP = de at lambda
+    differ by the positive factor e^{-rT} (1 - lam) / (1 - lambda'), so the policy
+    must coincide. Returns (max |policy difference|, max relative deviation of
+    V_old / V_new from that factor, lambda')."""
+    lp = lambda_prime(lam, r, de, p.T)
+    q = p.replace(RATE_MODEL="constant")
+    new = dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq, p=q.replace(
+        EMPLOYER_NUMERAIRE="retirement", SHORT_RATE=r, FINANCING_SPREAD=0.0, LAMBDA=lp))
+    old = dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq, p=q.replace(
+        EMPLOYER_NUMERAIRE="discounted", DISC_ER=r, DISC_EMP=de, LAMBDA=lam))
+    factor = np.exp(-r * p.T) * (1 - lam) / (1 - lp)
+    ratio = old["V"] / (factor * new["V"])
+    return (float(np.abs(new["policy"] - old["policy"]).max()),
+            float(np.nanmax(np.abs(ratio - 1))), lp)
+
+
+def face_value_premiums(p, Fg, rg, entry, n_paths, seed, a=0.4):
+    """(c) SHORT_RATE = s = 0: every premium factor of the retirement numeraire is
+    exactly 1, i.e. premiums count at face value (per unit of final salary). The
+    same face value is the discounted objective at DISC_ER = DISC_EMP = 0, so the
+    two must give the same cost and joint value. Returns (max |factor - 1|, max
+    |difference| in cost and joint)."""
+    from pension import numeraire
+    q = p.replace(RATE_MODEL="constant", SHORT_RATE=0.0, FINANCING_SPREAD=0.0)
+    ret = q.replace(EMPLOYER_NUMERAIRE="retirement")
+    disc = q.replace(EMPLOYER_NUMERAIRE="discounted", DISC_ER=0.0, DISC_EMP=0.0)
+    f = np.array(numeraire.premium_schedule(ret) + list(numeraire.terminal_factors(ret)))
+    pol = dp.const_policy(a, q.T, len(Fg), len(rg))
+    kw = dict(**entry, n_paths=n_paths, seed=seed)
+    r1, r2 = dp.simulate(pol, Fg, rg, p=ret, **kw), dp.simulate(pol, Fg, rg, p=disc, **kw)
+    return float(np.abs(f - 1).max()), float(max(abs(r1["cost"] - r2["cost"]),
+                                                 abs(r1["joint"] - r2["joint"])))
+
+
+def headline(p, Fg, rg, nq, entry, n_paths, seed, band_pct=(0.02, 0.15), na=20, score_p=None):
+    """(f) The banded optimum under p, scored under score_p (default p): employer
+    cost, joint value, median stayer / leaver total RR, mean contribution (% of
+    salary) by decade."""
+    lo, hi = band_pct[0] / p.GAMMA, min(band_pct[1] / p.GAMMA, 1.0)
+    pol = dp.solve(Fg=Fg, rg=rg, ag=np.linspace(lo, hi, na), n_quad=nq, p=p)["policy"]
+    r = dp.simulate(pol, Fg, rg, **entry, band=(lo, hi), n_paths=n_paths, seed=seed,
+                    p=p if score_p is None else score_p)
+    c, w = r["c_by"], r["frac"]
+    dec = [float((c[i:i + 10] * w[i:i + 10]).sum() / w[i:i + 10].sum()) for i in range(0, p.T, 10)]
+    return dict(cost=r["cost"], joint=r["joint"], sty=r["sty"], lea=r["lea"], by_decade=dec)
