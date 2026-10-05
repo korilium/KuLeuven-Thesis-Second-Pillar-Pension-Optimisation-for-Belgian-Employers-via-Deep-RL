@@ -78,12 +78,21 @@ Both are scored by the same `step()` and the same `Objective` (Section 2.8).
 `load_olo()` reads the cached NBB series. The 10Y history drives the calibration, the WAP window and the book yield. The latest cross-section is the curve the model starts on.
 
 <!-- gen:data -->
+- 10Y series: 321 monthly observations, Jan 2000 to Sep 2026; the last one, 4.12%, is month 0 of the model.
+- Latest cross-section (Sep 2026), in %:
+
+| maturity | 1Y | 2Y | 5Y | 10Y | 20Y | 30Y |
+|---|---|---|---|---|---|---|
+| yield | 3.06 | 3.20 | 3.60 | 4.12 | 4.66 | 4.83 |
 <!-- /gen -->
 
 ### 2.2 Vasicek: speed and volatility
 OLS of $\Delta r = a + b\,r + \varepsilon$ on the monthly 10Y gives $\kappa = -b/\Delta t$, $\theta = -a/b$ and $\sigma = \mathrm{sd}(\varepsilon)/\sqrt{\Delta t}$. Hull-White keeps only $\kappa$ and $\sigma$.
 
 <!-- gen:vasicek -->
+| kappa | theta | sigma | t-stat of b | p-value | half-life |
+|---|---|---|---|---|---|
+| 0.1104 | 2.23% | 0.61% | -1.61 | 0.109 | 6.3 y |
 <!-- /gen -->
 
 The mean reversion is weak. $b$ is not significant at 10%, so $\kappa$ is imprecise, and it is estimated on the 10Y rather than on a short rate. These are known caveats of this step.
@@ -96,6 +105,13 @@ $$
 $$
 
 <!-- gen:nss -->
+| b0 | b1 | b2 | b3 | tau1 | tau2 |
+|---|---|---|---|---|---|
+| 3.635% | -0.728% | -2.528% | 7.032% | 9.05 y | 13.73 y |
+
+- Fit to the 30 observed maturities: RMSE 1.29 bp.
+- Short rate today r(0) = f(0,0) = b0 + b1 = 2.907%; f(0,10) = 4.941%; f(0,30) = 5.032%.
+- Hull-White target at 0: theta(0) = f(0,0) + f'(0,0)/kappa = 5.744%.
 <!-- /gen -->
 
 ### 2.4 One rate path
@@ -106,6 +122,12 @@ $$
 `reconstructFutureYield` then prices the 10-year bond at every month and path, $y_{10}(t) = -\ln P(t, t+10)/10$. Below is scenario 0 of a block of 200, drawn with `RATE_SEED`. It is the same draw `economy.draw_rate_scenarios` makes, rebuilt step by step and checked against it.
 
 <!-- gen:paths -->
+| month | date | short rate r | 10Y yield (repriced) |
+|---|---|---|---|
+| 0 | Sep 2026 | 2.907% | 4.102% |
+| 12 | Sep 2027 | 4.088% | 4.832% |
+| 24 | Sep 2028 | 4.562% | 5.128% |
+| 36 | Sep 2029 | 4.560% | 5.128% |
 <!-- /gen -->
 
 At month 0 the repriced 10Y is within a few basis points of the observed 4.12%. It is not exactly equal: the model reprices the NSS curve, and the NSS fit has a 1–3 bp error.
@@ -116,6 +138,11 @@ The observed 10Y history is placed in front of the simulated months.
 **WAP fixing.** Model year $k$ starts $12k$ months after the last observation. Its WAP rate averages the 24 months ending 8 months earlier (the 1 June → 1 January lag), times 0.85. The result is rounded to 25 bp and clipped to $[1.75\%, 3.75\%]$.
 
 <!-- gen:wap -->
+| year k | 24-month window | data | average 10Y | x 0.85 | G_k (25 bp grid, [1.75%, 3.75%]) |
+|---|---|---|---|---|---|
+| 0 | Feb 2024 - Jan 2026 | observed | 3.073% | 2.612% | 2.50% |
+| 1 | Feb 2025 - Jan 2027 | mixed | 3.481% | 2.959% | 3.00% |
+| 2 | Feb 2026 - Jan 2028 | mixed | 4.212% | 3.581% | 3.50% |
 <!-- /gen -->
 
 Year 0 uses observed data only, so $G_0 = 2.50\%$, which is the rate in force today.
@@ -123,6 +150,11 @@ Year 0 uses observed data only, so $G_0 = 2.50\%$, which is the rate in force to
 **Book yield.** The credited return $\mu_k$ is the mean of the 10Y over the 8 years up to the start of year $k$. It reflects a Branch-21 portfolio that rolls over slowly.
 
 <!-- gen:book -->
+| year k | 8-year window | mu_k |
+|---|---|---|
+| 0 | Oct 2018 - Sep 2026 | 1.736% |
+| 1 | Oct 2019 - Sep 2027 | 2.224% |
+| 2 | Oct 2020 - Sep 2028 | 2.864% |
 <!-- /gen -->
 
 Both rates come from the same OLO path, which is what correlates the guarantee with the reserve.
@@ -131,17 +163,30 @@ Both rates come from the same OLO path, which is what correlates the guarantee w
 The DP cannot carry a rate path in its state. `certainty_equivalent` replaces the 5000 scenarios by constant moments. `solve` then optimises on $(t, F, \rho)$ with these moments:
 
 <!-- gen:ce -->
+G = 3.619%, MU = 4.749%, SIGMA_L = 0.292%, SIGMA_R = 5.100% (from 5000 scenarios)
 <!-- /gen -->
 
 ### 2.7 All randomness of the careers, and one year by hand
 `Exogenous.draw(p, n, seed, rates)` holds everything random about $n$ careers: the shocks, the churn uniforms, and the path's $G_t$, $\mu_t$. For career 0:
 
 <!-- gen:exo -->
+| year t | zR | zL | u (churn) | hazard h(t) | G_t | mu_t |
+|---|---|---|---|---|---|---|
+| 0 | +0.0012 | -1.2466 | 0.8037 | 0.1200 | 2.50% | 1.736% |
+| 1 | +1.0709 | -0.9194 | 0.1886 | 0.1074 | 3.00% | 2.224% |
+| 2 | +0.8968 | -2.5227 | 0.7211 | 0.0964 | 3.50% | 2.864% |
 <!-- /gen -->
 
 Year 0 of career 0 under the solved policy, each line one operation of `dynamics.step`:
 
 <!-- gen:step -->
+- Entry: R = 1.0001, L = 1.0000, S = 17.5412, so F = 1.0001, rho = 17.541.
+- Policy: a = a*(0, F, rho) = 0.9992, so c = a * GAMMA * S = 0.9992 x 0.15 x 17.541 = 2.6292.
+- Reserve: R' = (R + c) e^(mu_0 + 0.05 zR) = (1.0001 + 2.6292) e^(1.736% + 0.05 x +0.0012) = 3.6930.
+- Ledger: vintage 0 (opening L, locked at 2.50%) and vintage 1 (this contribution, locked at G_0 = 2.50%); L' = 3.7210.
+- Salary: S' = S (1 + W) = 17.9798; churn: u = 0.8037 vs h(0) = 0.1200 -> stays.
+- New state: F' = 0.9925, rho' = 4.832.
+- Reward of year 0: -w_er x a GAMMA (1+W)^-(T-0) x e^0 = -0.5 x 0.9992 x 0.15 x 0.3292 = -0.024669 (final-salary units; S_T = 53.29).
 <!-- /gen -->
 
 ### 2.8 From careers to the objective
@@ -154,6 +199,11 @@ $$
 `PensionEnv` pays the first term at retirement, the contribution terms year by year, and the shortfall at retirement. So an episode's return is exactly one path's contribution to $J$, and the mean over the careers is `simulate(...)["joint"]`:
 
 <!-- gen:joint -->
+- Career 0: leaves before T; final total replacement rate 0.708.
+- Its return: contributions -0.160215 plus the terminal reward +0.281377 = +0.121162.
+- Mean return over the 200 careers: +0.04030808.
+- simulate(...)["joint"] on the same paths: +0.04030808 (difference 3.5e-17).
+- Of which benefit 0.550075 (employee leg, weight 0.5) and cost 0.469458 (employer leg, weight 0.5).
 <!-- /gen -->
 
 ---
@@ -167,16 +217,33 @@ $$
 - Shocks: the same $z_R, z_L$ in both regimes. The Hull-White case uses the rates of scenario 0 from Section 2.
 
 <!-- gen:shocks -->
+| year t | zR | zL | G_t (HW) | mu_t (HW) |
+|---|---|---|---|---|
+| 0 | +0.3456 | +0.8216 | 2.50% | 1.736% |
+| 1 | -1.3032 | +0.9054 | 3.00% | 2.224% |
+| 2 | -0.5370 | +0.5811 | 3.50% | 2.864% |
 <!-- /gen -->
 
 **Constant rates.** $R$ is credited at $\mu = 3\%$ with noise $\sigma_R z_R$. $L$ is one pot growing at $G = 3\%$ with noise $\sigma_L z_L$.
 
 <!-- gen:career_constant -->
+| after year | S | c = a Γ S | R growth | R | ledger (amount@locked G) | L | F = R/L | ρ = S/L | reward of the year |
+|---|---|---|---|---|---|---|---|---|---|
+| 0 | 20.000 |  |  | 1.0000 | one pot | 1.0000 | 1.0000 | 20.000 |  |
+| 1 | 20.500 | 1.5000 | e^(3.00% +0.0173) | 2.6210 | one pot | 2.6188 | 1.0008 | 7.828 | -0.012344 |
+| 2 | 21.012 | 1.5375 | e^(3.00% -0.0652) | 4.0149 | one pot | 4.3612 | 0.9206 | 4.818 | -0.012036 |
+| 3 | 21.538 | 1.5759 | e^(3.00% -0.0268) | 5.6085 | one pot | 6.1894 | 0.9061 | 3.480 | -0.011735 |
 <!-- /gen -->
 
 **Hull-White.** $R$ is credited at the book yield $\mu_t$ (noise $\sigma_R z_R$). Each contribution is a separate vintage of the guarantee, locked at the $G_t$ of its year.
 
 <!-- gen:career_hw -->
+| after year | S | c = a Γ S | R growth | R | ledger (amount@locked G) | L | F = R/L | ρ = S/L | reward of the year |
+|---|---|---|---|---|---|---|---|---|---|
+| 0 | 20.000 |  |  | 1.0000 | 1.0000@2.50% | 1.0000 | 1.0000 | 20.000 |  |
+| 1 | 20.500 | 1.5000 | e^(1.74% +0.0173) | 2.5881 | 1.0253@2.50%; 1.5380@2.50% | 2.5633 | 1.0097 | 7.998 | -0.012344 |
+| 2 | 21.012 | 1.5375 | e^(2.22% -0.0652) | 3.9523 | 1.0513@2.50%; 1.5769@2.50%; 1.5843@3.00% | 4.2125 | 0.9382 | 4.988 | -0.012036 |
+| 3 | 21.538 | 1.5759 | e^(2.86% -0.0268) | 5.5381 | 1.0779@2.50%; 1.6168@2.50%; 1.6326@3.00%; 1.6321@3.50% | 5.9594 | 0.9293 | 3.614 | -0.011735 |
 <!-- /gen -->
 
 What the tables show:
@@ -236,6 +303,10 @@ The growth of $L$ now depends on the **composition** of the ledger, i.e. the wei
 **A counterexample.** Two members have the same $R$, $L$ and $S$, hence the same $F$ and $\rho$, and take the same action at the same rates. They differ only in when their guarantee was booked.
 
 <!-- gen:not_markov -->
+| member | vintages (amount@locked G) | F now | ρ now | F next year | L at T if nothing more is paid (43 years) |
+|---|---|---|---|---|---|
+| early money (locked low) | 1.0@1.75% + 0.5@2.50% | 0.8000 | 12.000 | 0.8994 | 8.715 |
+| late money (locked high) | 0.5@2.50% + 1.0@3.75% | 0.8000 | 12.000 | 0.8932 | 11.763 |
 <!-- /gen -->
 
 Same $(F, \rho)$ today, different $F$ next year, and a liability at retirement that differs by about a third. So $(F, \rho)$ is not a Markov state here.

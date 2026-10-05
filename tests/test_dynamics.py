@@ -86,3 +86,28 @@ def test_churn_freezes_liability():
     L1 = s.L.copy()
     s, c = step(s, np.zeros(n), exo, p, ALWAYS)
     assert np.all(c == 0) and np.array_equal(s.L, L1)
+
+
+def test_horizontal_ledger_compresses_into_rate_buckets():
+    """The WAP rate lives on a 25 bp grid in [1.75%, 3.75%], so the horizontal
+    ledger is exactly 9 buckets "liability locked at rate g": vintages with the
+    same rate grow identically (paper/explanations/model-walkthrough.md, sec. 5)."""
+    from pension.economy import draw_rate_scenarios
+    p = DEFAULT.replace(RATE_MODEL="hull_white")
+    n = 50
+    exo = Exogenous.draw(p, n, 3, draw_rate_scenarios(n, p=p))
+    grid = np.round(np.arange(0.0175, 0.03751, 0.0025), 6)
+    assert len(grid) == 9
+    s = State.initial(p, exo, 1.0, 1.0, 15.0)
+    buckets = np.zeros((len(grid), n))
+    buckets[np.searchsorted(grid, np.round(exo.G[0], 6)), np.arange(n)] = 1.0
+    rng = np.random.default_rng(0)
+    for t in range(p.T):
+        a = np.where(s.present, rng.random(n), 0.0)
+        present = s.present.copy()
+        s, c = step(s, a, exo, p, dp.tenure_hazard)
+        g = np.searchsorted(grid, np.round(exo.G[t], 6))
+        assert np.allclose(grid[g], exo.G[t], atol=1e-12)          # on the grid
+        buckets[g, np.arange(n)] += c
+        buckets = np.where(present, buckets * np.exp(grid[:, None]), buckets)
+        np.testing.assert_allclose(buckets.sum(axis=0), s.L, rtol=1e-12)
