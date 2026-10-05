@@ -56,6 +56,12 @@ class Exogenous:
     def rates(self):
         return self.G is not None
 
+    def paths(self, idx):
+        """The sub-batch of paths `idx` (an int gives a batch of one)."""
+        sl = slice(idx, idx + 1) if isinstance(idx, (int, np.integer)) else idx
+        pick = lambda x: None if x is None else x[:, sl]
+        return Exogenous(pick(self.zR), pick(self.zL), pick(self.u), pick(self.G), pick(self.mu))
+
     @classmethod
     def draw(cls, p, n, seed, rates=None):
         """Shocks from np.random.default_rng(seed); `rates` is a scenario dict
