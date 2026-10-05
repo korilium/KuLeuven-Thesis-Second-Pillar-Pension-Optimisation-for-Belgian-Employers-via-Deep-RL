@@ -20,44 +20,44 @@ shocks; Gauss-Hermite quadrature; reduced state (t, F, rho).
 import numpy as np
 
 # --- parameters -----------------------------------------------------------
-# Sourced from economy.py, the single source of truth shared with the tabular
-# rung. They are imported as module globals on purpose: every function below
-# reads them as bare globals, and the sweep harnesses rebind them HERE (e.g.
-# setattr(dp, "LAMBDA", x); see tests/dynpro/common.restore) to vary one
-# parameter at a time. Rebinding dp.X does not touch economy.X, so patching the
-# oracle never silently moves the tabular environment.
-import sys as _sys
-from pension.economy import (T, G, MU, W, DISC_EMP, DISC_ER, DISC, SIGMA_R, SIGMA_L,
-                     GAMMA, LAMBDA, S0, ETA, ANNUITY, RR_LEGAL, SATIATE, RR_TARGET,
-                     BETA, RATE_MODEL, RATE_SEED, SIGMA_R_RATES, RATE_CE_PATHS, OBJECTIVE)
+# Every function takes the model parameters as an explicit `p`
+# (pension.params.Params); p=None means DEFAULT, the committed calibration. There
+# is no module state: two calls with different p never interact, so sweeps need no
+# restore bookkeeping and independent economies can run side by side.
+from pension.params import Params, DEFAULT
 import pension.economy as _economy      # draw_rate_scenarios: the rate engine is loaded only on use
 import pension.objective as _objective_mod
 from pension.objective import OBJECTIVES, Objective
 
-# The parameter namespace handed to the objective: THIS module, so an objective reads
-# dp.ETA, dp.LAMBDA, ... at call time and every setattr(dp, ...) sweep reaches it.
-_P = _sys.modules[__name__]
+
+def _params(p):
+    """p if given, else DEFAULT."""
+    return DEFAULT if p is None else p
 
 
-def _objective(obj=None):
+def _objective(obj=None, p=None):
     """The objective in force: obj if given (a name or an Objective), else the
-    module switch OBJECTIVE (default "baseline", the committed model). See
+    switch p.OBJECTIVE (default "baseline", the committed model). See
     objective.py for the parts and the registry."""
-    return _objective_mod.resolve(obj, OBJECTIVE)
+    p = _params(p)
+    return _objective_mod.resolve(obj, p.OBJECTIVE)
 
 
-def u(x):
-    """The normalized CRRA utility at the module's ETA (see objective.u). Kept for
-    callers that read dp.u directly; the objective itself lives in objective.py."""
-    return _objective_mod.u(x, ETA)
+def u(x, p=None):
+    """The normalized CRRA utility at p.ETA (see objective.u). Kept for callers
+    that read dp.u directly; the objective itself lives in objective.py."""
+    p = _params(p)
+    return _objective_mod.u(x, p.ETA)
 
 
 # --- transitions ----------------------------------------------------------
-def F_next(F, l, zR, zL):
-    return (F + l) / (1.0 + l) * np.exp((MU - G) + SIGMA_R * zR - SIGMA_L * zL)
+def F_next(F, l, zR, zL, p=None):
+    p = _params(p)
+    return (F + l) / (1.0 + l) * np.exp((p.MU - p.G) + p.SIGMA_R * zR - p.SIGMA_L * zL)
 
-def rho_next(rho, l, zL):
-    return (1.0 + W) * rho / ((1.0 + l) * np.exp(G + SIGMA_L * zL))
+def rho_next(rho, l, zL, p=None):
+    p = _params(p)
+    return (1.0 + p.W) * rho / ((1.0 + l) * np.exp(p.G + p.SIGMA_L * zL))
 
 
 def gauss_hermite_2d(n=15):
@@ -101,11 +101,12 @@ def tenure_hazard(t, h0=0.12, hinf=0.025, tau=7.0):
     return hinf + (h0 - hinf) * np.exp(-t / tau)
 
 
-def survival(hazard):
-    p = np.ones(T + 1)
-    for t in range(T):
-        p[t + 1] = p[t] * (1.0 - hazard(t))
-    return p
+def survival(hazard, p=None):
+    p = _params(p)
+    surv = np.ones(p.T + 1)
+    for t in range(p.T):
+        surv[t + 1] = surv[t] * (1.0 - hazard(t))
+    return surv
 
 
 # --- policies and plan-entry states ---------------------------------------
@@ -113,7 +114,7 @@ def const_policy(a, n_years, nF, nR):
     return np.full((n_years, nF, nR), float(a))
 
 
-def schedule_policy(a_of_t, nF, nR, n_years=None):
+def schedule_policy(a_of_t, nF, nR, n_years=None, p=None):
     """Lift a STATE-INDEPENDENT schedule a(t) to a (T, nF, nR) policy array.
 
     The time-varying generalisation of const_policy, for market plan designs whose
@@ -127,7 +128,7 @@ def schedule_policy(a_of_t, nF, nR, n_years=None):
     units (contribution = a*GAMMA*S), not in percent of salary: convert a
     percentage rate with a = rate / GAMMA.
     """
-    n = T if n_years is None else n_years
+    n = _params(p).T if n_years is None else n_years
     a = np.array([float(a_of_t(t)) for t in range(n)]) if callable(a_of_t) else \
         np.asarray(a_of_t, float)
     assert a.shape == (n,), f"a_of_t must give {n} values, got {a.shape}"
@@ -160,7 +161,7 @@ def bilinear(Fg, lrg, V, Fq, lrq):
             + V[iF, iR + 1] * (1 - tF) * tR + V[iF + 1, iR + 1] * tF * tR)
 
 
-def paidup_service(Fg, rg, obj=None):
+def paidup_service(Fg, rg, obj=None, p=None):
     """Per-leave-cohort paid-up value Phi[tau](F,rho), in closed form.
 
     On departure the contract goes paid-up: contributions cease, the reserve goes
@@ -186,31 +187,33 @@ def paidup_service(Fg, rg, obj=None):
     The value of the outcome is the objective's (see objective.py): its employee
     leg at the pro-rated target and its shortfall cost, combined by its weights.
     """
-    obj = _objective(obj); w_emp, w_er = obj.weights(_P)
+    p = _params(p)
+    obj = _objective(obj, p); w_emp, w_er = obj.weights(p)
     NF, NR = len(Fg), len(rg)
-    Phi = np.empty((T + 1, NF, NR))
-    for tau in range(0, T + 1):
-        m = T - tau; s = tau / T
-        target = RR_LEGAL + s * (RR_TARGET - RR_LEGAL)          # pro-rated target (gap only)
-        Fp = Fg * np.exp(MU * m)                                # (NF,) deterministic: no asset shock
-        rp = rg * (1.0 + W) ** m                                # (NR,)
-        rr2 = np.maximum(Fp, 1.0)[:, None] / (ANNUITY * rp[None, :])   # FULL vested pot
-        rrtot = RR_LEGAL + rr2
-        emp = w_emp * obj.employee(rrtot, target, _P) * np.exp(-DISC_EMP * T)
+    Phi = np.empty((p.T + 1, NF, NR))
+    for tau in range(0, p.T + 1):
+        m = p.T - tau; s = tau / p.T
+        target = p.RR_LEGAL + s * (p.RR_TARGET - p.RR_LEGAL)          # pro-rated target (gap only)
+        Fp = Fg * np.exp(p.MU * m)                                # (NF,) deterministic: no asset shock
+        rp = rg * (1.0 + p.W) ** m                                # (NR,)
+        rr2 = np.maximum(Fp, 1.0)[:, None] / (p.ANNUITY * rp[None, :])   # FULL vested pot
+        rrtot = p.RR_LEGAL + rr2
+        emp = w_emp * obj.employee(rrtot, target, p) * np.exp(-p.DISC_EMP * p.T)
         short = np.maximum(1.0 - Fp, 0.0)[:, None] / rp[None, :]
-        empr = w_er * obj.shortfall(short, _P) * np.exp(-DISC_ER * T)
+        empr = w_er * obj.shortfall(short, p) * np.exp(-p.DISC_ER * p.T)
         Phi[tau] = emp - empr
     return Phi
 
 
-def terminal(Fg, rg, obj=None):
+def terminal(Fg, rg, obj=None, p=None):
     """Full-career stayer at T: the objective's employee leg at RR_TARGET minus its
     shortfall cost, combined by its weights (see objective.py)."""
-    obj = _objective(obj); w_emp, w_er = obj.weights(_P)
+    p = _params(p)
+    obj = _objective(obj, p); w_emp, w_er = obj.weights(p)
     Fc = Fg[:, None]; rc = rg[None, :]
-    rr = RR_LEGAL + np.maximum(Fc, 1.0) / (rc * ANNUITY)
-    emp = w_emp * obj.employee(rr, RR_TARGET, _P) * np.exp(-DISC_EMP * T)              # employee rate
-    empr = w_er * obj.shortfall(np.maximum(1.0 - Fc, 0.0) / rc, _P) * np.exp(-DISC_ER * T)  # employer rate
+    rr = p.RR_LEGAL + np.maximum(Fc, 1.0) / (rc * p.ANNUITY)
+    emp = w_emp * obj.employee(rr, p.RR_TARGET, p) * np.exp(-p.DISC_EMP * p.T)              # employee rate
+    empr = w_er * obj.shortfall(np.maximum(1.0 - Fc, 0.0) / rc, p) * np.exp(-p.DISC_ER * p.T)  # employer rate
     return emp - empr
 
 
@@ -241,7 +244,7 @@ def _soft_readout(Qstack, ag, beta):
 
 
 # --- backward induction (mode = 'optimize' | 'evaluate') ------------------
-def certainty_equivalent(rates):
+def certainty_equivalent(rates, p=None):
     """Constant-rate parameters that summarise a rate scenario for the DP.
 
     The backward induction lives on (t, F, rho); following path-wise rates would
@@ -252,15 +255,19 @@ def certainty_equivalent(rates):
         SIGMA_R  -> SIGMA_R_RATES and the dispersion of mu_t, added in quadrature.
     A crude moment match, not an equivalence: the forward simulate() then scores
     the resulting policy against the true path-wise rates."""
+    p = _params(p)
     Gs, mus = np.asarray(rates["G"]), np.asarray(rates["mu"])
     return dict(G=float(Gs.mean()), MU=float(mus.mean()),
                 SIGMA_L=float(Gs.std()),
-                SIGMA_R=float(np.sqrt(SIGMA_R_RATES ** 2 + mus.var())))
+                SIGMA_R=float(np.sqrt(p.SIGMA_R_RATES ** 2 + mus.var())))
 
 
 def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
-          hazard=tenure_hazard, beta=None, betas=None, rates=None, objective=None):
+          hazard=tenure_hazard, beta=None, betas=None, rates=None, objective=None,
+          p=None):
     """Backward induction for the committed (churn-aware) objective.
+
+    `p` (pension.params.Params): the model parameters.
 
     `objective`: the value function -- None follows the OBJECTIVE switch (default
     "baseline"), or pass a registry name / an objective.Objective. The same object
@@ -275,31 +282,28 @@ def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
       * a scenario dict from economy.draw_rate_scenarios: certainty-equivalent
         to that scenario;
       * "constant": force the constant-rate oracle whatever the switch says.
-    The certainty-equivalent overrides (see certainty_equivalent) hold for this
-    call only; the module globals are restored on the way out, and the moments
-    used are returned under "ce". Under a rate model G, MU, SIGMA_L and SIGMA_R
+    The certainty-equivalent overrides (see certainty_equivalent) are applied as
+    p.replace(**ce) for this call only, and the moments used are returned under
+    "ce". Under a rate model G, MU, SIGMA_L and SIGMA_R
     are therefore SET by the scenario: overriding them has no effect.
 """
+    p = _params(p)
     if isinstance(rates, str) and rates == "constant":
         rates = None
-    elif rates is None and RATE_MODEL != "constant":
-        rates = _economy.draw_rate_scenarios(RATE_CE_PATHS, seed=RATE_SEED,
-                                             model=RATE_MODEL, horizon=T)
+    elif rates is None and p.RATE_MODEL != "constant":
+        rates = _economy.draw_rate_scenarios(p.RATE_CE_PATHS, seed=p.RATE_SEED,
+                                             model=p.RATE_MODEL, horizon=p.T, p=p)
     if rates is not None:
-        ce = certainty_equivalent(rates)
-        saved = {k: globals()[k] for k in ce}
-        try:
-            globals().update(ce)
-            out = _solve(mode, plan_rule, Fg, rg, ag, n_quad, hazard, beta, betas, objective)
-        finally:
-            globals().update(saved)
+        ce = certainty_equivalent(rates, p)
+        out = _solve(mode, plan_rule, Fg, rg, ag, n_quad, hazard, beta, betas, objective,
+                     p=p.replace(**ce))
         out["ce"] = ce
         return out
-    return _solve(mode, plan_rule, Fg, rg, ag, n_quad, hazard, beta, betas, objective)
+    return _solve(mode, plan_rule, Fg, rg, ag, n_quad, hazard, beta, betas, objective, p=p)
 
 
 def _solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
-           hazard=tenure_hazard, beta=None, betas=None, objective=None):
+           hazard=tenure_hazard, beta=None, betas=None, objective=None, p=None):
     """The constant-rate backward induction (see solve).
 
     `hazard`: leaving is a hazard on the horizon, not a state variable. At each
@@ -310,7 +314,7 @@ def _solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
     earned the year -- so the freeze applies only from t+1. Pass hazard=None for
     the no-churn benchmark, which reduces this to the plain oracle exactly.
 
-    `beta` (defaults to economy.BETA): the policy-EXTRACTION temperature, given
+    `beta` (defaults to p.BETA): the policy-EXTRACTION temperature, given
     RELATIVE to the local Q-spread -- "blend actions within this fraction of the
     state's full value range". See _soft_readout: this makes the readout invariant
     to any affine rescale of the reward, which a raw Q-unit temperature is not.
@@ -336,40 +340,41 @@ def _solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
     if ag is None: ag = make_a_grid(n=31)
     ag = np.asarray(ag, float)                 # soft path needs ag[:, None, None]
     betas = list(betas) if betas else []
-    beta = BETA if beta is None else float(beta)   # module default; 0 = hard argmax
+    beta = p.BETA if beta is None else float(beta)   # module default; 0 = hard argmax
     need_Q = bool(betas) or beta > 0
     zR, zL, wq = gauss_hermite_2d(n_quad)
     lrg = np.log(rg)
     NF, NR, Q = len(Fg), len(rg), len(wq)
-    obj = _objective(objective); w_er = obj.weights(_P)[1]
-    Phi = paidup_service(Fg, rg, obj) if hazard is not None else None
+    p = _params(p)
+    obj = _objective(objective, p); w_er = obj.weights(p)[1]
+    Phi = paidup_service(Fg, rg, obj, p) if hazard is not None else None
 
-    V = np.empty((T + 1, NF, NR))
-    policy = np.empty((T, NF, NR))
-    soft = {b: np.empty((T, NF, NR)) for b in betas}
-    hard = np.empty((T, NF, NR)) if beta > 0 else None
-    V[T] = terminal(Fg, rg, obj)
+    V = np.empty((p.T + 1, NF, NR))
+    policy = np.empty((p.T, NF, NR))
+    soft = {b: np.empty((p.T, NF, NR)) for b in betas}
+    hard = np.empty((p.T, NF, NR)) if beta > 0 else None
+    V[p.T] = terminal(Fg, rg, obj, p)
 
     def bellman_scalar_a(t, a, Vnext):
-        l = a * GAMMA * rg
-        Fp = F_next(Fg[:, None, None], l[None, :, None], zR[None, None, :], zL[None, None, :])
-        rp = rho_next(rg[:, None], l[:, None], zL[None, :])
+        l = a * p.GAMMA * rg
+        Fp = F_next(Fg[:, None, None], l[None, :, None], zR[None, None, :], zL[None, None, :], p)
+        rp = rho_next(rg[:, None], l[:, None], zL[None, :], p)
         lrq = np.broadcast_to(np.log(rp)[None, :, :], (NF, NR, Q))
         vi = bilinear(Fg, lrg, Vnext, Fp, lrq)
         cont = (vi * wq[None, None, :]).sum(axis=2)
-        flow = -w_er * obj.contribution(a, t, _P) * np.exp(-DISC_ER * t)
+        flow = -w_er * obj.contribution(a, t, p) * np.exp(-p.DISC_ER * t)
         return flow + cont
 
     def bellman_field_a(t, A, Vnext):
-        l = A * GAMMA * rg[None, :]
-        Fp = F_next(Fg[:, None, None], l[:, :, None], zR[None, None, :], zL[None, None, :])
-        rp = rho_next(rg[None, :, None], l[:, :, None], zL[None, None, :])
+        l = A * p.GAMMA * rg[None, :]
+        Fp = F_next(Fg[:, None, None], l[:, :, None], zR[None, None, :], zL[None, None, :], p)
+        rp = rho_next(rg[None, :, None], l[:, :, None], zL[None, None, :], p)
         vi = bilinear(Fg, lrg, Vnext, Fp, np.log(rp))
         cont = (vi * wq[None, None, :]).sum(axis=2)
-        flow = -w_er * obj.contribution(A, t, _P) * np.exp(-DISC_ER * t)
+        flow = -w_er * obj.contribution(A, t, p) * np.exp(-p.DISC_ER * t)
         return flow + cont
 
-    for t in range(T - 1, -1, -1):
+    for t in range(p.T - 1, -1, -1):
         Vnext = V[t + 1]
         if hazard is not None:
             h = float(hazard(t))
@@ -402,7 +407,7 @@ def _solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
 # --- forward evaluation of a policy (the committed scoring model) ---------
 def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
             seed=7, hazard=tenure_hazard, track=False, visits=False, rates=None,
-            objective=None):
+            objective=None, p=None):
     """Canonical forward Monte-Carlo of a reduced policy a*(t,F,rho) under the
     committed model: Belgian churn (immediate-vesting, paid-up leavers), a split
     discount (employee at DISC_EMP, employer at DISC_ER), and the service-pro-rated
@@ -447,37 +452,38 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
     of paths with L_T > R_T), the terminal R_T / L_T per path, and the scenario
     itself under "rates".
     """
-    obj = _objective(objective); w_emp, w_er = obj.weights(_P)
-    use_rates = rates is not None or RATE_MODEL != "constant"
+    p = _params(p)
+    obj = _objective(objective, p); w_emp, w_er = obj.weights(p)
+    use_rates = rates is not None or p.RATE_MODEL != "constant"
     if use_rates and rates is None:
-        rates = _economy.draw_rate_scenarios(n_paths, seed=RATE_SEED, model=RATE_MODEL,
-                                             horizon=T)
+        rates = _economy.draw_rate_scenarios(n_paths, seed=p.RATE_SEED, model=p.RATE_MODEL,
+                                             horizon=p.T, p=p)
     if use_rates:
         Gr, mur = np.asarray(rates["G"]), np.asarray(rates["mu"])
-        assert Gr.shape[0] >= T and Gr.shape[1] == n_paths, \
-            f"rates must cover T={T} years x n_paths={n_paths}, got {Gr.shape}"
+        assert Gr.shape[0] >= p.T and Gr.shape[1] == n_paths, \
+            f"rates must cover T={p.T} years x n_paths={n_paths}, got {Gr.shape}"
     lrg = np.log(rg)
     rng = np.random.default_rng(seed)
     n = n_paths
     R = np.full(n, 1.0) * np.asarray(R0); L = np.full(n, 1.0) * np.asarray(L0)
     S = np.full(n, 1.0) * np.asarray(S0 if S0 is not None else rg[-1])
-    ST = S * (1.0 + W) ** T
+    ST = S * (1.0 + p.W) ** p.T
     lo, hi = (0.0, 1.0) if band is None else band
-    present = np.ones(n, bool); leave_t = np.full(n, T, float)
+    present = np.ones(n, bool); leave_t = np.full(n, p.T, float)
     cost = np.zeros(n); a_sum = np.zeros(n)
-    a_by_t = np.full(T, np.nan); rho_med = np.zeros(T)
-    frac = np.zeros(T); c_by = np.zeros(T)
-    visit = np.zeros((T, len(Fg), len(rg))) if visits else None
+    a_by_t = np.full(p.T, np.nan); rho_med = np.zeros(p.T)
+    frac = np.zeros(p.T); c_by = np.zeros(p.T)
+    visit = np.zeros((p.T, len(Fg), len(rg))) if visits else None
     if use_rates:
         # horizontal vintages: slot 0 = opening liability, slot t+1 = year-t contribution
-        Lv = np.zeros((T + 1, n)); Lv[0] = L
-        lock = np.zeros((T + 1, n)); lock[0] = Gr[0]
-    for t in range(T):
+        Lv = np.zeros((p.T + 1, n)); Lv[0] = L
+        lock = np.zeros((p.T + 1, n)); lock[0] = Gr[0]
+    for t in range(p.T):
         F = R / L; rho = S / L
         a = np.clip(bilinear(Fg, lrg, policy[t], F, np.log(rho)), lo, hi)
         a = np.where(present, a, 0.0)
         frac[t] = present.mean()
-        c_by[t] = (a[present] * GAMMA).mean() * 100 if present.any() else 0.0
+        c_by[t] = (a[present] * p.GAMMA).mean() * 100 if present.any() else 0.0
         if visits and present.any():
             iF = np.abs(Fg[:, None] - np.clip(F[present], Fg[0], Fg[-1])[None, :]).argmin(axis=0)
             iR = np.abs(lrg[:, None] - np.clip(np.log(rho[present]), lrg[0], lrg[-1])[None, :]).argmin(axis=0)
@@ -486,35 +492,35 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
             a_by_t[t] = a[present].mean() if present.any() else np.nan
             rho_med[t] = np.median(rho[present]) if present.any() else np.nan
         a_sum += a
-        c = a * GAMMA * S
-        cost += np.where(present, obj.contribution(a, t, _P) * np.exp(-DISC_ER * t), 0.0)
+        c = a * p.GAMMA * S
+        cost += np.where(present, obj.contribution(a, t, p) * np.exp(-p.DISC_ER * t), 0.0)
         zR = rng.standard_normal(n); zL = rng.standard_normal(n)
         # in force: contribute and carry the asset shock. Paid-up: the reserve compounds at the
         # LOCKED credited return with no further shock, matching paidup_service -- freezing the
         # contract freezes its risk. L freezes on both counts once absent.
         if not use_rates:
-            R = np.where(present, (R + c) * np.exp(MU + SIGMA_R * zR), R * np.exp(MU))
-            L = np.where(present, (L + c) * np.exp(G + SIGMA_L * zL), L)
+            R = np.where(present, (R + c) * np.exp(p.MU + p.SIGMA_R * zR), R * np.exp(p.MU))
+            L = np.where(present, (L + c) * np.exp(p.G + p.SIGMA_L * zL), L)
         else:
-            R = np.where(present, (R + c) * np.exp(mur[t] + SIGMA_R_RATES * zR), R * np.exp(mur[t]))
+            R = np.where(present, (R + c) * np.exp(mur[t] + p.SIGMA_R_RATES * zR), R * np.exp(mur[t]))
             Lv[t + 1] = c; lock[t + 1] = Gr[t]
             Lv[:t + 2] = np.where(present, Lv[:t + 2] * np.exp(lock[:t + 2]), Lv[:t + 2])
             L = Lv[:t + 2].sum(axis=0)
-        S = S * (1.0 + W)
+        S = S * (1.0 + p.W)
         lv = present & (rng.random(n) < hazard(t))
         leave_t = np.where(lv, t + 1, leave_t); present = present & ~lv
     payout = np.maximum(R, L); short = np.maximum(L - R, 0.0)
-    cost += obj.shortfall(short / ST, _P) * np.exp(-DISC_ER * T)
-    RR2 = payout / (ANNUITY * ST)
-    svc = np.minimum(leave_t / T, 1.0)
-    target = RR_LEGAL + svc * (RR_TARGET - RR_LEGAL)
-    benefit_paths = np.exp(-DISC_EMP * T) * obj.employee(RR_LEGAL + RR2, target, _P)
-    stay = leave_t >= T
-    RRtot = RR_LEGAL + RR2
+    cost += obj.shortfall(short / ST, p) * np.exp(-p.DISC_ER * p.T)
+    RR2 = payout / (p.ANNUITY * ST)
+    svc = np.minimum(leave_t / p.T, 1.0)
+    target = p.RR_LEGAL + svc * (p.RR_TARGET - p.RR_LEGAL)
+    benefit_paths = np.exp(-p.DISC_EMP * p.T) * obj.employee(p.RR_LEGAL + RR2, target, p)
+    stay = leave_t >= p.T
+    RRtot = p.RR_LEGAL + RR2
     out = dict(
         benefit=float(benefit_paths.mean()), cost=float(cost.mean()),
         joint=float(w_emp * benefit_paths.mean() - w_er * cost.mean()),
-        mean_a=float((a_sum / T).mean()), c_by=c_by, frac=frac,
+        mean_a=float((a_sum / p.T).mean()), c_by=c_by, frac=frac,
         avg=float((c_by * frac).sum() / frac.sum()) if frac.sum() > 0 else np.nan,
         RR=RR2, RR_tot=RRtot, tot=float(np.median(RRtot)), stay=stay,
         sty=float(np.median(RRtot[stay])) if stay.any() else np.nan,
@@ -525,7 +531,7 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
     if visits:
         out["visits"] = visit
     if use_rates:
-        out.update(G_by_t=Gr[:T].mean(axis=1), mu_by_t=mur[:T].mean(axis=1),
+        out.update(G_by_t=Gr[:p.T].mean(axis=1), mu_by_t=mur[:p.T].mean(axis=1),
                    regime_B=float((L > R).mean()), R_T=R, L_T=L, rates=rates)
     return out
 

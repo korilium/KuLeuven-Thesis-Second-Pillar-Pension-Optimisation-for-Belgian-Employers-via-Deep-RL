@@ -71,7 +71,7 @@ def _run_design(rate_of_t, Fg, rg, visits=False):
 
     `visits=True` additionally returns the policy array and the (T, NF, NR) occupancy
     counts, so visitation() can reuse this construction rather than rebuilding it."""
-    a_of_t = lambda t: min(rate_of_t(t) / c.dp.GAMMA, 1.0)
+    a_of_t = lambda t: min(rate_of_t(t) / c.P.GAMMA, 1.0)
     pol = c.schedule_policy(a_of_t, len(Fg), len(rg))
     r = c.simulate(pol, Fg, rg, **c.entry(N_PATHS, SEED), n_paths=N_PATHS, seed=SEED,
                    visits=visits)
@@ -91,7 +91,7 @@ def _run_dp(Fg, rg, banded=True, lam=None, visits=False, **g):
     gg = {**GRID, **g}
     with c.overrides(**({} if lam is None else dict(LAMBDA=float(lam)))):
         if banded:
-            lo, hi = BAND_PCT[0] / c.dp.GAMMA, min(BAND_PCT[1] / c.dp.GAMMA, 1.0)
+            lo, hi = BAND_PCT[0] / c.P.GAMMA, min(BAND_PCT[1] / c.P.GAMMA, 1.0)
             ag, band = np.linspace(lo, hi, gg["na"]), (lo, hi)
         else:
             ag, band = c.dp.make_a_grid(n=gg["na"]), None
@@ -226,8 +226,8 @@ def frontier(lambdas=FRONTIER_LAMBDAS, **g):
         if dp_sty is not None:                 # vertical gap = adequacy bought at the same budget
             axR.annotate("", xy=(m["cost"], dp_sty), xytext=(m["cost"], m["sty"]),
                          arrowprops=dict(arrowstyle="->", color=col, lw=1.1, alpha=0.8))
-    axR.axhline(c.dp.RR_TARGET, color="#C1121F", ls="--", lw=1.1, label=f"target {c.dp.RR_TARGET}")
-    axR.axhline(c.dp.RR_LEGAL, color="#9aa0a6", ls=":", lw=1.0, label=f"legal {c.dp.RR_LEGAL}")
+    axR.axhline(c.P.RR_TARGET, color="#C1121F", ls="--", lw=1.1, label=f"target {c.P.RR_TARGET}")
+    axR.axhline(c.P.RR_LEGAL, color="#9aa0a6", ls=":", lw=1.0, label=f"legal {c.P.RR_LEGAL}")
     axR.set_xscale("log"); axR.set_xlabel("employer cost per unit final salary (log)")
     axR.set_ylabel("stayer replacement rate")
     axR.set_title("Adequacy at the same budget (arrow = the gap)")
@@ -242,7 +242,7 @@ def schedules(**g):
     c.ensure_out(OUT)
     gg = {**GRID, **g}
     Fg, rg, _ = c.grids(gg["nF"], gg["nR"])
-    yrs = np.arange(c.dp.T)
+    yrs = np.arange(c.P.T)
     dp_b = _run_dp(Fg, rg, banded=True, **g)
     fig, ax = c.plt.subplots(figsize=(7.6, 4.9), constrained_layout=True)
     cols = c.plt.cm.tab10(np.linspace(0, 0.9, len(DESIGNS)))
@@ -376,7 +376,7 @@ def visitation(designs=MAP_DESIGNS, years=(0, 10, 22, 44), **g):
         assert abs(ym - vw) < 1e-9, f"{lb}: state step must be 0 for a calendar design"
         # (2) the visit histogram must reproduce the independently-computed per-year
         #     present means: avg = sum_t c_by*frac / sum_t frac, in percent of salary
-        assert abs(vw - m["avg"] / (100 * c.dp.GAMMA)) < 1e-9, f"{lb}: avg cross-check"
+        assert abs(vw - m["avg"] / (100 * c.P.GAMMA)) < 1e-9, f"{lb}: avg cross-check"
     g0, y0, v0 = star_steps
     print(f"  year step (survival) {g0:+.3f} -> {y0:+.3f};  state step {y0:+.3f} -> {v0:+.3f}"
           f"  = {v0 - y0:+.3f} for the optimum, 0.000 for every calendar design")

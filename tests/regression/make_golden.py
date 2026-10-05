@@ -28,19 +28,21 @@ def path(model, objective):
 
 
 def run(dp, model, objective):
-    """The outputs of one case, through the API of the code at the time of recording."""
-    dp.RATE_MODEL = model
+    """The outputs of one case, through the current API. (The files were recorded
+    with the pre-refactor API, which set dp.RATE_MODEL as a module global; the
+    case definitions -- and therefore the files -- are unchanged.)"""
+    p = dp.DEFAULT.replace(RATE_MODEL=model)
     Fg, rg = dp.make_F_grid(n=GRID["nF"]), dp.make_rho_grid(n=GRID["nR"])
     ag = dp.make_a_grid(n=GRID["na"])
     out = {}
-    sol = dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=GRID["nq"], objective=objective)
+    sol = dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=GRID["nq"], objective=objective, p=p)
     out["V"], out["policy"] = sol["V"], sol["policy"]
-    out["terminal"] = dp.terminal(Fg, rg, objective)
-    out["Phi"] = dp.paidup_service(Fg, rg, objective)[::9]     # every 9th leave cohort
-    lo, hi = 0.02 / dp.GAMMA, 0.15 / dp.GAMMA
+    out["terminal"] = dp.terminal(Fg, rg, objective, p=p)
+    out["Phi"] = dp.paidup_service(Fg, rg, objective, p=p)[::9]     # every 9th leave cohort
+    lo, hi = 0.02 / p.GAMMA, 0.15 / p.GAMMA
     for name, pol, band in [("opt", sol["policy"], None),
-                            ("flat", dp.const_policy(0.4, dp.T, len(Fg), len(rg)), (lo, hi))]:
-        s = dp.simulate(pol, Fg, rg, band=band, track=True, objective=objective, **SIM)
+                            ("flat", dp.const_policy(0.4, p.T, len(Fg), len(rg)), (lo, hi))]:
+        s = dp.simulate(pol, Fg, rg, band=band, track=True, objective=objective, p=p, **SIM)
         for k in SIM_KEYS:
             out[f"{name}_{k}"] = np.asarray(s[k])
     return out

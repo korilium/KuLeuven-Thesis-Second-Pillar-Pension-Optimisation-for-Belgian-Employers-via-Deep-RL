@@ -11,9 +11,9 @@ An Objective names the four parts. DynPro calls the SAME object in terminal(),
 paidup_service(), the Bellman flow and simulate(), so the oracle and the
 evaluation can never drift apart again.
 
-Every part receives `p`, the parameter namespace (DynPro passes its own module),
-and reads parameters from it at call time. Sweeping a parameter the usual way --
-setattr(dp, "ETA", 3) -- therefore moves every objective that uses it.
+Every part receives `p`, the run's pension.params.Params, and reads parameters
+from it at call time. A sweep -- dp.solve(..., p=DEFAULT.replace(ETA=3)) --
+therefore moves every objective that uses it.
 
 What fits the DP. Backward induction needs J additively separable over time:
   * employee:     any function of the terminal total replacement rate and the
@@ -28,7 +28,7 @@ product of the legs, a penalty on year-to-year changes in a -- needs more state
 than (t, F, rho) and belongs to the RL rung.
 
 Add a variant: write a factory below returning the callable, and register an
-Objective in OBJECTIVES. Select it with dp.OBJECTIVE = "<name>", or per call
+Objective in OBJECTIVES. Select it with Params(OBJECTIVE="<name>"), or per call
 with solve(..., objective=...) / simulate(..., objective=...).
 """
 

@@ -94,16 +94,16 @@ def _evaluate(overrides, **grid):
     Fg, rg, _ = c.grids(g["nF"], g["nR"])
     try:
         for k, v in overrides.items():
-            setattr(c.dp, k, v)
-        lo, hi = BAND_PCT[0] / c.dp.GAMMA, min(BAND_PCT[1] / c.dp.GAMMA, 1.0)
+            c.update(**{k: v})
+        lo, hi = BAND_PCT[0] / c.P.GAMMA, min(BAND_PCT[1] / c.P.GAMMA, 1.0)
         lo = min(lo, hi)                       # GAMMA->0 can invert the band
         pol = c.solve(Fg, rg, np.linspace(lo, hi, g["na"]), g["nq"])["policy"]
         r = c.simulate(pol, Fg, rg, **c.entry(N_PATHS, SEED), band=(lo, hi),
                        n_paths=N_PATHS, seed=SEED, track=True)
-        r["band"] = (lo * c.dp.GAMMA * 100, hi * c.dp.GAMMA * 100)
+        r["band"] = (lo * c.P.GAMMA * 100, hi * c.P.GAMMA * 100)
         # the no-contribution outcome under the SAME overrides and regime: the legal
         # pillar plus whatever the entry reserve grows into on its own
-        r["sty_zero"] = c.simulate(c.const_policy(0.0, c.dp.T, len(Fg), len(rg)), Fg, rg,
+        r["sty_zero"] = c.simulate(c.const_policy(0.0, c.P.T, len(Fg), len(rg)), Fg, rg,
                                    **c.entry(N_PATHS, SEED), n_paths=N_PATHS, seed=SEED)["sty"]
         r["early"] = float(np.mean(r["c_by"][:10]))
         r["late"] = float(np.mean(r["c_by"][35:]))
@@ -154,7 +154,7 @@ def table():
 
     print("\n  group-A anchors: %s" % ("all PASS" if not failures else "FAILED -> " + ", ".join(failures)))
     print("  globals restored: MU=%.3f DISC_ER=%.3f LAMBDA=%.2f SATIATE=%s ETA=%.1f BETA=%.3f"
-          % (c.dp.MU, c.dp.DISC_ER, c.dp.LAMBDA, c.dp.SATIATE, c.dp.ETA, c.dp.BETA))
+          % (c.P.MU, c.P.DISC_ER, c.P.LAMBDA, c.P.SATIATE, c.P.ETA, c.P.BETA))
     return results
 
 
@@ -179,7 +179,7 @@ def shapes():
               if any(g == p[0] for _, g, _, _ in _active(SCENARIOS))]
     fig, axes = c.plt.subplots(1, len(panels), figsize=(6.4 * len(panels), 4.8),
                                sharey=True, constrained_layout=True)
-    yrs = np.arange(c.dp.T)
+    yrs = np.arange(c.P.T)
     base = _evaluate({})
     for ax, (grp, title, skip) in zip(np.atleast_1d(axes), panels):
         rows = [(lb, ov) for lb, g, ov, _ in _active(SCENARIOS) if g == grp and lb not in skip]
@@ -209,7 +209,7 @@ def rates(Gs=(0.0175, 0.03, 0.045), DERs=(0.02, 0.05)):
     every G) while G shifts the LEVEL. This grid shows that separation directly."""
     if c.rate_owned("G"): return
     c.ensure_out(OUT)
-    yrs = np.arange(c.dp.T)
+    yrs = np.arange(c.P.T)
     fig, axes = c.plt.subplots(1, len(DERs), figsize=(6.4 * len(DERs), 4.8),
                                sharey=True, constrained_layout=True)
     print("  %-18s %8s %8s %8s %8s" % ("(G, delta_f)", "styRR", "avg", "early", "late"))
@@ -223,11 +223,11 @@ def rates(Gs=(0.0175, 0.03, 0.045), DERs=(0.02, 0.05)):
                   % (G, der, r["sty"], r["avg"], r["early"], r["late"]))
         ax.set_xlabel("career year $t$")
         ax.set_title(f"$\\delta_f$ = {der:.0%}  "
-                     + ("(front-loads)" if der < c.dp.MU else "(back-loads)"))
+                     + ("(front-loads)" if der < c.P.MU else "(back-loads)"))
         ax.legend(frameon=False, fontsize=8.5, loc="best"); ax.grid(True, alpha=0.25, lw=0.6)
     np.atleast_1d(axes)[0].set_ylabel("contribution (% of salary)")
     fig.suptitle(r"$\delta_f$ selects the SHAPE; $G$ shifts the LEVEL  "
-                 r"($\mu$ fixed at %.0f%%)" % (100 * c.dp.MU), fontsize=12)
+                 r"($\mu$ fixed at %.0f%%)" % (100 * c.P.MU), fontsize=12)
     fig.savefig(f"{OUT}/scenario_rates.png", dpi=c.DPI); c.plt.close(fig)
     print(f"\nwrote {OUT}/scenario_rates.png")
 
@@ -293,7 +293,7 @@ def figures(only=("base", "B", "C"), grid=None, figs=None):
         t0 = time.time()
         try:
             for k, v in ov.items():
-                setattr(c.dp, k, v)
+                c.update(**{k: v})
             with _redirect(d):
                 for name, _mod, fn in chosen:
                     try:
@@ -304,7 +304,7 @@ def figures(only=("base", "B", "C"), grid=None, figs=None):
             c.restore()                 # never leak a mutated global
         print("    (%.0fs)" % (time.time() - t0))
     print("\ntotal %.0fs   globals: MU=%.3f DISC_ER=%.3f LAMBDA=%.2f SATIATE=%s BETA=%.3f"
-          % (time.time() - t_all, c.dp.MU, c.dp.DISC_ER, c.dp.LAMBDA, c.dp.SATIATE, c.dp.BETA))
+          % (time.time() - t_all, c.P.MU, c.P.DISC_ER, c.P.LAMBDA, c.P.SATIATE, c.P.BETA))
 
 
 # ============ 0. invariants: properties the model must satisfy ============
@@ -339,14 +339,14 @@ def invariants(nF=73, nR=71, na=15, nq=5, n_paths=8000, seed=3, tol=1e-6):
 
     # 3. eta -> 1 is continuous and equals log utility
     x = np.array([0.4, 1.0, 2.5])
-    with c.overrides(ETA=1.0):       u1 = c.dp.u(x).copy()
-    with c.overrides(ETA=1.0 + 1e-4): ue = c.dp.u(x).copy()
+    with c.overrides(ETA=1.0):       u1 = c.dp.u(x, p=c.P).copy()
+    with c.overrides(ETA=1.0 + 1e-4): ue = c.dp.u(x, p=c.P).copy()
     dl = float(np.abs(u1 - np.log(x)).max()); dc = float(np.abs(u1 - ue).max())
     check("u -> log as eta -> 1 (and continuous)", dl < 1e-12 and dc < 1e-3,
           f"|u-log| {dl:.1e}, |u(1)-u(1+eps)| {dc:.1e}")
 
     # 4. the leaver and stayer terminal conditions coincide at tau = T
-    d4 = float(np.abs(c.dp.paidup_service(Fg, rg)[c.dp.T] - c.dp.terminal(Fg, rg)).max())
+    d4 = float(np.abs(c.dp.paidup_service(Fg, rg, p=c.P)[c.P.T] - c.dp.terminal(Fg, rg, p=c.P)).max())
     check("Phi[T] == terminal (full-service cohort)", d4 == 0.0, f"max|diff| {d4:.2e}")
 
     # 5. cost and stayer adequacy are monotone in LAMBDA
@@ -368,8 +368,8 @@ def invariants(nF=73, nR=71, na=15, nq=5, n_paths=8000, seed=3, tol=1e-6):
     if c.RATES != "constant":
         print(f"  (timing-neutrality invariant skipped under {c.RATES}: mu is path-wise)")
         return _report(rows)
-    lo, hi = 0.02 / c.dp.GAMMA, 0.15 / c.dp.GAMMA
-    with c.overrides(DISC_ER=c.dp.MU, DISC_EMP=c.dp.MU):
+    lo, hi = 0.02 / c.P.GAMMA, 0.15 / c.P.GAMMA
+    with c.overrides(DISC_ER=c.P.MU, DISC_EMP=c.P.MU):
         p = c.solve(Fg, rg, np.linspace(lo, hi, 20), nq)["policy"]
         rr = c.simulate(p, Fg, rg, **c.entry(n_paths, seed), band=(lo, hi),
                         n_paths=n_paths, seed=seed)

@@ -43,7 +43,7 @@ COLORS = dict(zip(NAMES, ["#222222", "#1D9E75", "#C1121F", "#274690", "#E08D1C",
 
 
 def _band():
-    lo, hi = BAND_PCT[0] / c.dp.GAMMA, min(BAND_PCT[1] / c.dp.GAMMA, 1.0)
+    lo, hi = BAND_PCT[0] / c.P.GAMMA, min(BAND_PCT[1] / c.P.GAMMA, 1.0)
     return lo, hi
 
 
@@ -58,7 +58,7 @@ _POL = {}
 
 def _policy(name, g=None):
     """The banded optimum under objective `name` (memoised per grid and regime)."""
-    key = (name, tuple(sorted((g or {}).items())), c.dp.RATE_MODEL)
+    key = (name, tuple(sorted((g or {}).items())), c.P.RATE_MODEL)
     if key not in _POL:
         Fg, rg, ag, nq = _grids(g)
         _POL[key] = c.solve(Fg, rg, ag, nq, objective=name)["policy"]
@@ -73,7 +73,7 @@ def _sim(pol, objective, g=None, **kw):
 
 def _floor_policy(g=None):
     Fg, rg, _, _ = _grids(g)
-    return c.const_policy(_band()[0], c.dp.T, len(Fg), len(rg))
+    return c.const_policy(_band()[0], c.P.T, len(Fg), len(rg))
 
 
 # --- checks -------------------------------------------------------------------
@@ -89,19 +89,19 @@ def _cross_matrix(names=NAMES):
 @c.restores
 def checks(tol=0.02):
     Fg, rg, ag, nq = _grids()
-    dp = c.dp
+    dp, P = c.dp, c.P
 
     # baseline == the committed formulas, written out by hand
     Fc, rc = Fg[:, None], rg[None, :]
-    rr = dp.RR_LEGAL + np.maximum(Fc, 1.0) / (rc * dp.ANNUITY)
-    ref = (dp.LAMBDA * dp.RR_TARGET * dp.ANNUITY * dp.u(rr / dp.RR_TARGET) * np.exp(-dp.DISC_EMP * dp.T)
-           - (1 - dp.LAMBDA) * np.maximum(1.0 - Fc, 0.0) / rc * np.exp(-dp.DISC_ER * dp.T))
-    d = float(np.abs(dp.terminal(Fg, rg, "baseline") - ref).max() / np.abs(ref).max())
+    rr = P.RR_LEGAL + np.maximum(Fc, 1.0) / (rc * P.ANNUITY)
+    ref = (P.LAMBDA * P.RR_TARGET * P.ANNUITY * dp.u(rr / P.RR_TARGET, p=P) * np.exp(-P.DISC_EMP * P.T)
+           - (1 - P.LAMBDA) * np.maximum(1.0 - Fc, 0.0) / rc * np.exp(-P.DISC_ER * P.T))
+    d = float(np.abs(dp.terminal(Fg, rg, "baseline", p=P) - ref).max() / np.abs(ref).max())
     assert d < 1e-12, d
     print(f"  baseline   terminal == committed formula (rel {d:.1e})                  OK")
 
     for n in NAMES:
-        d = float(np.abs(dp.paidup_service(Fg, rg, n)[dp.T] - dp.terminal(Fg, rg, n)).max())
+        d = float(np.abs(dp.paidup_service(Fg, rg, n, p=P)[P.T] - dp.terminal(Fg, rg, n, p=P)).max())
         assert d < 1e-12, (n, d)
     print(f"  leaver     Phi[T] == terminal for all {len(NAMES)} objectives                      OK")
 
@@ -145,9 +145,9 @@ def maps(years=(5, 22), names=NAMES):
         r = _sim(pol, n, MAP_G, visits=True)
         for i, t in enumerate(years):
             ax = axes[i, j]
-            mesh = ax.pcolormesh(Fg, rg, pol[t].T * c.dp.GAMMA * 100, cmap="viridis",
-                                 vmin=lo * c.dp.GAMMA * 100, vmax=hi * c.dp.GAMMA * 100, shading="auto")
-            cs = ax.contour(Fg, rg, RR.T, levels=[c.dp.RR_TARGET], colors="white", linewidths=1.0)
+            mesh = ax.pcolormesh(Fg, rg, pol[t].T * c.P.GAMMA * 100, cmap="viridis",
+                                 vmin=lo * c.P.GAMMA * 100, vmax=hi * c.P.GAMMA * 100, shading="auto")
+            cs = ax.contour(Fg, rg, RR.T, levels=[c.P.RR_TARGET], colors="white", linewidths=1.0)
             _bm._contours(ax, r["visits"][t], Fg, rg, color="#ff4fd8")
             ax.set_yscale("log"); ax.axvline(1.0, color="white", lw=0.7, ls=":")
             if i == 0: ax.set_title(n, fontsize=10)
@@ -182,7 +182,7 @@ def schedules(names=NAMES):
         print("  %-17s %7.3f %7.3f %7.1f %7.1f %7.1f %8.4f   %s"
               % (n, m["sty"], m["lea"], m["avg"], m["early"], m["late"], m["cost"], OBJECTIVES[n].note))
     fig, ax = c.plt.subplots(figsize=(9, 5), constrained_layout=True)
-    yrs = np.arange(c.dp.T)
+    yrs = np.arange(c.P.T)
     for n, m in rows.items():
         ax.plot(yrs, m["c_by"], lw=2.6 if n == "baseline" else 1.6, color=COLORS.get(n),
                 ls="--" if n == "baseline" else "-",

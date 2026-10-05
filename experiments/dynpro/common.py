@@ -1,6 +1,6 @@
 """Presentation/sweep harness for the experiments/dynpro suites (sensitivity_suite.py,
 contribution_schedule_suite.py, lambda_dial_suite.py): the model import,
-figure config and labels, and baseline/restore bookkeeping for parameter sweeps.
+figure config and labels, and the current parameters of a sweep (P, update, restore).
 
 The MODEL lives entirely in pension/dp.py -- parameters, transitions, grids,
 the churn-aware DP solver, and simulate() (the committed forward Monte-Carlo).
@@ -24,8 +24,8 @@ import pension.dp as dp
 #     python sensitivity_suite.py tornado                    # constant rates (default)
 #     python sensitivity_suite.py tornado --rates=hull_white
 #     DYNPRO_RATES=vasicek python scenario_suite.py table
-# It becomes the baseline value of dp.RATE_MODEL, so restore() keeps it, and both
-# dp.solve (certainty-equivalent) and dp.simulate (path-wise G_t, mu_t) follow it.
+# It becomes the baseline value of RATE_MODEL in BASE, so restore() keeps it, and
+# both dp.solve (certainty-equivalent) and dp.simulate (path-wise G_t, mu_t) follow it.
 # Figures of a rate regime go to their own tree, figs/rates_<model>/..., so they
 # never overwrite the constant-rate results they are compared against.
 RATE_MODELS = ("constant", "hull_white", "vasicek")
@@ -40,7 +40,6 @@ def _pick_rates():
     return model
 
 RATES = _pick_rates()
-dp.RATE_MODEL = RATES
 
 # Parameters a rate model sets path-wise (simulate) and by moment-matching (solve),
 # so overriding them under a rate model does nothing. Sweeps over them are
@@ -61,7 +60,7 @@ def rate_owned(*params):
 
 
 def rate_overrides(ov):
-    """Translate a dict of dp.* overrides to the active regime.
+    """Translate a dict of parameter overrides to the active regime.
 
     Under constant rates it is returned unchanged. Under a rate model, SIGMA_R maps
     to SIGMA_R_RATES (the asset noise on top of the book yield) and SIGMA_L is
@@ -88,29 +87,48 @@ mpl.rcParams.update({"figure.facecolor": "white", "savefig.facecolor": "white", 
 # so including DISC_EMP too would double-count one lever and mis-rank the tornado.
 PARAMS = ["LAMBDA", "RR_TARGET", "RR_LEGAL", "ANNUITY", "GAMMA", "ETA", "G", "MU",
           "SIGMA_R", "DISC_ER"]
-_PARAMS_ALL = list(PARAMS)
 if RATES != "constant":     # the tornado sweeps what the regime leaves free
     PARAMS = [p for p in PARAMS if p not in RATE_OWNED] + ["SIGMA_R_RATES"]
 LAB = {"LAMBDA": r"$\lambda$", "RR_TARGET": r"$RR^\star$", "RR_LEGAL": r"$RR_{\rm legal}$",
        "ANNUITY": r"$\ddot a$", "GAMMA": r"$\Gamma$", "ETA": r"$\eta$", "G": r"$G$",
        "MU": r"$\mu$", "SIGMA_R": r"$\sigma_R$", "SIGMA_R_RATES": r"$\sigma_R$ (excess)", "DISC_EMP": r"$\delta_e$", "DISC_ER": r"$\delta_f$"}
 
-# PARAMS drives tornado(), which perturbs each entry by +/-15%, so it holds only
-# continuous ECONOMIC parameters. restore() must cover more than that: anything a
-# caller might set on dp. SATIATE is a bool and BETA is extraction-only, so neither
-# belongs in a +/-15% sweep, but both must still be reset -- leaving them out let a
-# scenario leak SATIATE=True into every later run.
-_RESTORE = _PARAMS_ALL + ["SIGMA_R_RATES", "DISC_EMP", "SIGMA_L", "SATIATE", "BETA", "DISC", "T", "W", "S0",
-                     "RATE_MODEL", "RATE_SEED",   # the rate-regime switch
-                     "OBJECTIVE"]                 # the value-function switch (objective.py)
+# --- the parameters of the run -------------------------------------------------
+# The model takes an explicit pension.params.Params. The harness keeps ONE current
+# value, P, which every wrapper below passes on; BASE is the run's baseline (DEFAULT
+# with the chosen rate regime). Sweeps change P with update()/overrides() and go back
+# with restore(). P is an immutable Params, so "restoring" is a single rebinding: no
+# per-name bookkeeping, and nothing can be left half-reset.
+BASE = dp.DEFAULT.replace(RATE_MODEL=RATES)
+P = BASE
 
-_BASE = {k: getattr(dp, k) for k in _RESTORE}
 
-# model entry points, re-exported for the suites' existing call sites
+def update(**kw):
+    """Change the current parameters: P <- P.replace(**kw)."""
+    global P
+    P = P.replace(**kw)
+
+
+def restore():
+    """Back to the baseline parameters of the run."""
+    global P
+    P = BASE
+
+
+# model entry points, re-exported for the suites' existing call sites; the ones
+# that depend on the parameters receive the current P unless given their own
+def simulate(*a, **kw):
+    kw.setdefault("p", P)
+    return dp.simulate(*a, **kw)
+
+
+def schedule_policy(*a, **kw):
+    kw.setdefault("p", P)
+    return dp.schedule_policy(*a, **kw)
+
+
 grids = dp.grids
-simulate = dp.simulate
 const_policy = dp.const_policy
-schedule_policy = dp.schedule_policy
 new_plan_init = dp.new_plan_init
 sample_entry = dp.sample_entry
 
@@ -126,14 +144,9 @@ SEED = 7
 BAND_PCT = (0.02, 0.15)          # contribution band, as a fraction of salary
 
 
-def restore():
-    """Reset every dp.* global any suite might sweep back to its baseline value."""
-    for k, v in _BASE.items(): setattr(dp, k, v)
-
-
 @contextlib.contextmanager
 def overrides(**kw):
-    """Apply dp.* overrides for the duration, then ALWAYS restore.
+    """Run with BASE.replace(**kw) for the duration, then ALWAYS restore.
 
         with c.overrides(G=0.02, MU=0.05):
             ...
@@ -142,7 +155,7 @@ def overrides(**kw):
     the bare form leaks the mutated global into every later figure in the run."""
     try:
         restore()
-        for k, v in kw.items(): setattr(dp, k, v)
+        update(**kw)
         yield
     finally:
         restore()
@@ -169,10 +182,10 @@ def lambda_equivalent(de_new, lam=None, de_ref=None):
         lambda'' = A / (A + B*exp(-de_ref*T)),  A = lam*exp(-de_new*T), B = 1-lam
     Report this alongside any delta_e result so it is not read as an independent
     economic mechanism."""
-    lam = _BASE["LAMBDA"] if lam is None else lam
-    de_ref = _BASE["DISC_EMP"] if de_ref is None else de_ref
-    A = lam * np.exp(-de_new * dp.T); B = 1.0 - lam
-    return float(A / (A + B * np.exp(-de_ref * dp.T)))
+    lam = BASE.LAMBDA if lam is None else lam
+    de_ref = BASE.DISC_EMP if de_ref is None else de_ref
+    A = lam * np.exp(-de_new * P.T); B = 1.0 - lam
+    return float(A / (A + B * np.exp(-de_ref * P.T)))
 
 
 def ensure_out(path=None):
@@ -210,13 +223,14 @@ def iso_rr(Fg, rg, total=True):
     `total=False` returns the second-pillar rate alone, for a figure that wants to
     separate the employer's contribution from the legal floor."""
     FF, RRr = np.meshgrid(Fg, rg, indexing="ij")
-    rr2 = np.maximum(FF, 1.0) / (dp.ANNUITY * RRr)
-    return dp.RR_LEGAL + rr2 if total else rr2
+    rr2 = np.maximum(FF, 1.0) / (P.ANNUITY * RRr)
+    return P.RR_LEGAL + rr2 if total else rr2
 
 
 def solve(Fg, rg, ag, nq=5, beta=None, betas=None, objective=None):
     """The committed (churn-aware, paid-up service-pro-rated) policy oracle.
     `betas` additionally returns soft (signal) readouts of the same Q-values;
     it leaves V and the hard policy untouched -- see dp.solve. `objective` picks
-    the value function (None follows dp.OBJECTIVE; see pension/objective.py)."""
-    return dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq, beta=beta, betas=betas, objective=objective)
+    the value function (None follows P.OBJECTIVE; see pension/objective.py)."""
+    return dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq, beta=beta, betas=betas, objective=objective,
+                    p=P)

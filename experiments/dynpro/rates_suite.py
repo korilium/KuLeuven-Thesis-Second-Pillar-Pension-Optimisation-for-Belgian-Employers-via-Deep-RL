@@ -4,7 +4,7 @@ The constant-rate model holds G and MU fixed. Here both come from ONE simulated
 10Y OLO path per scenario (economy.draw_rate_scenarios), Hull-White or Vasicek:
 G_t is the statutory WAP filter of that path (pension/rates/wap.py), applied
 HORIZONTALLY to the liability, and mu_t is the insurer's book yield on the
-reserve. The switch is dp.RATE_MODEL; "constant" is the original model, so every
+reserve. The switch is Params.RATE_MODEL; "constant" is the original model, so every
 other suite is untouched and this one can flip back to it at will.
 
 Checks (asserted; the suite stops on the first failure):
@@ -34,7 +34,7 @@ MODELS = ("hull_white", "vasicek")
 
 
 def _scen(model, n=N_PATHS):
-    return c.dp._economy.draw_rate_scenarios(n, seed=c.dp.RATE_SEED, model=model)
+    return c.dp._economy.draw_rate_scenarios(n, seed=c.P.RATE_SEED, model=model, p=c.P)
 
 
 def _grids():
@@ -45,19 +45,19 @@ def _grids():
 @c.restores
 def checks(n=4000):
     Fg, rg, _ = _grids()
-    pol = c.const_policy(0.4, c.dp.T, len(Fg), len(rg))
+    pol = c.const_policy(0.4, c.P.T, len(Fg), len(rg))
     kw = dict(**c.entry(n, SEED), n_paths=n, seed=SEED)
 
     # switch: constant -> hull_white -> constant leaves the constant result unchanged
     base = c.simulate(pol, Fg, rg, **kw)
-    c.dp.RATE_MODEL = "hull_white"; c.simulate(pol, Fg, rg, **kw)
-    c.dp.RATE_MODEL = "constant"
+    c.update(RATE_MODEL="hull_white"); c.simulate(pol, Fg, rg, **kw)
+    c.update(RATE_MODEL="constant")
     again = c.simulate(pol, Fg, rg, **kw)
     assert base["joint"] == again["joint"] and "rates" not in again
     print("  switch      constant mode identical after visiting hull_white          OK")
 
     # known answer: degenerate scenario == constant branch (SIGMA_L = 0 in both)
-    c.dp.SIGMA_L = 0.0; c.dp.SIGMA_R_RATES = c.dp.SIGMA_R
+    c.update(SIGMA_L=0.0, SIGMA_R_RATES=c.P.SIGMA_R)
     ref = c.simulate(pol, Fg, rg, **kw)
     deg = c.simulate(pol, Fg, rg, **kw, rates=_scen("constant", n))
     gap = max(abs(ref["joint"] - deg["joint"]), float(np.abs(ref["RR_tot"] - deg["RR_tot"]).max()))
@@ -66,10 +66,10 @@ def checks(n=4000):
     c.restore()
 
     # horizontal: G steps 3.00% -> 1.75% at t = 20; deterministic, no churn
-    T, W, GAM = c.dp.T, c.dp.W, c.dp.GAMMA
+    T, W, GAM = c.P.T, c.P.W, c.P.GAMMA
     Gs = np.where(np.arange(T) < 20, 0.03, 0.0175)
     scen = dict(G=np.repeat(Gs[:, None], 1, 1), mu=np.full((T, 1), 0.02))
-    c.dp.SIGMA_R_RATES = 0.0
+    c.update(SIGMA_R_RATES=0.0)
     a, S0, L0 = 0.4, 20.0, 1.0
     r = c.simulate(c.const_policy(a, T, len(Fg), len(rg)), Fg, rg, R0=1.0, L0=L0, S0=S0,
                    n_paths=1, hazard=lambda t: 0.0, rates=scen)
@@ -129,13 +129,13 @@ def table():
     Fg, rg, ag = _grids()
     designs = {"DP (constant rates)": c.solve(Fg, rg, ag, GRID["nq"])["policy"]}
     for m in MODELS:
-        sol = c.dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=GRID["nq"], rates=_scen(m))
+        sol = c.dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=GRID["nq"], rates=_scen(m), p=c.P)
         designs[f"DP (CE {m})"] = sol["policy"]       # explicit scenario: CE to that model
         ce = sol["ce"]
         print(f"  CE {m:10s}: G={ce['G']:.2%} MU={ce['MU']:.2%} "
               f"SIGMA_L={ce['SIGMA_L']:.2%} SIGMA_R={ce['SIGMA_R']:.2%}")
     for lab, rate in (("flat 5% of salary", 0.05), ("flat 8% of salary", 0.08)):
-        designs[lab] = c.schedule_policy(lambda t, r=rate: min(r / c.dp.GAMMA, 1.0), len(Fg), len(rg))
+        designs[lab] = c.schedule_policy(lambda t, r=rate: min(r / c.P.GAMMA, 1.0), len(Fg), len(rg))
 
     scen = {"constant": None, **{m: _scen(m) for m in MODELS}}
     print(f"\n  {'policy':24s} {'rates':11s} {'joint':>8s} {'benefit':>8s} {'cost':>7s} "

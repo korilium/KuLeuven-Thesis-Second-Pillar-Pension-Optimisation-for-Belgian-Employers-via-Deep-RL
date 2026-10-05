@@ -20,11 +20,7 @@ def _current(model, objective):
     """The same case through the CURRENT API. This adapter is the one place that
     follows the refactor; the recorded files never change."""
     import pension.dp as dp
-    saved = dp.RATE_MODEL
-    try:
-        return golden.run(dp, model, objective)
-    finally:
-        dp.RATE_MODEL = saved
+    return golden.run(dp, model, objective)
 
 
 @pytest.mark.parametrize("model,objective", golden.CASES, ids=[f"{m}-{o}" for m, o in golden.CASES])

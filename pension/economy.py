@@ -1,9 +1,8 @@
 """
 economy.py -- the economic scenario (exogenous world).
  
-Single source of truth for the pension economy shared by BOTH the tabular
-environment (coreEnv) and the DP oracle (dp_oracle). Holds only:
-  * structural / economic parameters,
+Shared by the tabular rung and the DP oracle. Holds:
+  * the parameter names of the tabular rung (values from pension/params.py),
   * the contribution plan rules c(t, S),
   * the exogenous credited-return shock process,
   * the interest-rate regime switch and its scenarios (G_t, mu_t).
@@ -17,76 +16,14 @@ rate model is actually drawn.
 import numpy as np
  
 # --- parameters -----------------------------------------------------------
-# THE single source of truth for the economic calibration: both the tabular
-# environment (basicEnv) and the DP oracle (DynPro) import from here, so the two
-# rungs are guaranteed to run the same economy.
-#
-# Rung 1 previously carried an older vintage of its own (G=1.75%, the earlier WAP
-# floor; MU=1%; a single 1% numeraire). It now inherits the committed calibration
-# below, so its drift gap MU-G moves from -0.75% to 0 and its discount from 1% to
-# the employer rate.
-T = 45                      # career length in years
-G, MU, W = 0.03, 0.03, 0.025   # WAP guarantee rate, credited tariff, salary growth
+# All parameters live in pension/params.py (Params / DEFAULT). The names below
+# are module-level copies for the TABULAR rung (pension/envs/tabular.py), which
+# reads them as globals and rebinds them per config; the DP and the rate engine
+# take an explicit Params instead.
+from pension.params import DEFAULT
 
-DISC_EMP = 0.03    # EMPLOYEE discount: values future retirement income at the risk-free/OLO rate
-DISC_ER  = 0.05     # EMPLOYER discount: firm cost of capital (contributions + shortfall)
-DISC = DISC_ER      # single numeraire, used by the tabular rung and as a legacy alias
-
-SIGMA_R, SIGMA_L = 0.05, 0.02   # asset shock, guarantee shock
-SIGMA = SIGMA_R     # the tabular rung has ONE shock, on the reserve
-
-GAMMA, LAMBDA, S0 = 0.15, 0.5, 1.0
-ETA = 2.0                   # CRRA curvature over the replacement rate (eta != 1)
-ANNUITY = 15.0              # actuarial annuity factor: capital -> annual pension
-                            # (Belgian life expectancy at 65 ~20y, ~2% technical rate,
-                            #  mortality-adjusted). RR is ANNUAL: pension / final salary.
-RR_LEGAL = 0.43             # 1st-pillar (legal) gross replacement, Belgian private-sector
-                            # average earner (OECD PaaG); the 2nd pillar sits ON TOP.
-SATIATE = False             # if True, cap RR at RR_TARGET in the utility (no reward for overshoot)
-RR_TARGET = 0.70            # total-adequacy target across all pillars (OECD/EU ~70%);
-                            # the employee's lifecycle utility is judged against this.
-# GAMMA/ETA/ANNUITY/RR_* and the DISC_EMP/DISC_ER split are Rung-2 concepts; the
-# binary-action tabular model simply does not read them.
-
-OBJECTIVE = "baseline"      # the value function DynPro optimises and scores: a name in
-                            # objective.OBJECTIVES (Envs/objective.py). "baseline" is the
-                            # committed CRRA-employee / linear-employer / lambda-weighted model.
-
-BETA = 0.01      # policy-EXTRACTION temperature, RELATIVE to the local Q-spread:
-                # 0 = hard argmax (the true optimum); > 0 = soft signal readout that blends
-                # actions lying within BETA of the state's full value range
-                # (max_a Q - min_a Q). Relative, not in Q units, because Q is NOT scale-free
-                # in the reward: rescaling the employee leg changes every Q-difference, so a
-                # fixed absolute temperature would mean something different per specification.
-                # This form is invariant to any affine rescale Q -> alpha*Q + c.
-                # Rough ladder: 0.01 barely smooths, 0.1 visible, 0.3 strong, ->inf uniform.
-                # Extraction only: the objective and the value function V are IDENTICAL at
-                # every BETA, so the value gap to a soft policy stays meaningful.
-
-N_EVAL = 2000   # default number of evaluation paths (SAA batch) -- numerical, not economic
-
-# --- interest-rate regime -------------------------------------------------
-# RATE_MODEL is THE switch between the constant-rate economy above and the
-# stochastic-rate one. "constant" (default) is the original model, untouched: G,
-# MU, SIGMA_R and SIGMA_L as set above. "hull_white" / "vasicek" replace G and MU
-# by path-wise rates driven by ONE simulated 10Y OLO path:
-#   G_t  = the statutory WAP filter of that path (liability/WAP.py), applied
-#          HORIZONTALLY: each contribution keeps the G_t of its payment year;
-#   mu_t = the insurer's book yield, a rolling mean of the same 10Y OLO over
-#          BOOK_DURATION years plus BOOK_SPREAD (a Branch 21 portfolio rolls over
-#          slowly, so its yield lags the market).
-# The common driver is what makes the guarantee and the reserve correlated.
-# Consumers rebind RATE_MODEL on their own module (e.g. setattr(dp, "RATE_MODEL",
-# "hull_white")), like every other parameter here.
-RATE_MODEL = "constant"     # "constant" | "hull_white" | "vasicek"
-RATE_DT = 1 / 12            # monthly rate step -- matches the OLO calibration
-RATE_SEED = 2026            # seed of the rate scenarios (separate from the churn/asset noise)
-BOOK_DURATION = 8           # years averaged into the book yield (Branch 21 portfolio duration)
-BOOK_SPREAD = 0.0           # book yield over the 10Y OLO (credit/illiquidity pickup, net of costs)
-SIGMA_R_RATES = SIGMA_R     # excess-return noise on top of the book yield (profit sharing,
-                            # asset-mix risk); kept equal to SIGMA_R so the two regimes carry
-                            # the same asset risk. 0 = pure book-yield crediting.
-RATE_CE_PATHS = 5000        # scenarios behind the certainty-equivalent moments DynPro.solve uses
+T, G, MU, W, S0 = DEFAULT.T, DEFAULT.G, DEFAULT.MU, DEFAULT.W, DEFAULT.S0
+LAMBDA, DISC, SIGMA, N_EVAL = DEFAULT.LAMBDA, DEFAULT.DISC, DEFAULT.SIGMA, DEFAULT.N_EVAL
 
  
 # --- plan rules: c(t, S) -> premium --------------------------------------
@@ -135,7 +72,7 @@ def rate_calibration():
     return _CALIBRATION
 
 
-def draw_rate_scenarios(n_paths=N_EVAL, seed=RATE_SEED, model=None, horizon=None):
+def draw_rate_scenarios(n_paths=2000, seed=None, model=None, horizon=None, p=None):
     """Annual rate scenarios for the reserve/liability simulation.
 
     Simulates the rate model monthly from the last observed OLO month (model year
@@ -155,27 +92,33 @@ def draw_rate_scenarios(n_paths=N_EVAL, seed=RATE_SEED, model=None, horizon=None
 
     Returns dict of (horizon, n_paths) arrays G, mu and (horizon+1, n_paths) y10, r
     (annual samples; r is the short rate, = y10 under Vasicek), plus model, t0.
+
+    `p` (default DEFAULT) supplies everything not given explicitly: seed=None ->
+    p.RATE_SEED, model=None -> p.RATE_MODEL, horizon=None -> p.T, and the book-yield
+    and constant-mode parameters.
     """
-    model = RATE_MODEL if model is None else model
-    H = T if horizon is None else horizon
+    p = DEFAULT if p is None else p
+    model = p.RATE_MODEL if model is None else model
+    seed = p.RATE_SEED if seed is None else seed
+    H = p.T if horizon is None else horizon
     # memoised: the suites call this once per simulate(), hundreds of times per run.
     # The key holds every input the scenario depends on (the WAP constants are
-    # module constants of liability/WAP.py and are not swept). Callers must treat
-    # the returned arrays as read-only.
-    key = (model, n_paths, seed, H, BOOK_DURATION, BOOK_SPREAD) + \
-          ((G, MU) if model == "constant" else ())
+    # module constants of pension/rates/wap.py and are not swept). Callers must
+    # treat the returned arrays as read-only.
+    key = (model, n_paths, seed, H, p.RATE_DT, p.BOOK_DURATION, p.BOOK_SPREAD) + \
+          ((p.G, p.MU) if model == "constant" else ())
     if key not in _SCENARIOS:
-        _SCENARIOS[key] = _draw_rate_scenarios(n_paths, seed, model, H)
+        _SCENARIOS[key] = _draw_rate_scenarios(n_paths, seed, model, H, p)
     return _SCENARIOS[key]
 
 _SCENARIOS = {}
 
 
-def _draw_rate_scenarios(n_paths, seed, model, H, chunk=10000):
+def _draw_rate_scenarios(n_paths, seed, model, H, p, chunk=10000):
     """Uncached draw (see draw_rate_scenarios). Paths are simulated in blocks of
     `chunk` so a 40k-path cohort does not hold ~1 GB of monthly arrays at once."""
     if model == "constant":
-        G_ = np.full((H, n_paths), G); mu_ = np.full((H, n_paths), MU)
+        G_ = np.full((H, n_paths), p.G); mu_ = np.full((H, n_paths), p.MU)
         return dict(model=model, G=G_, mu=mu_, y10=np.full((H + 1, n_paths), np.nan),
                     r=np.full((H + 1, n_paths), np.nan), t0=None)
 
@@ -184,10 +127,10 @@ def _draw_rate_scenarios(n_paths, seed, model, H, chunk=10000):
     from pension.rates.wap import computeWAPRate
     cal = rate_calibration(); vas = cal["vasicek"]
     rng = np.random.default_rng(seed)
-    mpy = int(round(1 / RATE_DT))
+    mpy = int(round(1 / p.RATE_DT))
     hist = cal["hist10Y"]
     start = len(hist) - 1                                # row of model year 0
-    n_book = BOOK_DURATION * mpy
+    n_book = p.BOOK_DURATION * mpy
     assert start + 1 >= n_book, "OLO history shorter than BOOK_DURATION"
     rows = start + mpy * np.arange(H)                    # start month of each year
     yearly = np.arange(H + 1) * mpy
@@ -197,12 +140,12 @@ def _draw_rate_scenarios(n_paths, seed, model, H, chunk=10000):
         n = min(chunk, n_paths - lo)
         if model == "hull_white":
             r_m = simulateHullWhite(cal["curve"], vas["kappa"], vas["sigma"], T=H,
-                                    n_paths=n, dt=RATE_DT, rng=rng)
+                                    n_paths=n, dt=p.RATE_DT, rng=rng)
             y10_m = reconstructFutureYield(r_m, vas["kappa"], vas["sigma"], cal["curve"],
-                                           tau=10.0, dt=RATE_DT)
+                                           tau=10.0, dt=p.RATE_DT)
         elif model == "vasicek":
             r_m = simulateVasicek(vas["kappa"], vas["theta"], vas["sigma"], vas["r0"], T=H,
-                                  n_paths=n, dt=RATE_DT, rng=rng)
+                                  n_paths=n, dt=p.RATE_DT, rng=rng)
             y10_m = r_m
         else:
             raise ValueError(f"unknown RATE_MODEL {model!r}")
@@ -212,7 +155,7 @@ def _draw_rate_scenarios(n_paths, seed, model, H, chunk=10000):
         full = np.vstack([np.repeat(hist[:, None], n, axis=1), y10_m[1:]])
         G_ = computeWAPRate(full, start, H, months_per_year=mpy)
         cs = np.vstack([np.zeros((1, n)), np.cumsum(full, axis=0)])
-        mu_ = (cs[rows + 1] - cs[rows + 1 - n_book]) / n_book + BOOK_SPREAD
+        mu_ = (cs[rows + 1] - cs[rows + 1 - n_book]) / n_book + p.BOOK_SPREAD
         parts.append((G_, mu_, y10_m[yearly], r_m[yearly]))
     G_, mu_, y10_, r_ = (np.hstack(x) for x in zip(*parts))
     return dict(model=model, G=G_, mu=mu_, y10=y10_, r=r_, t0=cal["t0"])

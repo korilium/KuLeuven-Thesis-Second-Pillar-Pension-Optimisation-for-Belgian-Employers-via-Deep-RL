@@ -40,9 +40,9 @@ def tornado(pct=0.15, nF=73, nR=91, na=15, nq=5, params=None):
     print("baseline:", {k: round(v, 3) for k, v in base.items() if k in ("gm_a", "tot", "sty", "lea")})
     rows = []
     for p in params:
-        b = c._BASE[p]
-        c.restore(); setattr(c.dp, p, b * (1 - pct)); lo = _metrics(Fg, rg, ag, nq)
-        c.restore(); setattr(c.dp, p, b * (1 + pct)); hi = _metrics(Fg, rg, ag, nq)
+        b = getattr(c.BASE, p)
+        c.restore(); c.update(**{p: b * (1 - pct)}); lo = _metrics(Fg, rg, ag, nq)
+        c.restore(); c.update(**{p: b * (1 + pct)}); hi = _metrics(Fg, rg, ag, nq)
         rows.append((p, lo, hi))
         print(f"  {p:8}: RRtot {lo['tot']:.3f}->{hi['tot']:.3f}  gm_a {lo['gm_a']:.2f}->{hi['gm_a']:.2f}")
     c.restore()
@@ -70,7 +70,7 @@ def interaction(pi, pj, vi, vj, nF=73, nR=91, na=15, nq=5, tag=""):
     Z = np.zeros((len(vj), len(vi)))
     for a, vjj in enumerate(vj):
         for b, vii in enumerate(vi):
-            c.restore(); setattr(c.dp, pi, float(vii)); setattr(c.dp, pj, float(vjj))
+            c.restore(); c.update(**{pi: float(vii)}); c.update(**{pj: float(vjj)})
             Z[a, b] = c.solve(Fg, rg, ag, nq)["policy"].mean()
     c.restore()
     add = Z.mean(1, keepdims=True) + Z.mean(0, keepdims=True) - Z.mean()
@@ -99,10 +99,10 @@ def policy_map_sweep(param, values, year=YEAR, nF=121, nR=91, na=25, nq=5, n_pat
     if len(values) == 1: axes = [axes]
     mesh = None
     for ax, val in zip(axes, values):
-        c.restore(); setattr(c.dp, param, float(val))
+        c.restore(); c.update(**{param: float(val)})
         pol = c.solve(Fg, rg, ag, nq)["policy"]
         r = c.simulate(pol, Fg, rg, **c.entry(n_paths, 12345), n_paths=n_paths, seed=12345)
-        print(f"   {param}={val}:  mean a*={pol.mean():.3f}   lambda={c.dp.LAMBDA:.2f}  "
+        print(f"   {param}={val}:  mean a*={pol.mean():.3f}   lambda={c.P.LAMBDA:.2f}  "
               f"benefit={r['benefit']:+.4f}  cost={r['cost']:.4f}")
         mesh = ax.pcolormesh(Fg, rg, pol[year].T, cmap="viridis", vmin=0, vmax=1, shading="auto", rasterized=True)
         cs = ax.contour(Fg, rg, RR.T, levels=lev, colors="white", linewidths=0.8, alpha=0.85)
@@ -129,7 +129,7 @@ def frontier_shift(param, values, lambdas=(0.1, 0.3, 0.5, 0.7, 0.9),
     for val, col in zip(values, colors):
         ben, cost = [], []
         for lam in lambdas:
-            c.restore(); setattr(c.dp, param, float(val)); c.dp.LAMBDA = float(lam)
+            c.restore(); c.update(**{param: float(val)}); c.update(LAMBDA=float(lam))
             pol = c.solve(Fg, rg, ag, nq)["policy"]
             r = c.simulate(pol, Fg, rg, **c.entry(n_paths, 12345), n_paths=n_paths, seed=12345)
             ben.append(r["benefit"]); cost.append(r["cost"])
@@ -156,7 +156,7 @@ def resolution_check(param="G", values=(0.0175, 0.025, 0.0375),
         Fg, rg, ag = c.grids(nF, nR, na)
         ma, cst, ben = [], [], []
         for val in values:
-            c.restore(); setattr(c.dp, param, float(val))
+            c.restore(); c.update(**{param: float(val)})
             pol = c.solve(Fg, rg, ag, nq)["policy"]
             r = c.simulate(pol, Fg, rg, **c.entry(n_paths, 12345), n_paths=n_paths, seed=12345)
             ma.append(float(pol.mean())); cst.append(r["cost"]); ben.append(r["benefit"])
@@ -185,7 +185,7 @@ def anchor_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=101, na=3
     Fg, rg, ag = c.grids(nF, nR, na)
     data = {name: dict(a=[], cost=[], ben=[]) for name, _ in anchors}
     for val in values:
-        c.restore(); setattr(c.dp, param, float(val))
+        c.restore(); c.update(**{param: float(val)})
         pol = c.solve(Fg, rg, ag, nq)["policy"]
         for name, rho0 in anchors:
             r = c.simulate(pol, Fg, rg, R0=1.0, L0=1.0, S0=float(rho0), n_paths=n_paths, seed=12345)
@@ -211,7 +211,7 @@ def entry_dist_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=101, 
     Fg, rg, ag = c.grids(nF, nR, na)
     corner_a, dist_a = [], []
     for val in values:
-        c.restore(); setattr(c.dp, param, float(val))
+        c.restore(); c.update(**{param: float(val)})
         pol = c.solve(Fg, rg, ag, nq)["policy"]
         rc = c.simulate(pol, Fg, rg, **c.entry(n_paths, 7), n_paths=n_paths, seed=7)
         rng = np.random.default_rng(8); R0, L0, S0 = c.sample_entry(rng, n_paths)
@@ -249,19 +249,19 @@ def schedule_grid(nF=73, nR=91, band_pct=(0.02, 1.0), n_paths=15000, specs=None,
     Fg, rg, _ = c.grids(nF, nR)
 
     def schedule():
-        lo, hi = band_pct[0] / c.dp.GAMMA, band_pct[1] / c.dp.GAMMA
+        lo, hi = band_pct[0] / c.P.GAMMA, band_pct[1] / c.P.GAMMA
         ag = np.linspace(lo, min(hi, 1.0), 20)
         pol = c.solve(Fg, rg, ag, 5)["policy"]
         return c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), band=(lo, min(hi, 1.0)),
                           n_paths=n_paths, seed=seed)["c_by"]
 
     c.restore(); c_base = schedule(); print("baseline schedule computed")
-    yrs = np.arange(c.dp.T)
+    yrs = np.arange(c.P.T)
     fig, axes = c.plt.subplots(3, 3, figsize=(13.5, 10), constrained_layout=True)
     for ax, (pk, (lo, hi), lab) in zip(axes.ravel(), specs):
-        c.restore(); setattr(c.dp, pk, lo); c_lo = schedule()
-        c.restore(); setattr(c.dp, pk, hi); c_hi = schedule(); c.restore()
-        ax.plot(yrs, c_base, color="#9aa0a6", lw=2.2, label=f"base {c._BASE[pk]:g}")
+        c.restore(); c.update(**{pk: lo}); c_lo = schedule()
+        c.restore(); c.update(**{pk: hi}); c_hi = schedule(); c.restore()
+        ax.plot(yrs, c_base, color="#9aa0a6", lw=2.2, label=f"base {getattr(c.BASE, pk):g}")
         ax.plot(yrs, c_lo, color="#274690", lw=1.8, label=f"low {lo:g}")
         ax.plot(yrs, c_hi, color="#C1121F", lw=1.8, label=f"high {hi:g}")
         ax.set_title(lab, fontsize=11); ax.set_xlabel("year $t$"); ax.set_ylabel("contrib %sal"); ax.set_ylim(0, 16)

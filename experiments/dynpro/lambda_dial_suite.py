@@ -38,7 +38,7 @@ def lambda_threshold(lambdas=np.linspace(0.15, 0.62, 16), nF=121, nR=91, na=25, 
     rng = np.random.default_rng(seed); R0, L0, S0 = c.new_plan_init(n_paths, rng)
     gm, pw = [], []
     for lam in lambdas:
-        c.restore(); c.dp.LAMBDA = float(lam)
+        c.restore(); c.update(LAMBDA=float(lam))
         pol = c.solve(Fg, rg, c.dp.make_a_grid(n=na), nq)["policy"]
         r = c.simulate(pol, Fg, rg, R0=R0, L0=L0, S0=S0, n_paths=n_paths, seed=seed)
         gm.append(pol.mean()); pw.append(r["mean_a"])
@@ -80,7 +80,7 @@ def pareto_frontier(lambdas=np.array([0.10, 0.18, 0.24, 0.30, 0.34, 0.38, 0.42,
     Fg, rg, ag = c.grids(nF, nR, na)
     fr_ben, fr_cost, fr_avg, fr_sty, fr_lea = [], [], [], [], []
     for lam in lambdas:
-        c.restore(); c.dp.LAMBDA = float(lam)
+        c.restore(); c.update(LAMBDA=float(lam))
         pol = c.solve(Fg, rg, ag, nq)["policy"]
         r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), n_paths=n_paths, seed=seed)
         fr_ben.append(r["benefit"]); fr_cost.append(r["cost"])
@@ -94,7 +94,7 @@ def pareto_frontier(lambdas=np.array([0.10, 0.18, 0.24, 0.30, 0.34, 0.38, 0.42,
 
     nv_ben, nv_cost = [], []
     for a_c in naive_a:
-        pol = c.const_policy(a_c, c.dp.T, len(Fg), len(rg))
+        pol = c.const_policy(a_c, c.P.T, len(Fg), len(rg))
         r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), n_paths=n_paths, seed=seed)
         nv_ben.append(r["benefit"]); nv_cost.append(r["cost"])
         print(f"  naive a={a_c:.1f}: benefit={r['benefit']:+.4f}  cost={r['cost']:.4f}")
@@ -139,7 +139,7 @@ def pareto_frontier(lambdas=np.array([0.10, 0.18, 0.24, 0.30, 0.34, 0.38, 0.42,
     ax2 = ax.twinx()
     ax2.plot(lambdas, fr_sty, "-s", color="#274690", lw=1.6, label="stayer RR")
     ax2.plot(lambdas, fr_lea, "-^", color="#E08D1C", lw=1.4, label="leaver RR")
-    ax2.axhline(c.dp.RR_TARGET, color="#274690", ls=":", lw=1, alpha=0.6); ax2.spines["top"].set_visible(False)
+    ax2.axhline(c.P.RR_TARGET, color="#274690", ls=":", lw=1, alpha=0.6); ax2.spines["top"].set_visible(False)
     ax.set_xlabel(r"$\lambda$"); ax.set_ylabel("career-avg contrib %", color="#146c50")
     ax2.set_ylabel("replacement rate", color="#274690")
     h1, l1 = ax.get_legend_handles_labels(); h2, l2 = ax2.get_legend_handles_labels()
@@ -157,30 +157,30 @@ def crowding_out(RLs=np.array([0.0, 0.10, 0.20, 0.25, 0.30, 0.35, 0.45, 0.60]),
     Fg, rg, ag = c.grids(nF, nR, na)
     a_rl = []
     for rl in RLs:
-        c.restore(); c.dp.RR_LEGAL = float(rl)
+        c.restore(); c.update(RR_LEGAL=float(rl))
         a_rl.append(float(c.solve(Fg, rg, ag, nq)["policy"].mean()))
         print(f"  RR_legal={rl:.2f}: grid-mean a*={a_rl[-1]:.3f}")
     c.restore()
     a_lam = []
     for lam in lambdas:
-        c.restore(); c.dp.LAMBDA = float(lam)
+        c.restore(); c.update(LAMBDA=float(lam))
         a_lam.append(float(c.solve(Fg, rg, ag, nq)["policy"].mean()))
         print(f"  lambda={lam:.2f}: grid-mean a*={a_lam[-1]:.3f}")
     c.restore()
     fig, (a1, a2) = c.plt.subplots(1, 2, figsize=(11, 4.4), constrained_layout=True)
     a1.plot(RLs, a_rl, "-o", color="#C1121F", lw=1.8, ms=5)
-    a1.axvline(c._BASE["RR_LEGAL"], color="#274690", ls="--", lw=1.2,
-               label=rf'committed $RR_{{legal}}$ = {c._BASE["RR_LEGAL"]:.2f}')
+    a1.axvline(getattr(c.BASE, "RR_LEGAL"), color="#274690", ls="--", lw=1.2,
+               label=rf'committed $RR_{{legal}}$ = {getattr(c.BASE, "RR_LEGAL"):.2f}')
     a1.set_xlabel(r"first-pillar (legal) replacement $RR_{legal}$"); a1.set_ylabel(r"grid-mean $a^\star$")
     d_rl = (a_rl[-1] - a_rl[0]) / (RLs[-1] - RLs[0]) if len(RLs) > 1 else float("nan")
-    a1.set_title(r"$a^\star$ vs the first pillar ($\lambda=%.2f$)" % c._BASE["LAMBDA"]
+    a1.set_title(r"$a^\star$ vs the first pillar ($\lambda=%.2f$)" % getattr(c.BASE, "LAMBDA")
                  + "\n" + rf"slope {d_rl:+.2f} per unit $RR_{{legal}}$; "
                  rf"{a_rl[0]:.2f}$\to${a_rl[-1]:.2f}", fontsize=10)
     a1.legend(frameon=False, fontsize=9); a1.grid(True, alpha=0.25, lw=0.6)
     a2.plot(lambdas, a_lam, "-s", color="#1D9E75", lw=1.8, ms=5)
     a2.axvline(0.5, color="#9aa0a6", ls=":", lw=1.2, label=r"equal weight $\lambda=0.5$")
     a2.set_xlabel(r"employee weight $\lambda$"); a2.set_ylabel(r"grid-mean $a^\star$")
-    a2.set_title(rf"$a^\star$ vs employee weight ($RR_{{legal}}={c.dp.RR_LEGAL}$)"
+    a2.set_title(rf"$a^\star$ vs employee weight ($RR_{{legal}}={c.P.RR_LEGAL}$)"
                  + "\n" + rf"{a_lam[0]:.2f}$\to${a_lam[-1]:.2f} over "
                  rf"$\lambda$={lambdas[0]:.2f}-{lambdas[-1]:.2f}", fontsize=10)
     a2.legend(frameon=False, fontsize=9); a2.grid(True, alpha=0.25, lw=0.6)
@@ -198,7 +198,7 @@ def frontier_entry_robustness(lambdas=np.array([0.15, 0.25, 0.35, 0.45, 0.55, 0.
     Fg, rg, ag = c.grids(nF, nR, na)
     c_cost, c_ben, d_cost, d_ben = [], [], [], []
     for lam in lambdas:
-        c.restore(); c.dp.LAMBDA = float(lam)
+        c.restore(); c.update(LAMBDA=float(lam))
         pol = c.solve(Fg, rg, ag, nq)["policy"]
         rc = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), n_paths=n_paths, seed=seed)
         rng = np.random.default_rng(seed + 1); R0, L0, S0 = c.sample_entry(rng, n_paths)

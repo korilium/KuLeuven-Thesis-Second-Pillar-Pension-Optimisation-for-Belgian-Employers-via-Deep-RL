@@ -52,10 +52,10 @@ def policy_map(nF=145, nR=101, na=41, nq=7, years=(1, 5, 10, 20, 25, 30, 40, 44)
         # max(F,1)/rho and label that "RR", which is ANNUITY times the second-pillar
         # rate -- the old "RR=0.7" contour actually sat at a total of 0.477). The
         # target gets its own heavier line: it is the level a reader looks for.
-        lv = [l for l in (0.5, 0.6, 0.8, 1.0, 1.5) if l != c.dp.RR_TARGET]
+        lv = [l for l in (0.5, 0.6, 0.8, 1.0, 1.5) if l != c.P.RR_TARGET]
         cs = ax.contour(Fg, rg, RR.T, levels=lv, colors="white", linewidths=0.8, alpha=0.8)
         ax.clabel(cs, inline=True, fontsize=7, fmt="RR=%.2f")
-        ct = ax.contour(Fg, rg, RR.T, levels=[c.dp.RR_TARGET],
+        ct = ax.contour(Fg, rg, RR.T, levels=[c.P.RR_TARGET],
                         colors="#FFD166", linewidths=1.6)
         ax.clabel(ct, inline=True, fontsize=7.5, fmt="target %.2f")
         # where the cohort actually is that year -- degenerate early on, when
@@ -76,7 +76,7 @@ def policy_map(nF=145, nR=101, na=41, nq=7, years=(1, 5, 10, 20, 25, 30, 40, 44)
     fig.colorbar(m, ax=axes, shrink=0.9, pad=0.015).set_label(r"optimal funding $a^\star$")
     fig.suptitle(r"Optimal funding rule vs iso TOTAL-replacement contours, with the simulated "
                  r"cohort's occupancy (magenta) — $\eta=%.0f$, $\lambda=%.2f$"
-                % (c.dp.ETA, c.dp.LAMBDA), fontsize=12)
+                % (c.P.ETA, c.P.LAMBDA), fontsize=12)
     fig.savefig(f"{OUT}/policy_map.png", dpi=c.DPI); c.plt.close(fig)
     print(f"wrote {OUT}/policy_map.png")
 
@@ -84,12 +84,12 @@ def policy_map(nF=145, nR=101, na=41, nq=7, years=(1, 5, 10, 20, 25, 30, 40, 44)
 # ============ 2. baseline banded-DCA schedule + adequacy ============
 def baseline_schedule(nF=145, nR=101, nq=7, band_pct=(0.02, 0.15), n_paths=40000, seed=7):
     Fg, rg, _ = c.grids(nF, nR)
-    lo, hi = band_pct[0] / c.dp.GAMMA, band_pct[1] / c.dp.GAMMA
+    lo, hi = band_pct[0] / c.P.GAMMA, band_pct[1] / c.P.GAMMA
     ag = np.linspace(lo, hi, 26)
     pol = c.solve(Fg, rg, ag, nq)["policy"]
     r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), band=(lo, hi), n_paths=n_paths, seed=seed)
     print(f"[baseline_schedule] career-avg {r['avg']:.1f}%  stayer RR {r['sty']:.3f}  leaver RR {r['lea']:.3f}")
-    yrs = np.arange(c.dp.T)
+    yrs = np.arange(c.P.T)
     fig, (axL, axR) = c.plt.subplots(1, 2, figsize=(12, 4.4), constrained_layout=True)
     axL.bar(yrs, r["c_by"], color="#1D9E75", alpha=0.85, width=0.9)
     axL.axhline(r["avg"], color="#C1121F", ls="--", lw=1.2, label=f"career avg {r['avg']:.1f}%")
@@ -99,8 +99,8 @@ def baseline_schedule(nF=145, nR=101, nq=7, band_pct=(0.02, 0.15), n_paths=40000
              color="#274690", alpha=0.6, label=f"stayers (med {r['sty']:.2f})")
     axR.hist(r["RR_tot"][~r["stay"]], bins=40, range=(0.42, np.quantile(r["RR_tot"], 0.995)),
              color="#E08D1C", alpha=0.6, label=f"leavers (med {r['lea']:.2f})")
-    axR.axvline(c.dp.RR_TARGET, color="#C1121F", ls=":", lw=1.2, label=f"target {c.dp.RR_TARGET}")
-    axR.axvline(c.dp.RR_LEGAL, color="#9aa0a6", ls=":", lw=1)
+    axR.axvline(c.P.RR_TARGET, color="#C1121F", ls=":", lw=1.2, label=f"target {c.P.RR_TARGET}")
+    axR.axvline(c.P.RR_LEGAL, color="#9aa0a6", ls=":", lw=1)
     axR.set_xlabel("total replacement rate"); axR.set_ylabel("paths"); axR.legend(frameon=False, fontsize=8.5)
     axR.set_title("Adequacy: stayers on target, leavers proportional")
     fig.savefig(f"{OUT}/baseline_schedule.png", dpi=c.DPI); c.plt.close(fig)
@@ -112,16 +112,16 @@ def flat_design_curve(rates_pct=np.linspace(2, 15, 14), n_paths=30000, seed=7, n
     Fg, rg, _ = c.grids(nF, nR)
     tot, sty = [], []
     for cp in rates_pct:
-        a = cp / 100.0 / c.dp.GAMMA
-        pol = c.const_policy(a, c.dp.T, len(Fg), len(rg))
+        a = cp / 100.0 / c.P.GAMMA
+        pol = c.const_policy(a, c.P.T, len(Fg), len(rg))
         r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), n_paths=n_paths, seed=seed)
         tot.append(r["tot"]); sty.append(r["sty"])
-    i = int(np.argmin(np.abs(np.array(sty) - c.dp.RR_TARGET)))
+    i = int(np.argmin(np.abs(np.array(sty) - c.P.RR_TARGET)))
     fig, ax = c.plt.subplots(figsize=(7, 4.6), constrained_layout=True)
     ax.plot(rates_pct, sty, "-o", color="#274690", lw=2, label="stayer RR")
     ax.plot(rates_pct, tot, "-s", color="#1D9E75", lw=2, label="median RR")
-    ax.axhline(c.dp.RR_TARGET, color="#C1121F", ls="--", lw=1.2, label=f"target {c.dp.RR_TARGET}")
-    ax.axhline(c.dp.RR_LEGAL, color="#9aa0a6", ls=":", lw=1, label=f"legal {c.dp.RR_LEGAL}")
+    ax.axhline(c.P.RR_TARGET, color="#C1121F", ls="--", lw=1.2, label=f"target {c.P.RR_TARGET}")
+    ax.axhline(c.P.RR_LEGAL, color="#9aa0a6", ls=":", lw=1, label=f"legal {c.P.RR_LEGAL}")
     ax.axvline(rates_pct[i], color="#146c50", ls=":", lw=1)
     ax.set_xlabel("flat contribution (% of payroll, every year)"); ax.set_ylabel("replacement rate")
     ax.set_title(f"Fixed-cashflow design curve (baseline)\n~{rates_pct[i]:.1f}% flat lands stayers on target")
@@ -139,11 +139,11 @@ def dca_predictability(nF=121, nR=91, na=31, nq=5, eps_list=(0.0, 0.10, 0.25, 0.
 
     best = None
     for ac in np.linspace(0.02, 0.6, 20):
-        pol = c.const_policy(ac, c.dp.T, len(Fg), len(rg))
+        pol = c.const_policy(ac, c.P.T, len(Fg), len(rg))
         r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), n_paths=n_paths, seed=seed)
         if best is None or r["joint"] > best[1]: best = (ac, r["joint"])
     abar = best[0]
-    print(f"optimal constant rate abar={abar:.3f} (contrib {abar*c.dp.GAMMA*100:.1f}% salary)  joint={best[1]:+.3f}")
+    print(f"optimal constant rate abar={abar:.3f} (contrib {abar*c.P.GAMMA*100:.1f}% salary)  joint={best[1]:+.3f}")
 
     res = []
     for eps in eps_list:
@@ -157,7 +157,7 @@ def dca_predictability(nF=121, nR=91, na=31, nq=5, eps_list=(0.0, 0.10, 0.25, 0.
     jd = res[0][1]["joint"]; ju = r_unc["joint"]
     print(f"COST OF PREDICTABILITY: pure DCA vs unconstrained = {100*(ju-jd)/abs(ju):.1f}% of joint value")
 
-    yrs = np.arange(c.dp.T)
+    yrs = np.arange(c.P.T)
     fig, ax = c.plt.subplots(figsize=(7.4, 4.6), constrained_layout=True)
     ax.plot(yrs, r_unc["c_by"], lw=2, color="#C1121F", label="unconstrained (ramps to the cap)")
     mid = res[len(res) // 2]          # a representative band, not a hardcoded index
@@ -195,20 +195,20 @@ def backload_vs_baseline(de=0.05, lam=0.3, nF=121, nR=91, nq=5, n_paths=40000, s
     The configuration below is reported by its LAMBDA-equivalent to avoid reading
     the discount as an independent mechanism -- see c.lambda_equivalent."""
     Fg, rg, _ = c.grids(nF, nR)
-    lo, hi = 0.02 / c.dp.GAMMA, 1.0
+    lo, hi = 0.02 / c.P.GAMMA, 1.0
 
     def run(de_, lam_):
-        c.restore(); c.dp.DISC_EMP = de_; c.dp.LAMBDA = lam_
+        c.restore(); c.update(DISC_EMP=de_); c.update(LAMBDA=lam_)
         pol = c.solve(Fg, rg, np.linspace(lo, hi, 26), nq)["policy"]
         r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), band=(lo, hi), n_paths=n_paths, seed=seed)
         c.restore()
         return r
 
-    rb = run(c._BASE["DISC_EMP"], c._BASE["LAMBDA"]); rx = run(de, lam)
+    rb = run(getattr(c.BASE, "DISC_EMP"), getattr(c.BASE, "LAMBDA")); rx = run(de, lam)
     lam_eq = c.lambda_equivalent(de, lam=lam)
     print(f"[backload] (delta_e={de:.0%}, lambda={lam}) == LAMBDA {lam_eq:.3f} at the committed "
-          f"delta_e={c._BASE['DISC_EMP']:.0%}  (one lever, not two)")
-    yrs = np.arange(c.dp.T)
+          f"delta_e={getattr(c.BASE, 'DISC_EMP'):.0%}  (one lever, not two)")
+    yrs = np.arange(c.P.T)
     fig, (axL, axR) = c.plt.subplots(1, 2, figsize=(12, 4.6), constrained_layout=True)
     axL.plot(yrs, rb["c_by"], lw=2.4, color="#1D9E75", label=f"baseline avg {rb['avg']:.1f}%")
     axL.plot(yrs, rx["c_by"], lw=2.4, color="#C1121F", label=f"back-load avg {rx['avg']:.1f}%")
@@ -219,8 +219,8 @@ def backload_vs_baseline(de=0.05, lam=0.3, nF=121, nR=91, nq=5, n_paths=40000, s
     xb = np.arange(2); w = 0.35
     axR.bar(xb - w / 2, [rb["sty"], rb["lea"]], w, color="#1D9E75", label="baseline")
     axR.bar(xb + w / 2, [rx["sty"], rx["lea"]], w, color="#C1121F", label="back-load")
-    axR.axhline(c.dp.RR_TARGET, color="#274690", ls="--", lw=1.2, label=f"target {c.dp.RR_TARGET}")
-    axR.axhline(c.dp.RR_LEGAL, color="#9aa0a6", ls=":", lw=1)
+    axR.axhline(c.P.RR_TARGET, color="#274690", ls="--", lw=1.2, label=f"target {c.P.RR_TARGET}")
+    axR.axhline(c.P.RR_LEGAL, color="#9aa0a6", ls=":", lw=1)
     axR.set_xticks(xb); axR.set_xticklabels(["stayer", "leaver"]); axR.set_ylabel("median total RR")
     axR.legend(frameon=False); axR.set_title("Adequacy cost of back-loading")
     fig.savefig(f"{OUT}/backload_compare.png", dpi=c.DPI); c.plt.close(fig)
@@ -234,14 +234,14 @@ def schedule_vs_macro(param="G", values=(0.020, 0.025, 0.030, 0.035), fixed=0.02
     assert param in ("MU", "G")
     if c.rate_owned(param): return
     Fg, rg, _ = c.grids(nF, nR)
-    lo, hi = band_pct[0] / c.dp.GAMMA, band_pct[1] / c.dp.GAMMA
+    lo, hi = band_pct[0] / c.P.GAMMA, band_pct[1] / c.P.GAMMA
     agb = np.linspace(lo, hi, 26)
-    yrs = np.arange(c.dp.T); cols = c.plt.cm.viridis(np.linspace(0.15, 0.85, len(values)))
+    yrs = np.arange(c.P.T); cols = c.plt.cm.viridis(np.linspace(0.15, 0.85, len(values)))
     res = []
     for v in values:
         c.restore()
-        if param == "MU": c.dp.MU, c.dp.G = v, fixed
-        else: c.dp.MU, c.dp.G = fixed, v
+        if param == "MU": c.update(MU=v, G=fixed)
+        else: c.update(MU=fixed, G=v)
         pol = c.solve(Fg, rg, agb, 5)["policy"]
         r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), band=(lo, hi), n_paths=n_paths, seed=seed)
         nceil = int((r["c_by"] > (band_pct[1] * 100 - 0.5)).sum())
@@ -257,7 +257,7 @@ def schedule_vs_macro(param="G", values=(0.020, 0.025, 0.030, 0.035), fixed=0.02
     ax2 = axR.twinx()
     axR.plot(values, [r["avg"] for r, _ in res], "-o", color="#1D9E75", lw=2, label="career-avg contrib (%)")
     ax2.plot(values, [r["sty"] for r, _ in res], "-s", color="#274690", lw=1.6, label="stayer RR")
-    ax2.axhline(c.dp.RR_TARGET, color="#274690", ls=":", lw=1, alpha=0.6)
+    ax2.axhline(c.P.RR_TARGET, color="#274690", ls=":", lw=1, alpha=0.6)
     axR.set_xlabel(param); axR.set_ylabel("career-avg contribution (%)", color="#146c50")
     ax2.set_ylabel("stayer RR", color="#274690"); ax2.spines["top"].set_visible(False)
     h1, l1 = axR.get_legend_handles_labels(); h2, l2 = ax2.get_legend_handles_labels()
@@ -278,25 +278,25 @@ def new_plan_profile(nF=145, nR=101, na=31, nq=7, n_paths=40000, seed=7):
     # a LOW first-3yr share means deferred funding: with delta_f > mu the optimum defers,
     # so this diagnostic documents how little is funded early rather than how much.
     print(f"[new_plan_profile] a*(0)={r['a_by_t'][0]:.3f}  first-3yr share={frac3:.2f}  "
-          f"rho after yr0={r['rho_med'][1]:.2f} (1/Gamma={1/c.dp.GAMMA:.2f})")
-    print(f"   TOTAL RR median={r['tot']:.3f} (legal={c.dp.RR_LEGAL})  stayer={r['sty']:.3f}  leaver={r['lea']:.3f}  "
-          f"survival to T={c.dp.survival(c.dp.tenure_hazard)[c.dp.T]:.2f}")
-    yrs = np.arange(c.dp.T)
+          f"rho after yr0={r['rho_med'][1]:.2f} (1/Gamma={1/c.P.GAMMA:.2f})")
+    print(f"   TOTAL RR median={r['tot']:.3f} (legal={c.P.RR_LEGAL})  stayer={r['sty']:.3f}  leaver={r['lea']:.3f}  "
+          f"survival to T={c.dp.survival(c.dp.tenure_hazard, p=c.P)[c.P.T]:.2f}")
+    yrs = np.arange(c.P.T)
     fig, (a1, a3) = c.plt.subplots(1, 2, figsize=(12, 4.6), constrained_layout=True)
     a1.bar(yrs, r["a_by_t"], color="#1D9E75", alpha=0.85, width=0.9, label=r"mean applied $a^\star$ (present)")
     a1.set_xlabel("career year $t$"); a1.set_ylabel(r"mean applied $a^\star$", color="#146c50"); a1.set_ylim(0, 1.02)
     a2 = a1.twinx(); a2.plot(yrs, r["rho_med"], color="#274690", lw=2, label=r"median $\rho(t)$")
-    a2.axhline(1 / c.dp.GAMMA, color="#C1121F", ls="--", lw=1.2, label=r"$1/\Gamma$")
+    a2.axhline(1 / c.P.GAMMA, color="#C1121F", ls="--", lw=1.2, label=r"$1/\Gamma$")
     a2.set_yscale("log"); a2.set_ylabel(r"median $\rho$ (log)", color="#274690"); a2.spines["top"].set_visible(False)
     h1, l1 = a1.get_legend_handles_labels(); h2, l2 = a2.get_legend_handles_labels()
     a1.legend(h1 + h2, l1 + l2, loc="upper right", frameon=False, fontsize=9)
     a1.set_title("New-plan funding: ramp up, then hold at capacity")
-    a3.hist(r["RR_tot"][r["stay"]], bins=45, range=(c.dp.RR_LEGAL * 0.98, np.quantile(r["RR_tot"], 0.99)),
+    a3.hist(r["RR_tot"][r["stay"]], bins=45, range=(c.P.RR_LEGAL * 0.98, np.quantile(r["RR_tot"], 0.99)),
             color="#274690", alpha=0.6, label=f"stayers (med {r['sty']:.2f})")
-    a3.hist(r["RR_tot"][~r["stay"]], bins=45, range=(c.dp.RR_LEGAL * 0.98, np.quantile(r["RR_tot"], 0.99)),
+    a3.hist(r["RR_tot"][~r["stay"]], bins=45, range=(c.P.RR_LEGAL * 0.98, np.quantile(r["RR_tot"], 0.99)),
             color="#E08D1C", alpha=0.6, label=f"leavers (med {r['lea']:.2f})")
-    a3.axvline(c.dp.RR_TARGET, color="#C1121F", ls=":", lw=1.2, label=f"target {c.dp.RR_TARGET}")
-    a3.axvline(c.dp.RR_LEGAL, color="#9aa0a6", ls="--", lw=1.0)
+    a3.axvline(c.P.RR_TARGET, color="#C1121F", ls=":", lw=1.2, label=f"target {c.P.RR_TARGET}")
+    a3.axvline(c.P.RR_LEGAL, color="#9aa0a6", ls="--", lw=1.0)
     a3.set_xlabel("TOTAL annual replacement (legal + 2nd pillar)"); a3.set_ylabel("paths")
     a3.set_title("Terminal RR: stayers on target, leavers proportional"); a3.legend(frameon=False, fontsize=9)
     fig.suptitle("New-plan behaviour: deferred ramp to capacity, service-pro-rated adequacy",
@@ -337,7 +337,7 @@ def signal_schedule(betas=(0.0001, 0.001, 0.01, 0.03, 0.10, 0.30), nF=145, nR=10
     for y in years:
         print(f"  {y:<5} " + "".join(f"{r['c_by'][y]:>12.1f}" for _, r, *_ in rows))
 
-    yrs = np.arange(c.dp.T)
+    yrs = np.arange(c.P.T)
     fig, (axL, axR) = c.plt.subplots(1, 2, figsize=(12.5, 4.8), constrained_layout=True)
     axL.plot(yrs, rh["c_by"], lw=2.4, color="#C1121F", label=f"argmax (hard, avg {rh['avg']:.1f}%)")
     cols = c.plt.cm.viridis(np.linspace(0.15, 0.8, len(betas)))
@@ -368,16 +368,16 @@ def scenario_grid(discounts=(0.025, 0.04), nF=121, nR=91, band_pct=(0.02, 0.15),
     scen = [("B21 underwater", dict(MU=0.01, G=0.03)), ("neutral", dict(MU=0.02, G=0.02)),
             ("baseline", dict(MU=0.03, G=0.03)), ("B23", dict(MU=0.05, G=0.03))]
     Fg, rg, _ = c.grids(nF, nR)
-    lo, hi = band_pct[0] / c.dp.GAMMA, band_pct[1] / c.dp.GAMMA
+    lo, hi = band_pct[0] / c.P.GAMMA, band_pct[1] / c.P.GAMMA
     agb = np.linspace(lo, hi, 26)
-    yrs = np.arange(c.dp.T)
+    yrs = np.arange(c.P.T)
     fig, axes = c.plt.subplots(len(discounts), len(scen), figsize=(15, 6.5),
                                sharex=True, sharey=True, constrained_layout=True)
     axes = np.atleast_2d(axes)
     for i, de in enumerate(discounts):
         for j, (nm, ov) in enumerate(scen):
-            c.restore(); c.dp.DISC_EMP = de
-            for k, v in ov.items(): setattr(c.dp, k, v)
+            c.restore(); c.update(DISC_EMP=de)
+            for k, v in ov.items(): c.update(**{k: v})
             pol = c.solve(Fg, rg, agb, 5)["policy"]
             r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), band=(lo, hi), n_paths=n_paths, seed=seed)
             c.restore()
@@ -402,9 +402,9 @@ _ALL = {
     # both sweeps pass through the COMMITTED point (MU=G=0.03): the MU grid now
     # contains 0.03, and the G sweep holds MU at the committed 0.03 (was 0.025).
     "macro": lambda: [schedule_vs_macro("MU", (0.015, 0.02, 0.03, 0.04, 0.05),
-                                        fixed=c._BASE["G"]),
+                                        fixed=getattr(c.BASE, "G")),
                       schedule_vs_macro("G", (0.0175, 0.025, 0.03, 0.035, 0.045),
-                                        fixed=c._BASE["MU"])],
+                                        fixed=getattr(c.BASE, "MU"))],
     "newplan": new_plan_profile,
     "signal": signal_schedule,
     "scenario": scenario_grid,
