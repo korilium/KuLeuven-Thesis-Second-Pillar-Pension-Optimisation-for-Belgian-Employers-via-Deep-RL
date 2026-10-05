@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pension"
+version = "0.1.0"
+description = "Second-pillar pension funding for Belgian employers: DP oracle, rate engine and RL environment"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=2.2",
+    "scipy>=1.15",
+    "pandas>=2.3",
+    "matplotlib>=3.10",
+    "requests>=2.33",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+rl = ["gymnasium>=1.0"]
+
+[tool.setuptools.packages.find]
+include = ["pension*"]
+
+[tool.setuptools.package-data]
+"pension.rates" = ["data/*.csv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: takes more than a few seconds (deselect with -m 'not slow')"]
