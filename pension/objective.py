@@ -1,13 +1,20 @@
 """
 objective.py -- the value function of the funding problem, as swappable parts.
 
-DynPro optimises (solve) and scores (simulate) one objective, per unit of final
-salary S_T:
+pension.dp optimises (solve) and scores (simulate) one objective, per unit of final
+salary S_T. Under the default numeraire ("retirement", pension/numeraire.py) both
+legs are in retirement-date money under the real-world measure:
 
-    J = w_emp * e^{-DISC_EMP T} * employee(RR_tot, target)
-      - w_er  * [ sum_t e^{-DISC_ER t} * contribution(a_t, t) + e^{-DISC_ER T} * shortfall((L_T-R_T)+/S_T) ]
+    J = w_emp * E[ employee(RR_tot, target) ]
+      - w_er  * E[ sum_t contribution(a_t, t) * A(t,T) + shortfall((L_T-R_T)+/S_T) ]
 
-An Objective names the four parts. DynPro calls the SAME object in terminal(),
+with A(t,T) = E^P_t[exp(int_t^T (r_u + s) du)] the premium's accrual to T and the
+terminal legs undiscounted. Under "discounted" (the previous specification) the
+factors are e^{-DISC_ER t} on premiums and e^{-DISC_EMP T} / e^{-DISC_ER T} on the
+terminal legs. The Objective says what each leg is worth; the numeraire is applied
+around it.
+
+An Objective names the four parts. pension.dp calls the SAME object in terminal(),
 paidup_service(), the Bellman flow and simulate(), so the oracle and the
 evaluation can never drift apart again.
 

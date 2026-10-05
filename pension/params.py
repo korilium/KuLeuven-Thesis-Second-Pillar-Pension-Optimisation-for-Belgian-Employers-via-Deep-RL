@@ -13,10 +13,21 @@ identity used to memoise scenarios and solves.
 
 Field names are the historical global names, so objective.py (which reads
 p.ETA, p.LAMBDA, ...) and the thesis notation carry over unchanged.
+
+The objective (default EMPLOYER_NUMERAIRE = "retirement"), per unit of final salary,
+in retirement-date money under the real-world measure P:
+
+    J = LAMBDA * E[ target * ANNUITY * u(RR_tot / target) ]
+      - (1 - LAMBDA) * E[ sum_{t<tau} a_t GAMMA (1+W)^-(T-t) A(t,T) + shortfall((L - R_T)^+ / S_T) ]
+
+A(t,T): the premium's expected accrual to T at the short rate plus FINANCING_SPREAD
+(pension/numeraire.py). "discounted" restores the previous specification
+(premiums at DISC_ER, terminal legs at DISC_EMP / DISC_ER).
 """
 
 import dataclasses
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -66,14 +77,30 @@ class Params:
     #   G_t  = the statutory WAP filter (pension/rates/wap.py), applied HORIZONTALLY;
     #   mu_t = the insurer's book yield, a rolling mean of the same OLO over
     #          BOOK_DURATION years plus BOOK_SPREAD.
-    RATE_MODEL: str = "constant"   # "constant" | "hull_white" | "vasicek"
+    RATE_MODEL: str = "constant"   # "constant" | "hull_white" | "vasicek" | "vasicek_short" | "hull_white_p"
     RATE_DT: float = 1 / 12        # monthly rate step -- matches the OLO calibration
     RATE_SEED: int = 2026          # seed of the rate scenarios (separate from churn/asset noise)
     BOOK_DURATION: int = 8         # years averaged into the book yield (Branch 21 portfolio duration)
     BOOK_SPREAD: float = 0.0       # book yield over the 10Y OLO (credit/illiquidity pickup, net of costs)
     SIGMA_R_RATES: float = 0.05    # excess-return noise on top of the book yield (= SIGMA_R, so both
                                    # regimes carry the same asset risk); 0 = pure book-yield crediting
+    LONG_RATE_P: Optional[float] = None   # long-run REAL-WORLD level, the one anchor of the P-models:
+                                   # vasicek: theta, the long-run 10Y level (None: OLS estimate);
+                                   # hull_white_p: sets its market price of risk (None: phi = 0);
+                                   # vasicek_short: theta_P (None: the OLS estimate)
+    SPREAD_10Y_SHORT: Optional[float] = None   # vasicek: the short rate is r = y10 - this spread;
+                                   # None: the historical mean (10Y - 1Y) of the OLO data
     RATE_CE_PATHS: int = 5000      # scenarios behind the certainty-equivalent moments of solve()
+
+    # --- the employer's numeraire ----------------------------------------------
+    # "retirement" (default): both legs in retirement-date money under P -- terminal
+    # legs undiscounted, each premium accrued to T at the short rate plus
+    # FINANCING_SPREAD, A(t,T) = E^P_t[exp(int_t^T (r_u + s) du)] (pension/numeraire.py).
+    # "discounted": the previous specification -- premiums discounted at DISC_ER,
+    # terminal legs at DISC_EMP / DISC_ER -- reproduced bit for bit.
+    EMPLOYER_NUMERAIRE: str = "retirement"   # "retirement" | "discounted"
+    SHORT_RATE: float = 0.03       # short rate of the constant-rate model (= MU = G)
+    FINANCING_SPREAD: float = 0.0  # s: the employer's financing spread over the short rate
 
     # --- numerics ---------------------------------------------------------------
     N_EVAL: int = 2000          # default number of evaluation paths (SAA batch) of the tabular rung

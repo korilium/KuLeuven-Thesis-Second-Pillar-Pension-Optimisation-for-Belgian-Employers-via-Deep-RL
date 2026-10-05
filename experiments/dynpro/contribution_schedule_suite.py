@@ -188,6 +188,7 @@ def dca_predictability(nF=121, nR=91, na=31, nq=5, eps_list=(0.0, 0.10, 0.25, 0.
 # ============ 5. preference-driven back-loading vs baseline ============
 @c.restores
 def backload_vs_baseline(de=0.05, lam=0.3, nF=121, nR=91, nq=5, n_paths=40000, seed=7):
+    if c.inert("DISC_EMP"): return
     """Back-loading driven by a weaker employee weight.
 
     NOTE the (de, lam) pair is ONE lever, not two: delta_e enters only as
@@ -198,7 +199,7 @@ def backload_vs_baseline(de=0.05, lam=0.3, nF=121, nR=91, nq=5, n_paths=40000, s
     lo, hi = 0.02 / c.P.GAMMA, 1.0
 
     def run(de_, lam_):
-        c.restore(); c.update(DISC_EMP=de_); c.update(LAMBDA=lam_)
+        c.restore(); c.update(DISC_EMP=de_); c.update(LAMBDA=lam_)       # (inert under "retirement")
         pol = c.solve(Fg, rg, np.linspace(lo, hi, 26), nq)["policy"]
         r = c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), band=(lo, hi), n_paths=n_paths, seed=seed)
         c.restore()
@@ -364,6 +365,7 @@ def signal_schedule(betas=(0.0001, 0.001, 0.01, 0.03, 0.10, 0.30), nF=145, nR=10
 # ============ 9. (mu,G) x discount scenario grid ============
 @c.restores
 def scenario_grid(discounts=(0.025, 0.04), nF=121, nR=91, band_pct=(0.02, 0.15), n_paths=15000, seed=7):
+    if c.inert("DISC_EMP"): return
     if c.rate_owned("MU", "G"): return
     scen = [("B21 underwater", dict(MU=0.01, G=0.03)), ("neutral", dict(MU=0.02, G=0.02)),
             ("baseline", dict(MU=0.03, G=0.03)), ("B23", dict(MU=0.05, G=0.03))]

@@ -28,7 +28,7 @@ import pension.dp as dp
 # both dp.solve (certainty-equivalent) and dp.simulate (path-wise G_t, mu_t) follow it.
 # Figures of a rate regime go to their own tree, figs/rates_<model>/..., so they
 # never overwrite the constant-rate results they are compared against.
-RATE_MODELS = ("constant", "hull_white", "vasicek")
+RATE_MODELS = ("constant", "hull_white", "vasicek", "vasicek_short")
 
 def _pick_rates():
     model = os.environ.get("DYNPRO_RATES", "constant")
@@ -75,6 +75,16 @@ def rate_overrides(ov):
     return out
 
 
+def inert(*params):
+    """True if any of `params` is inert by construction under the active numeraire
+    (DISC_ER / DISC_EMP under "retirement") -- and says so."""
+    hit = [p for p in params if p in INERT]
+    if hit:
+        print(f"  skipped: {', '.join(hit)} {'is' if len(hit) == 1 else 'are'} inert by construction "
+              f"under EMPLOYER_NUMERAIRE='retirement' (the objective has no discount rate)")
+    return bool(hit)
+
+
 # figures live in <repo>/results/figs, wherever the suite is launched from
 _FIGS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "results", "figs")
 OUT = _FIGS if RATES == "constant" else os.path.join(_FIGS, f"rates_{RATES}"); DPI = 150
@@ -87,6 +97,10 @@ mpl.rcParams.update({"figure.facecolor": "white", "savefig.facecolor": "white", 
 # so including DISC_EMP too would double-count one lever and mis-rank the tornado.
 PARAMS = ["LAMBDA", "RR_TARGET", "RR_LEGAL", "ANNUITY", "GAMMA", "ETA", "G", "MU",
           "SIGMA_R", "DISC_ER"]
+# Under the retirement numeraire (the default) the discount rates do not enter the
+# objective at all: sweeps over them are inert by construction (see inert()).
+INERT = ("DISC_ER", "DISC_EMP") if dp.DEFAULT.EMPLOYER_NUMERAIRE == "retirement" else ()
+PARAMS = [p for p in PARAMS if p not in INERT]
 if RATES != "constant":     # the tornado sweeps what the regime leaves free
     PARAMS = [p for p in PARAMS if p not in RATE_OWNED] + ["SIGMA_R_RATES"]
 LAB = {"LAMBDA": r"$\lambda$", "RR_TARGET": r"$RR^\star$", "RR_LEGAL": r"$RR_{\rm legal}$",

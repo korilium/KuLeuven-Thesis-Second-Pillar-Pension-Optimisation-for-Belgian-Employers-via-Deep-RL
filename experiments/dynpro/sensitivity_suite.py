@@ -243,6 +243,7 @@ def schedule_grid(nF=73, nR=91, band_pct=(0.02, 1.0), n_paths=15000, specs=None,
         ("LAMBDA", (0.3, 0.7), r"weight $\lambda$"),
         ("ANNUITY", (12.0, 18.0), r"annuity $\ddot a$"),
     ]
+    specs = [sp for sp in specs if sp[0] not in c.INERT]     # discount rates: inert under "retirement"
     if c.RATES != "constant":   # MU and G are path-wise rates now; sweep the asset noise instead
         specs = [sp for sp in specs if sp[0] not in c.RATE_OWNED] + \
                 [("SIGMA_R_RATES", (0.0, 0.10), r"excess-return noise $\sigma_R$")]

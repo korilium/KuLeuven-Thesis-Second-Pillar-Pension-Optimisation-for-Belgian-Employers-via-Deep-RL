@@ -15,6 +15,15 @@ against a total-adequacy target RR_TARGET:
 Employer leg: linear WAP shortfall  max(1-F,0)/rho.  (This is the "baseline" objective;
 every leg is swappable -- see objective.py and the OBJECTIVE switch.)  Asset (z_R) and guarantee (z_L)
 shocks; Gauss-Hermite quadrature; reduced state (t, F, rho).
+
+Numeraire (pension/numeraire.py, p.EMPLOYER_NUMERAIRE). Default "retirement": both
+legs in retirement-date money under P,
+    J = lambda E[ employee(RR_tot, target) ]
+      - (1 - lambda) E[ sum_t contribution(a_t, t) A(t,T) + shortfall((L - R)^+ / S_T) ],
+the terminal legs undiscounted and each premium accrued to T by A(t,T), the
+expected growth at the short rate plus FINANCING_SPREAD. "discounted": the previous
+specification, premiums and shortfall discounted at DISC_ER and the employee leg
+at DISC_EMP, reproduced bit for bit.
 """
 
 import numpy as np
@@ -26,6 +35,7 @@ import numpy as np
 # restore bookkeeping and independent economies can run side by side.
 from pension.params import Params, DEFAULT
 from pension.dynamics import Exogenous, State, step, settle
+from pension import numeraire
 import pension.economy as _economy      # draw_rate_scenarios: the rate engine is loaded only on use
 import pension.objective as _objective_mod
 from pension.objective import OBJECTIVES, Objective
@@ -190,6 +200,7 @@ def paidup_service(Fg, rg, obj=None, p=None):
     """
     p = _params(p)
     obj = _objective(obj, p); w_emp, w_er = obj.weights(p)
+    f_emp, f_er = numeraire.terminal_factors(p)
     NF, NR = len(Fg), len(rg)
     Phi = np.empty((p.T + 1, NF, NR))
     for tau in range(0, p.T + 1):
@@ -199,9 +210,9 @@ def paidup_service(Fg, rg, obj=None, p=None):
         rp = rg * (1.0 + p.W) ** m                                # (NR,)
         rr2 = np.maximum(Fp, 1.0)[:, None] / (p.ANNUITY * rp[None, :])   # FULL vested pot
         rrtot = p.RR_LEGAL + rr2
-        emp = w_emp * obj.employee(rrtot, target, p) * np.exp(-p.DISC_EMP * p.T)
+        emp = w_emp * obj.employee(rrtot, target, p) * f_emp
         short = np.maximum(1.0 - Fp, 0.0)[:, None] / rp[None, :]
-        empr = w_er * obj.shortfall(short, p) * np.exp(-p.DISC_ER * p.T)
+        empr = w_er * obj.shortfall(short, p) * f_er
         Phi[tau] = emp - empr
     return Phi
 
@@ -211,10 +222,11 @@ def terminal(Fg, rg, obj=None, p=None):
     shortfall cost, combined by its weights (see objective.py)."""
     p = _params(p)
     obj = _objective(obj, p); w_emp, w_er = obj.weights(p)
+    f_emp, f_er = numeraire.terminal_factors(p)
     Fc = Fg[:, None]; rc = rg[None, :]
     rr = p.RR_LEGAL + np.maximum(Fc, 1.0) / (rc * p.ANNUITY)
-    emp = w_emp * obj.employee(rr, p.RR_TARGET, p) * np.exp(-p.DISC_EMP * p.T)              # employee rate
-    empr = w_er * obj.shortfall(np.maximum(1.0 - Fc, 0.0) / rc, p) * np.exp(-p.DISC_ER * p.T)  # employer rate
+    emp = w_emp * obj.employee(rr, p.RR_TARGET, p) * f_emp                                  # employee leg
+    empr = w_er * obj.shortfall(np.maximum(1.0 - Fc, 0.0) / rc, p) * f_er                   # employer leg
     return emp - empr
 
 
@@ -287,6 +299,14 @@ def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
     p.replace(**ce) for this call only, and the moments used are returned under
     "ce". Under a rate model G, MU, SIGMA_L and SIGMA_R
     are therefore SET by the scenario: overriding them has no effect.
+
+    The premium factor in the Bellman flow (numeraire.premium_schedule) is one
+    DETERMINISTIC number per year: e^{-DISC_ER t} under "discounted", the
+    constant-rate accrual A(t,T) = e^{(SHORT_RATE + s)(T - t)} at constant rates,
+    and in rate mode the SCENARIO MEAN of A(t,T; r_t) over the paths -- the DP
+    state (t, F, rho) does not carry the short rate, so the solved policy cannot
+    react to it. simulate() and the RL environment use each path's own A(t,T; r_t).
+    The schedule used is returned under "premium".
 """
     p = _params(p)
     if isinstance(rates, str) and rates == "constant":
@@ -296,15 +316,16 @@ def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
                                              model=p.RATE_MODEL, horizon=p.T, p=p)
     if rates is not None:
         ce = certainty_equivalent(rates, p)
+        prem = numeraire.premium_schedule(p, rates)
         out = _solve(mode, plan_rule, Fg, rg, ag, n_quad, hazard, beta, betas, objective,
-                     p=p.replace(**ce))
+                     p=p.replace(**ce), prem=prem)
         out["ce"] = ce
         return out
     return _solve(mode, plan_rule, Fg, rg, ag, n_quad, hazard, beta, betas, objective, p=p)
 
 
 def _solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
-           hazard=tenure_hazard, beta=None, betas=None, objective=None, p=None):
+           hazard=tenure_hazard, beta=None, betas=None, objective=None, p=None, prem=None):
     """The constant-rate backward induction (see solve).
 
     `hazard`: leaving is a hazard on the horizon, not a state variable. At each
@@ -348,6 +369,8 @@ def _solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
     NF, NR, Q = len(Fg), len(rg), len(wq)
     p = _params(p)
     obj = _objective(objective, p); w_er = obj.weights(p)[1]
+    if prem is None:                                     # deterministic premium factor per year
+        prem = numeraire.premium_schedule(p)
     Phi = paidup_service(Fg, rg, obj, p) if hazard is not None else None
 
     V = np.empty((p.T + 1, NF, NR))
@@ -363,7 +386,7 @@ def _solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
         lrq = np.broadcast_to(np.log(rp)[None, :, :], (NF, NR, Q))
         vi = bilinear(Fg, lrg, Vnext, Fp, lrq)
         cont = (vi * wq[None, None, :]).sum(axis=2)
-        flow = -w_er * obj.contribution(a, t, p) * np.exp(-p.DISC_ER * t)
+        flow = -w_er * obj.contribution(a, t, p) * prem[t]
         return flow + cont
 
     def bellman_field_a(t, A, Vnext):
@@ -372,7 +395,7 @@ def _solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
         rp = rho_next(rg[None, :, None], l[:, :, None], zL[None, None, :], p)
         vi = bilinear(Fg, lrg, Vnext, Fp, np.log(rp))
         cont = (vi * wq[None, None, :]).sum(axis=2)
-        flow = -w_er * obj.contribution(A, t, p) * np.exp(-p.DISC_ER * t)
+        flow = -w_er * obj.contribution(A, t, p) * prem[t]
         return flow + cont
 
     for t in range(p.T - 1, -1, -1):
@@ -410,8 +433,8 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
             seed=7, hazard=tenure_hazard, track=False, visits=False, rates=None,
             objective=None, p=None):
     """Canonical forward Monte-Carlo of a reduced policy a*(t,F,rho) under the
-    committed model: Belgian churn (immediate-vesting, paid-up leavers), a split
-    discount (employee at DISC_EMP, employer at DISC_ER), and the service-pro-rated
+    committed model: Belgian churn (immediate-vesting, paid-up leavers), the
+    employer's numeraire (pension/numeraire.py), and the service-pro-rated
     adequacy target
         target_tau = RR_LEGAL + (tau/T)*(RR_TARGET - RR_LEGAL),
     so a full-career stayer is judged against RR_TARGET and a leaver with tau years
@@ -430,9 +453,11 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
     grid-mean (every cell weighted equally) from a path-weighted average.
 
     `objective` scores the outcome (None follows the OBJECTIVE switch; see
-    objective.py): `benefit` is the discounted employee leg, `cost` the discounted
-    employer leg (contributions + terminal shortfall, both in the objective's cost
-    units), and `joint` their weighted difference -- the quantity solve() maximises.
+    objective.py): `benefit` is the employee leg, `cost` the employer leg
+    (contributions + terminal shortfall, in the objective's cost units), both in
+    the numeraire of p.EMPLOYER_NUMERAIRE -- retirement-date money (premiums times
+    their path's A(t,T; r_t), terminal legs undiscounted) or discounted to t = 0 --
+    and `joint` their weighted difference, the quantity solve() maximises.
 
     Rates. With RATE_MODEL == "constant" and rates=None this is the original
     constant-rate model, line for line: the reserve earns MU + SIGMA_R*zR, the
@@ -457,6 +482,7 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
     """
     p = _params(p)
     obj = _objective(objective, p); w_emp, w_er = obj.weights(p)
+    f_emp, f_er = numeraire.terminal_factors(p)
     if rates is None and p.RATE_MODEL != "constant":
         rates = _economy.draw_rate_scenarios(n_paths, seed=p.RATE_SEED, model=p.RATE_MODEL,
                                              horizon=p.T, p=p)
@@ -474,13 +500,14 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
         a = np.where(present, a, 0.0)
         diag.record(t, a, present, F, rho, p)
         a_sum += a
-        cost += np.where(present, obj.contribution(a, t, p) * np.exp(-p.DISC_ER * t), 0.0)
+        r_t = exo.r[t] if exo.r is not None else p.SHORT_RATE
+        cost += np.where(present, obj.contribution(a, t, p) * numeraire.premium_factor(t, r_t, p), 0.0)
         state, _ = step(state, a, exo, p, hazard)
     end = settle(state, p)
-    cost += obj.shortfall(end["short"] / ST, p) * np.exp(-p.DISC_ER * p.T)
+    cost += obj.shortfall(end["short"] / ST, p) * f_er
     RR2 = end["payout"] / (p.ANNUITY * ST)
     target = p.RR_LEGAL + end["svc"] * (p.RR_TARGET - p.RR_LEGAL)
-    benefit_paths = np.exp(-p.DISC_EMP * p.T) * obj.employee(p.RR_LEGAL + RR2, target, p)
+    benefit_paths = f_emp * obj.employee(p.RR_LEGAL + RR2, target, p)
     stay = end["stay"]
     RRtot = p.RR_LEGAL + RR2
     frac, c_by = diag.frac, diag.c_by

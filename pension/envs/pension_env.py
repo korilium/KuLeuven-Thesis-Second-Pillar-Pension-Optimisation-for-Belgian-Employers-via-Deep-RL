@@ -7,26 +7,32 @@ pension.objective.Objective that dp.solve optimises. The return of an episode is
 therefore exactly that path's contribution to simulate(...)["joint"], so an RL
 agent and the DP oracle are measured on one scale (tests/test_env.py pins this).
 
-Observation (float64, 5 -- float64, like the action, so a policy read off it sees
+Observation (float64, 6 -- float64, like the action, so a policy read off it sees
 exactly the state simulate() sees and its actions are not rounded):
     t / T          career progress
     F = R / L      funding ratio
     log rho        log(S / L), salary relative to the guarantee
     G_t            the WAP rate a contribution made now is locked at
     mu_t           the credited return this year
-  Under constant rates G_t = G and mu_t = MU throughout; under a rate model they
-  are the episode's path from the scenario pool.
+    r_t            the short rate now, which sets this year's premium accrual A(t,T)
+                   (vasicek: r = y10 - SPREAD_10Y_SHORT; constant: SHORT_RATE)
+  Under constant rates G_t = G, mu_t = MU and r_t = SHORT_RATE throughout; under a
+  rate model they are the episode's path from the scenario pool. DPPolicyAgent
+  reads components 0-2 only.
 
 Action: Box([0], [1]) -- a, the fraction of contribution capacity used this year
   (contribution = a * GAMMA * salary), clipped to `band` if given.
 
-Reward (per unit of final salary, discounted to t = 0, as in the objective):
-    each year in force   -w_er * contribution(a, t) * exp(-DISC_ER t)
-    at retirement        w_emp * exp(-DISC_EMP T) * employee(RR_tot, target)
-                         - w_er * exp(-DISC_ER T) * shortfall((L - R)+ / S_T)
-  If the member leaves, the contract goes paid-up: the remaining years need no
-  decisions, so the environment rolls them forward and pays the terminal reward
-  in the same step. gamma = 1 -- the discounting is in the reward.
+Reward (per unit of final salary, in the numeraire of p.EMPLOYER_NUMERAIRE, as in
+the objective; see pension/numeraire.py):
+    each year in force   -w_er * contribution(a, t) * A(t,T; r_t)
+    at retirement        w_emp * employee(RR_tot, target) - w_er * shortfall((L - R)+ / S_T)
+  under "retirement" (A(t,T; r_t) the premium's expected accrual to T, known when
+  it is paid; terminal legs undiscounted), or with e^{-DISC_ER t} and the terminal
+  legs discounted at DISC_EMP / DISC_ER under "discounted". If the member leaves,
+  the contract goes paid-up: the remaining years need no decisions, so the
+  environment rolls them forward and pays the terminal reward in the same step.
+  gamma = 1 -- the numeraire is in the reward.
 
 Randomness: entry state, shocks and churn come from the episode's own RNG
 (seeded via reset), the rate path is drawn from a fixed pool of `rate_pool`
@@ -42,6 +48,7 @@ from gymnasium import spaces
 import pension.economy as _economy
 from pension.dp import _objective, bilinear, new_plan_init, tenure_hazard
 from pension.dynamics import Exogenous, State, settle, step
+from pension import numeraire
 from pension.params import DEFAULT
 
 
@@ -60,7 +67,7 @@ class PensionEnv(gym.Env):
         self.hazard = hazard
         self.entry = entry or (lambda rng: tuple(x[0] for x in new_plan_init(1, rng)))
         self.rate_pool = rate_pool
-        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(5,), dtype=np.float64)
+        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(6,), dtype=np.float64)
         self.action_space = spaces.Box(0.0, 1.0, shape=(1,), dtype=np.float64)
         self._pool = None
 
@@ -71,7 +78,7 @@ class PensionEnv(gym.Env):
         if self._pool is None:
             self._pool = _economy.draw_rate_scenarios(self.rate_pool, p=self.p)
         j = int(self.np_random.integers(self.rate_pool))
-        return dict(G=self._pool["G"][:, j:j + 1], mu=self._pool["mu"][:, j:j + 1])
+        return {k: self._pool[k][:, j:j + 1] for k in ("G", "mu", "r", "acc")}
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -88,28 +95,32 @@ class PensionEnv(gym.Env):
     # --- dynamics -------------------------------------------------------------------
     def _rates_now(self):
         t = min(self.state.t, self.p.T - 1)
+        r_t = float(self.exo.r[t, 0]) if self.exo.r is not None else self.p.SHORT_RATE
         if self.exo.rates:
-            return float(self.exo.G[t, 0]), float(self.exo.mu[t, 0])
-        return self.p.G, self.p.MU
+            return float(self.exo.G[t, 0]), float(self.exo.mu[t, 0]), r_t
+        return self.p.G, self.p.MU, r_t
 
     def _obs(self):
         s = self.state
-        G_t, mu_t = self._rates_now()
-        return np.array([s.t / self.p.T, s.F[0], np.log(s.rho[0]), G_t, mu_t], dtype=np.float64)
+        G_t, mu_t, r_t = self._rates_now()
+        return np.array([s.t / self.p.T, s.F[0], np.log(s.rho[0]), G_t, mu_t, r_t], dtype=np.float64)
 
     def _terminal_reward(self):
         p, end = self.p, settle(self.state, self.p)
         RR2 = end["payout"] / (p.ANNUITY * self.ST)
         target = p.RR_LEGAL + end["svc"] * (p.RR_TARGET - p.RR_LEGAL)
-        emp = np.exp(-p.DISC_EMP * p.T) * self.obj.employee(p.RR_LEGAL + RR2, target, p)
-        short = self.obj.shortfall(end["short"] / self.ST, p) * np.exp(-p.DISC_ER * p.T)
+        f_emp, f_er = numeraire.terminal_factors(p)
+        emp = f_emp * self.obj.employee(p.RR_LEGAL + RR2, target, p)
+        short = self.obj.shortfall(end["short"] / self.ST, p) * f_er
         return float(self.w_emp * emp[0] - self.w_er * short[0]), RR2[0]
 
     def step(self, action):
         p, s = self.p, self.state
         t = s.t
         a = np.clip(np.asarray(action, dtype=float).reshape(1), *self.band)
-        reward = float(-self.w_er * self.obj.contribution(a, t, p)[0] * np.exp(-p.DISC_ER * t))
+        r_t = self.exo.r[t] if self.exo.r is not None else p.SHORT_RATE
+        reward = float(-self.w_er * self.obj.contribution(a, t, p)[0]
+                       * np.asarray(numeraire.premium_factor(t, r_t, p)).ravel()[0])
         s, _ = step(s, a, self.exo, p, self.hazard)
         while not s.present[0] and s.t < p.T:            # paid-up: nothing left to decide
             s, _ = step(s, np.zeros(1), self.exo, p, self.hazard)

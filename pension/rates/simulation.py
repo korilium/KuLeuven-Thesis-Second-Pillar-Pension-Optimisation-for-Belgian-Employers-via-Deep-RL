@@ -74,6 +74,7 @@ def simulateHullWhite(
     dt:      float = 1/12,
     seed:    int   = 42,
     rng:     np.random.Generator = None,
+    phi:     float = 0.0,
 ) -> np.ndarray:
     """
     Simulate Hull-White short-rate paths using EXACT step-wise discretisation
@@ -107,6 +108,11 @@ def simulateHullWhite(
     seed    : random seed for reproducibility (legacy global-seed behaviour)
     rng     : optional np.random.Generator; when given it supplies the shocks
               and `seed` is ignored, so a caller can own the random stream
+    phi     : constant market price of risk. 0 (default) simulates under Q, as
+              fitted. phi != 0 simulates the REAL-WORLD paths: x gets the drift
+              -kappa x + sigma phi (P-drift = Q-drift + sigma phi), so it reverts
+              to m = sigma phi / kappa instead of 0; r(0) = f(0,0) either way.
+              Bond prices stay Q-prices (pricing.hullWhiteBondPrice).
 
     Returns
     -------
@@ -144,7 +150,12 @@ def simulateHullWhite(
     # ── Simulate (vectorised across paths; only drift differs from Vasicek)
     eps = (np.random.normal(0, 1, size=(n_steps, n_paths)) if rng is None
            else rng.standard_normal((n_steps, n_paths)))
-    for t in range(n_steps):
-        paths[t+1, :] = alpha[t+1] + (paths[t, :] - alpha[t]) * e_kdt + diff * eps[t, :]
+    if phi == 0.0:
+        for t in range(n_steps):
+            paths[t+1, :] = alpha[t+1] + (paths[t, :] - alpha[t]) * e_kdt + diff * eps[t, :]
+    else:
+        m = sigma * phi / kappa                          # P long-run mean of x
+        for t in range(n_steps):
+            paths[t+1, :] = alpha[t+1] + m + (paths[t, :] - alpha[t] - m) * e_kdt + diff * eps[t, :]
 
     return paths

@@ -42,7 +42,10 @@ def lambda_equivalent(p, de_new, lam=None, de_ref=None):
 
 def lambda_reparam(p, Fg, rg, ag, nq, lam=0.5, de_new=0.02, objective=None):
     """Max |policy difference| between (lam, DISC_EMP=de_new) and its LAMBDA
-    equivalent at the reference DISC_EMP -- must be ~0. Returns (gap, lam_eq)."""
+    equivalent at the reference DISC_EMP -- must be ~0. Returns (gap, lam_eq).
+    A statement about the DISCOUNTED objective (DISC_EMP does not enter the
+    retirement numeraire), so it is evaluated there."""
+    p = p.replace(EMPLOYER_NUMERAIRE="discounted")
     lam_eq = lambda_equivalent(p, de_new, lam=lam)
     pa = dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq, objective=objective,
                   p=p.replace(LAMBDA=lam, DISC_EMP=de_new))["policy"]
@@ -77,11 +80,14 @@ def lambda_monotonicity(p, Fg, rg, ag, nq, entry, n_paths, seed, lambdas=(0.2, 0
 
 
 def timing_neutrality(p, Fg, rg, nq, entry, n_paths, seed, band_pct=(0.02, 0.15), na=20):
-    """(early, late) mean contribution (% of salary, years 0-9 and 35-44) with
-    DISC_ER = DISC_EMP = MU: the benefit/cost ratio is then flat in t, so the
-    schedule must be roughly level. Constant rates only."""
+    """(early, late) mean contribution (% of salary, years 0-9 and 35-44) when a
+    contribution's cost and value grow alike: SHORT_RATE = MU = G under the
+    retirement numeraire (premiums accrue at the rate R and L earn), DISC_ER =
+    DISC_EMP = MU under the discounted one. The benefit/cost ratio is then flat in
+    t, so the schedule must be roughly level. Constant rates only."""
     lo, hi = band_pct[0] / p.GAMMA, band_pct[1] / p.GAMMA
-    q = p.replace(DISC_ER=p.MU, DISC_EMP=p.MU)
+    q = p.replace(SHORT_RATE=p.MU, G=p.MU) if p.EMPLOYER_NUMERAIRE == "retirement" \
+        else p.replace(DISC_ER=p.MU, DISC_EMP=p.MU)
     pol = dp.solve(Fg=Fg, rg=rg, ag=np.linspace(lo, hi, na), n_quad=nq, p=q)["policy"]
     r = dp.simulate(pol, Fg, rg, **entry, band=(lo, hi), n_paths=n_paths, seed=seed, p=q)
     return float(np.mean(r["c_by"][:10])), float(np.mean(r["c_by"][35:]))
@@ -178,14 +184,136 @@ def cross_scores(p, policies, Fg, rg, entry, n_paths, seed, band, floor_a):
     return J, floor
 
 
-def diagonal_margin(J, floor):
-    """Per column j: how far the best OTHER policy is above j's own optimum, as a
-    fraction of j's gain over the floor (<= 0 means the diagonal wins). Returns
-    (margins, index of that best other policy)."""
-    scale = np.abs(np.diag(J) - floor)
+def diagonal_margin(J, floor, relative_to="gain"):
+    """Per column j: how far the best OTHER policy is above j's own optimum
+    (<= 0 means the diagonal wins), as a fraction of j's gain over the floor
+    (relative_to="gain") or of |J_jj| ("value"). The gain normalisation is
+    ill-conditioned when an objective barely beats the floor (it amplifies grid
+    error); the value normalisation is not. Returns (margins, best other index)."""
+    scale = np.abs(np.diag(J) - floor) if relative_to == "gain" else np.abs(np.diag(J))
     rel = (J - np.diag(J)[None, :]) / np.where(scale > 0, scale, 1.0)[None, :]
     np.fill_diagonal(rel, -np.inf)
     return rel.max(axis=0), rel.argmax(axis=0)
 
 
 ALL_OBJECTIVES = list(OBJECTIVES)
+
+
+# --- the real-world short rate (RATE_MODEL = "vasicek_short") ---------------------------
+def vasicek_short_fit(p=None):
+    """Calibration and fit of the P-measure Vasicek short rate: the maturity used
+    as short-rate proxy, kappa, theta_P (OLS, and the one simulated: p.LONG_RATE_P
+    if set), sigma, the significance of the mean reversion, theta_Q and phi, the
+    in-sample fit of the reconstructed 10Y from the observed short rate (RMSE,
+    bias -- zero by construction --, correlation, RMSE over the last 24 months),
+    the jump at t0, and the AR(1) decay of the t0 offset (phi_e, its standard
+    error, half-life, and whether the kappa fallback is used)."""
+    from pension.economy import rate_calibration, vasicek_short_params
+    from pension.params import DEFAULT
+    sh = rate_calibration()["short"]
+    vp = vasicek_short_params(DEFAULT if p is None else p)
+    d = sh["diagnostics"]
+    return dict(maturity=sh["maturity"], kappa=sh["kappa"], theta_P_ols=sh["theta_P"],
+                theta_P=vp["theta_P"], sigma=sh["sigma"], t_stat_b=d["t_stat_b"],
+                p_val_b=d["p_val_b"], half_life=d["half_life_years"], theta_Q=sh["theta_Q"],
+                phi=vp["phi"], r0=sh["r0"], **sh["fit"],
+                **{"offset_" + k: v for k, v in sh["offset"].items()})
+
+
+def scenario_stats(p, model, n=2000):
+    """Distribution of the annual short rate r_t, the 10Y, G_t, mu_t and the
+    realised accrual of `model`'s scenarios at a few years: dict year -> stats."""
+    sc = draw_rate_scenarios(n, model=model, p=p)
+    out = {}
+    for t in (0, 1, 5, 10, 20, p.T - 1):
+        q = lambda x: (float(np.percentile(x, 5)), float(np.median(x)), float(np.percentile(x, 95)))
+        out[t] = dict(r=q(sc["r"][t]), y10=q(sc["y10"][t]), G=q(sc["G"][t]), mu=q(sc["mu"][t]),
+                      acc=q(sc["acc"][t]), r_neg=float((sc["r"][t] < 0).mean()))
+    return out
+
+
+# --- Hull-White under the real-world measure (RATE_MODEL = "hull_white_p") --------------
+def hw_p_link(n=200):
+    """(a) With phi = 0 and the legacy sigma, hull_white_p's simulation IS
+    hull_white's: max |difference| of the monthly short rate and 10Y (must be 0),
+    and of the annual r against the hull_white scenarios (same seed)."""
+    from pension.economy import hull_white_p_params, hull_white_paths, rate_calibration
+    from pension.params import DEFAULT
+    from pension.rates.pricing import reconstructFutureYield
+    from pension.rates.simulation import simulateHullWhite
+    p = DEFAULT
+    vas, curve = rate_calibration()["vasicek"], rate_calibration()["curve"]
+    r_q = simulateHullWhite(curve, vas["kappa"], vas["sigma"], T=p.T, n_paths=n, dt=p.RATE_DT,
+                            rng=np.random.default_rng(p.RATE_SEED))
+    y_q = reconstructFutureYield(r_q, vas["kappa"], vas["sigma"], curve, tau=10.0, dt=p.RATE_DT)
+    r_p, y_p = hull_white_paths(hull_white_p_params(p, legacy_sigma=True, phi=0.0), p.T, n,
+                                p.RATE_DT, np.random.default_rng(p.RATE_SEED))
+    sc = draw_rate_scenarios(n, model="hull_white", p=p)
+    yearly = np.arange(p.T + 1) * int(round(1 / p.RATE_DT))
+    return dict(r=float(np.abs(r_q - r_p).max()), y10=float(np.abs(y_q - y_p).max()),
+                scenario_r=float(np.abs(sc["r"] - r_p[yearly]).max()))
+
+
+def hw_p_t0_fit(p):
+    """(b) The model 10Y at t0 against the NSS 10Y (equal: exact fit to today's
+    curve) and against the last observed 10Y (the NSS fitting error)."""
+    from pension.economy import hull_white_p_params, rate_calibration
+    from pension.rates.calibration import nss_yield
+    from pension.rates.data import load_olo
+    hp = hull_white_p_params(p)
+    sc = draw_rate_scenarios(50, model="hull_white_p", p=p)
+    df10Y, mats, ylds = load_olo()
+    prm = rate_calibration()["curve"]["params"]
+    nss10 = float(nss_yield(10.0, *prm))
+    rmse = float(np.sqrt(np.mean((nss_yield(mats.astype(float), *prm) - ylds / 100) ** 2)))
+    return dict(model_10y_t0=float(sc["y10"][0, 0]), nss_10y=nss10,
+                observed_10y=float(df10Y["YIELD"].iloc[-1] / 100), nss_rmse=rmse,
+                r0=float(sc["r"][0, 0]), f00=float(prm[0] + prm[1]), phi=hp["phi"])
+
+
+def hw_p_drift(p, n=4000, years=(1, 5, 10, 20, 30, 44)):
+    """(c) Per year: the scenario mean of r_t (with its standard error) against
+    E^P[r_t] = alpha(t) + m (1 - e^{-kappa t})  (E^Q[r_t] = alpha(t))."""
+    from pension.economy import hull_white_p_params
+    from pension.rates.accrual import hull_white_alpha
+    hp = hull_white_p_params(p)
+    r = draw_rate_scenarios(n, model="hull_white_p", p=p)["r"]
+    out = {}
+    for t in years:
+        an = float(hull_white_alpha(t, hp["kappa"], hp["sigma"], hp["curve"])
+                   + hp["m"] * (1 - np.exp(-hp["kappa"] * t)))
+        out[t] = dict(mc=float(r[t].mean()), se=float(r[t].std(ddof=1) / np.sqrt(n)), analytic=an)
+    return out
+
+
+def vol_target(p, n=500, years=10):
+    """(d) Std of the model's monthly 10Y changes (first `years` years, pooled)
+    against the historical std of monthly 10Y changes; for hull_white_p and for
+    hull_white (legacy sigma). Also B(10)/10, hull_white's understatement factor."""
+    from pension.economy import hull_white_p_params, hull_white_paths, rate_calibration
+    hist = rate_calibration()["hist10Y"]
+    out = dict(historical=float(np.std(np.diff(hist), ddof=1)))
+    for name, kw in (("hull_white_p", {}), ("hull_white", dict(legacy_sigma=True, phi=0.0))):
+        hp = hull_white_p_params(p, **kw)
+        _, y = hull_white_paths(hp, years, n, p.RATE_DT, np.random.default_rng(1))
+        out[name] = float(np.std(np.diff(y, axis=0), ddof=1))
+    out["B10_over_10"] = hull_white_p_params(p)["B10"] / 10.0
+    return out
+
+
+def accrual_accuracy(p, n=4000, years=(0, 5, 10, 20, 30, 40, 44)):
+    """(e) Per payment year t: the Monte Carlo mean of the realised accrual to T,
+    prod_{u >= t} acc_u (monthly r * dt sums), against the mean of the closed-form
+    conditional A(t, T; r_t) over the same paths (tower property). Reported as the
+    relative error of the paired difference and its standard error."""
+    from pension.rates.accrual import closed_form_accrual
+    sc = draw_rate_scenarios(n, p=p)
+    out = {}
+    for t in years:
+        realised = np.prod(sc["acc"][t:p.T], axis=0)
+        closed = closed_form_accrual(t, sc["r"][t], p)
+        d = realised - closed
+        out[t] = dict(closed=float(closed.mean()), realised=float(realised.mean()),
+                      rel_err=float(d.mean() / closed.mean()),
+                      rel_se=float(d.std(ddof=1) / np.sqrt(n) / closed.mean()))
+    return out

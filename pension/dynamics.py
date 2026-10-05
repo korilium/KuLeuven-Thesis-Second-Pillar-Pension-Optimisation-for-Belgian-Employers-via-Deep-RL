@@ -40,6 +40,9 @@ class Exogenous:
     zR, zL, u: (T, n) asset shock, guarantee shock, churn uniform.
     G, mu:     (>=T, n) path-wise WAP rate and book yield under a rate model;
                None under constant rates (then p.G / p.MU apply).
+    r, acc:    (T, n) the short rate at the start of each year and the realised
+               accrual of the year, exp(sum of monthly r*dt): the employer's
+               numeraire (pension/numeraire.py). Constant rates: r = SHORT_RATE.
     The draw order -- per year zR, zL, u -- is the order dp.simulate always used,
     so pre-drawing reproduces its historical numbers exactly."""
     zR: np.ndarray
@@ -47,6 +50,8 @@ class Exogenous:
     u: np.ndarray
     G: Optional[np.ndarray] = None
     mu: Optional[np.ndarray] = None
+    r: Optional[np.ndarray] = None
+    acc: Optional[np.ndarray] = None
 
     @property
     def n(self):
@@ -60,7 +65,8 @@ class Exogenous:
         """The sub-batch of paths `idx` (an int gives a batch of one)."""
         sl = slice(idx, idx + 1) if isinstance(idx, (int, np.integer)) else idx
         pick = lambda x: None if x is None else x[:, sl]
-        return Exogenous(pick(self.zR), pick(self.zL), pick(self.u), pick(self.G), pick(self.mu))
+        return Exogenous(pick(self.zR), pick(self.zL), pick(self.u), pick(self.G), pick(self.mu),
+                         pick(self.r), pick(self.acc))
 
     @classmethod
     def draw(cls, p, n, seed, rates=None):
@@ -71,11 +77,14 @@ class Exogenous:
         for t in range(p.T):
             zR[t] = rng.standard_normal(n); zL[t] = rng.standard_normal(n); u[t] = rng.random(n)
         if rates is None:
-            return cls(zR, zL, u)
+            r = np.full((p.T, n), p.SHORT_RATE)
+            return cls(zR, zL, u, r=r, acc=np.exp(r))
         G, mu = np.asarray(rates["G"]), np.asarray(rates["mu"])
         assert G.shape[0] >= p.T and G.shape[1] == n, \
             f"rates must cover T={p.T} years x n_paths={n}, got {G.shape}"
-        return cls(zR, zL, u, G, mu)
+        r = np.asarray(rates["r"])[:p.T] if "r" in rates else np.full((p.T, n), p.SHORT_RATE)
+        acc = np.asarray(rates["acc"])[:p.T] if "acc" in rates else np.exp(r)
+        return cls(zR, zL, u, G, mu, r, acc)
 
 
 # --- liability ledgers --------------------------------------------------------------

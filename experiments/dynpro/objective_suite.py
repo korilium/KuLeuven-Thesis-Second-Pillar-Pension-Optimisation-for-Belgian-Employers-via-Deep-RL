@@ -87,9 +87,9 @@ def _cross_matrix(names=NAMES):
 
 
 @c.restores
-def checks(tol=0.02):
+def checks(tol=0.01):
     Fg, rg, ag, nq = _grids()
-    dp, P = c.dp, c.P
+    dp, P = c.dp, c.P.replace(EMPLOYER_NUMERAIRE="discounted")   # the hand formula is the discounted one
 
     # baseline == the committed formulas, written out by hand
     Fc, rc = Fg[:, None], rg[None, :]
@@ -110,10 +110,11 @@ def checks(tol=0.02):
     print(f"  lambda     delta_e == LAMBDA reparametrisation (max|dpolicy| {d:.1e})        OK")
 
     J, floor = _cross_matrix()
-    worst, arg = known.diagonal_margin(J, floor)
+    gain, _ = known.diagonal_margin(J, floor)
+    worst, arg = known.diagonal_margin(J, floor, relative_to="value")
     for j, n in enumerate(NAMES):
-        print(f"  diagonal   {n:17s} best other policy ({NAMES[arg[j]]}) {worst[j]:+.3f} of own gain over floor"
-              f"  {'OK' if worst[j] <= tol else 'FAIL'}")
+        print(f"  diagonal   {n:17s} best other ({NAMES[arg[j]]}) {worst[j]:+.4f} of |J|, "
+              f"{gain[j]:+.3f} of the gain over the floor  {'OK' if worst[j] <= tol else 'FAIL'}")
     assert np.all(worst <= tol), "an objective is beaten by another objective's policy"
 
 

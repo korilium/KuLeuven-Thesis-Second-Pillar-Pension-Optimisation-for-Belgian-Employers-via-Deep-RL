@@ -97,6 +97,77 @@ def calibrateVasicek(df10Y: pd.DataFrame, verbose: bool = True):
     }
 
 
+def calibrateVasicekShort(df_short: pd.DataFrame, df10Y: pd.DataFrame, tau: float = 10.0):
+    """Real-world (P) Vasicek short rate for RATE_MODEL="vasicek_short".
+
+    kappa, theta_P, sigma: calibrateVasicek on the monthly short-rate proxy.
+    theta_Q: the risk-neutral long-run mean used ONLY to map r to the tau-year
+    yield with the affine Vasicek price (pricing.vasicekBondPrice). It is set so
+    that the model's mean (tau-year - short) spread over the history equals the
+    observed one; the implied market price of risk is
+        phi = (theta_P - theta_Q) * kappa / sigma   (constant).
+    Because only the mean spread is matched, the in-sample bias of the
+    reconstructed yield is zero by construction; the RMSE is the informative fit.
+
+    The t0 offset. The model 10Y at the observed r0 misses the last observed 10Y
+    by e_t0 (the last in-sample residual e_t = y10_obs - y10_model(r_obs)). The
+    scenarios add a DETERMINISTIC decaying offset e_t0 * phi_e^m (m months ahead),
+    so they start on the observed 10Y and converge to the mean-spread model.
+    phi_e is the AR(1) coefficient of e_t (OLS, no intercept: e has mean zero by
+    construction). It is used if its decay is better identified than the short
+    rate's own mean reversion -- t-stat of (1 - phi_e) above |t-stat of b| --
+    else the decay falls back to e^{-kappa dt}. Being deterministic, the offset
+    simulates no slope risk, so the dispersion of G_t and mu_t is probably
+    understated.
+
+    Returns the parameters, r0 (last observed short rate), a "fit" dict
+    (in-sample RMSE / bias / correlation of the reconstructed 10Y from the
+    observed short rate, and the jump at t0 between the model 10Y at r0 and the
+    last observed 10Y) and an "offset" dict (e_t0, phi_e, its standard error,
+    half-life, the monthly decay used and whether it is the kappa fallback)."""
+    from pension.rates.pricing import vasicekBondPrice
+    assert np.array_equal(df_short["DATE"].values, df10Y["DATE"].values), \
+        "short and 10Y series must share their dates"
+    vas = calibrateVasicek(df_short, verbose=False)
+    kappa, theta_P, sigma = vas["kappa"], vas["theta"], vas["sigma"]
+    r = df_short["YIELD"].values / 100.0
+    y10 = df10Y["YIELD"].values / 100.0
+
+    # model yield y(r) = (B r - log A) / tau, log A linear in theta_Q:
+    # mean y(r) = mean y10  <=>  log A = B mean(r) - tau mean(y10)
+    B = (1 - np.exp(-kappa * tau)) / kappa
+    logA = B * r.mean() - tau * y10.mean()
+    theta_Q = (logA + sigma**2 * B**2 / (4 * kappa)) / (B - tau) + sigma**2 / (2 * kappa**2)
+    phi = (theta_P - theta_Q) * kappa / sigma
+
+    fit = -np.log(vasicekBondPrice(r, kappa, theta_Q, sigma, tau)) / tau
+    err = fit - y10
+
+    e = y10 - fit                                        # residual, mean 0 by construction
+    e0, e1 = e[1:], e[:-1]
+    phi_e = float((e0 @ e1) / (e1 @ e1))
+    s2 = float(((e0 - phi_e * e1) ** 2).sum() / (len(e0) - 1))
+    se = float(np.sqrt(s2 / (e1 @ e1)))
+    t_decay = (1 - phi_e) / se
+    use_ar1 = 0.0 < phi_e < 1.0 and t_decay > abs(vas["diagnostics"]["t_stat_b"])
+    decay = phi_e if use_ar1 else float(np.exp(-kappa / 12))      # monthly steps
+    offset = {"e_t0": float(e[-1]), "phi_e": phi_e, "se": se, "t_decay": float(t_decay),
+              "half_life_years": float(np.log(0.5) / np.log(decay) / 12),
+              "monthly_decay": decay, "fallback_kappa": not use_ar1}
+    return {
+        "kappa": kappa, "theta_P": theta_P, "theta_Q": theta_Q, "sigma": sigma,
+        "phi": phi, "r0": r[-1], "tau": tau, "diagnostics": vas["diagnostics"],
+        "fit": {"rmse": float(np.sqrt(np.mean(err**2))), "bias": float(err.mean()),
+                "corr": float(np.corrcoef(fit, y10)[0, 1]),
+                "rmse_last24": float(np.sqrt(np.mean(err[-24:]**2))),
+                "model_10y_t0": float(fit[-1]), "observed_10y_t0": float(y10[-1]),
+                "jump_t0": float(fit[-1] - y10[-1]),
+                "spread_obs": float((y10 - r).mean())},
+        "offset": offset,
+        "arrays": {"r": r, "y10": y10, "y10_fit": fit},
+    }
+
+
 ############################
 ### hull-white extension ###
 ############################

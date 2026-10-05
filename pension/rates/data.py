@@ -1,5 +1,7 @@
 
 
+import os
+
 import requests
 import xml.etree.ElementTree as ET
 import pandas as pd
@@ -80,6 +82,21 @@ def load_olo(startPeriod: str = "2000-01", cache: str = None, refresh: bool = Fa
         .reset_index(drop=True)
     )
     return df10Y, dfCurrentYield["MAT_NUM"].values, dfCurrentYield["YIELD"].values
+
+
+def load_olo_short(cache: str = None):
+    """The monthly history of the SHORTEST OLO maturity in the data -- the short-rate
+    proxy of RATE_MODEL="vasicek_short". Returns (maturity label, DataFrame with
+    DATE and YIELD in %), on the same dates as the 10Y series of load_olo()."""
+    load_olo(cache=cache)                       # make sure the cache exists
+    if cache is None:
+        cache = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "olo_yields.csv")
+    dfYield = pd.read_csv(cache, parse_dates=["DATE"])
+    mats = dfYield["IROLOBE2_MATUR"].unique()
+    shortest = min(mats, key=lambda m: int(m.replace("Y", "")))
+    df = (dfYield[dfYield["IROLOBE2_MATUR"] == shortest]
+          .sort_values("DATE").reset_index(drop=True))
+    return shortest, df
 
 
 # Example usage

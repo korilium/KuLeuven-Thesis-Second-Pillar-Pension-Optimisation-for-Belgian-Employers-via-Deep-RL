@@ -80,11 +80,12 @@ _GROUP_TITLE = {"base": "committed baseline",
 
 
 def _active(rows):
-    """The SCENARIOS rows that exist under the active regime, overrides translated."""
+    """The SCENARIOS rows that exist under the active regime and numeraire,
+    overrides translated (rows that only move an inert discount rate are dropped)."""
     out = []
     for label, grp, ov, exp in rows:
         tov = c.rate_overrides(ov)
-        if tov is not None:
+        if tov is not None and not any(k in c.INERT for k in tov):
             out.append((label, grp, tov, exp))
     return out
 
@@ -137,6 +138,9 @@ def table():
     skipped = [lb for lb, _, ov, _ in SCENARIOS if c.rate_overrides(ov) is None]
     if skipped:
         print(f"skipped under {c.RATES} (G/MU are path-wise): {', '.join(skipped)}")
+    inert = [lb for lb, _, ov, _ in SCENARIOS if any(k in c.INERT for k in ov)]
+    if inert:
+        print(f"skipped, inert by construction under the retirement numeraire: {', '.join(inert)}")
     print("early/late = mean contribution %% over years 0-9 and 35-44\n")
     hdr = "  %-30s %7s %7s %8s %7s %7s %7s  %s" % (
         "scenario", "styRR", "leaRR", "avg", "cost", "early", "late", "check")
@@ -208,7 +212,7 @@ def rates(Gs=(0.0175, 0.03, 0.045), DERs=(0.02, 0.05)):
     """G and delta_f do not form a regime boundary by their ORDERING -- the schedule
     tracks delta_f alone (front-loaded at 0.02 for every G, back-loaded at 0.05 for
     every G) while G shifts the LEVEL. This grid shows that separation directly."""
-    if c.rate_owned("G"): return
+    if c.rate_owned("G") or c.inert("DISC_ER"): return
     c.ensure_out(OUT)
     yrs = np.arange(c.P.T)
     fig, axes = c.plt.subplots(1, len(DERs), figsize=(6.4 * len(DERs), 4.8),
@@ -343,8 +347,10 @@ def invariants(nF=73, nR=71, na=15, nq=5, n_paths=8000, seed=3, tol=1e-6):
     check("stayer RR increasing in LAMBDA", bool(np.all(np.diff(sty) > 0)),
           " ".join(f"{v:.3f}" for v in sty))
 
-    # frictionless benchmark: with delta_f = delta_e = mu the benefit/cost ratio
-    # exp((mu-d_e)T + (d_f-mu)t) is 1 for every t, so timing must be neutral.
+    # frictionless benchmark: the benefit/cost ratio of a contribution is flat in t
+    # when its accrual matches the credited return -- SHORT_RATE = MU = G under the
+    # retirement numeraire, delta_f = delta_e = mu under the discounted one -- so
+    # timing must be neutral (checks.timing_neutrality).
     # Under a rate model mu is path-wise, so there is no single mu to set the
     # discounts to; the invariant is a constant-rate property and is not run.
     if c.RATES != "constant":
@@ -352,7 +358,8 @@ def invariants(nF=73, nR=71, na=15, nq=5, n_paths=8000, seed=3, tol=1e-6):
         return _report(rows)
     early, late = checks.timing_neutrality(P, Fg, rg, nq, c.entry(n_paths, seed), n_paths, seed)
     tilt = abs(early - late) / max(early, late)
-    check("timing neutral when delta_f = delta_e = mu", tilt < 0.25,
+    check("timing neutral when " + ("short rate = mu = G" if c.INERT else "delta_f = delta_e = mu"),
+          tilt < 0.25,
           f"early {early:.1f}% vs late {late:.1f}% (tilt {tilt:.0%})")
     return _report(rows)
 
