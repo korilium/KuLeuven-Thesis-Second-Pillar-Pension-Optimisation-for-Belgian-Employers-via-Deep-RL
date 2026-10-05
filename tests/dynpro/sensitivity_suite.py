@@ -65,6 +65,7 @@ def tornado(pct=0.15, nF=73, nR=91, na=15, nq=5, params=None):
 # ============ 2. pairwise interaction (grid-mean a*) ============
 @c.restores
 def interaction(pi, pj, vi, vj, nF=73, nR=91, na=15, nq=5, tag=""):
+    if c.rate_owned(pi, pj): return
     Fg, rg, ag = c.grids(nF, nR, na)
     Z = np.zeros((len(vj), len(vi)))
     for a, vjj in enumerate(vj):
@@ -90,6 +91,7 @@ def interaction(pi, pj, vi, vj, nF=73, nR=91, na=15, nq=5, tag=""):
 # ============ 3. policy-map sweep (one param, several values) ============
 @c.restores
 def policy_map_sweep(param, values, year=YEAR, nF=121, nR=91, na=25, nq=5, n_paths=15000):
+    if c.rate_owned(param): return
     Fg, rg, ag = c.grids(nF, nR, na); RR = c.iso_rr(Fg, rg)
     lev = [0.1, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5]
     fig, axes = c.plt.subplots(1, len(values), figsize=(4.5 * len(values), 4.3),
@@ -120,6 +122,7 @@ def policy_map_sweep(param, values, year=YEAR, nF=121, nR=91, na=25, nq=5, n_pat
 @c.restores
 def frontier_shift(param, values, lambdas=(0.1, 0.3, 0.5, 0.7, 0.9),
                    nF=100, nR=71, na=21, nq=5, n_paths=15000):
+    if c.rate_owned(param): return
     Fg, rg, ag = c.grids(nF, nR, na)
     colors = ["#1D9E75", "#C1121F", "#274690", "#E08D1C"]
     fig, ax = c.plt.subplots(figsize=(6.8, 5.4), constrained_layout=True)
@@ -146,6 +149,7 @@ def frontier_shift(param, values, lambdas=(0.1, 0.3, 0.5, 0.7, 0.9),
 @c.restores
 def resolution_check(param="G", values=(0.0175, 0.025, 0.0375),
                      coarse=(121, 51, 25, 5), fine=(181, 61, 25, 7), n_paths=15000):
+    if c.rate_owned(param): return
     print(f"[resolution_check] {param}  coarse={coarse}  fine={fine}")
     series = {}
     for tag, (nF, nR, na, nq) in (("coarse", coarse), ("fine", fine)):
@@ -176,6 +180,7 @@ def resolution_check(param="G", values=(0.0175, 0.025, 0.0375),
 @c.restores
 def anchor_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=101, na=31, nq=7,
                  anchors=(("edge (rho0=35)", 35.0), ("interior (rho0=3)", 3.0)), n_paths=15000):
+    if c.rate_owned(param): return
     print(f"[anchor_check] {param}  grids=({nF},{nR},{na},q{nq})")
     Fg, rg, ag = c.grids(nF, nR, na)
     data = {name: dict(a=[], cost=[], ben=[]) for name, _ in anchors}
@@ -201,6 +206,7 @@ def anchor_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=101, na=3
 # ============ 7. entry-state distribution vs single corner anchor ============
 @c.restores
 def entry_dist_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=101, na=31, nq=7, n_paths=15000):
+    if c.rate_owned(param): return
     print(f"[entry_dist_check] {param}  (placeholder entry distribution, see common.sample_entry)")
     Fg, rg, ag = c.grids(nF, nR, na)
     corner_a, dist_a = [], []
@@ -226,7 +232,7 @@ def entry_dist_check(param="G", values=(0.0175, 0.025, 0.0375), nF=145, nR=101, 
 
 # ============ 8. year-by-year schedule sensitivity, 3x3 param grid ============
 @c.restores
-def schedule_grid(nF=73, nR=91, band_pct=(0.02, 1.0), n_paths=15000, specs=None):
+def schedule_grid(nF=73, nR=91, band_pct=(0.02, 1.0), n_paths=15000, specs=None, seed=7):
     specs = specs or [
         ("DISC_ER", (0.03, 0.07), r"employer disc $\delta_f$"),
         ("MU", (0.02, 0.05), r"credited return $\mu$"),
@@ -237,6 +243,9 @@ def schedule_grid(nF=73, nR=91, band_pct=(0.02, 1.0), n_paths=15000, specs=None)
         ("LAMBDA", (0.3, 0.7), r"weight $\lambda$"),
         ("ANNUITY", (12.0, 18.0), r"annuity $\ddot a$"),
     ]
+    if c.RATES != "constant":   # MU and G are path-wise rates now; sweep the asset noise instead
+        specs = [sp for sp in specs if sp[0] not in c.RATE_OWNED] + \
+                [("SIGMA_R_RATES", (0.0, 0.10), r"excess-return noise $\sigma_R$")]
     Fg, rg, _ = c.grids(nF, nR)
 
     def schedule():
@@ -244,7 +253,7 @@ def schedule_grid(nF=73, nR=91, band_pct=(0.02, 1.0), n_paths=15000, specs=None)
         ag = np.linspace(lo, min(hi, 1.0), 20)
         pol = c.solve(Fg, rg, ag, 5)["policy"]
         return c.simulate(pol, Fg, rg, **c.entry(n_paths, seed), band=(lo, min(hi, 1.0)),
-                          n_paths=n_paths, seed=7)["c_by"]
+                          n_paths=n_paths, seed=seed)["c_by"]
 
     c.restore(); c_base = schedule(); print("baseline schedule computed")
     yrs = np.arange(c.dp.T)
@@ -258,6 +267,7 @@ def schedule_grid(nF=73, nR=91, band_pct=(0.02, 1.0), n_paths=15000, specs=None)
         ax.set_title(lab, fontsize=11); ax.set_xlabel("year $t$"); ax.set_ylabel("contrib %sal"); ax.set_ylim(0, 16)
         ax.legend(frameon=False, fontsize=7.5, loc="upper right")
         print(f"  {pk}: base_avg={c_base.mean():.1f} lo_avg={c_lo.mean():.1f} hi_avg={c_hi.mean():.1f}")
+    for ax in axes.ravel()[len(specs):]: ax.set_visible(False)
     fig.suptitle("Year-by-year sensitivity of the optimal contribution schedule to each parameter", fontsize=13)
     fig.savefig(f"{OUT}/sens_schedule_grid.png", dpi=c.DPI); c.plt.close(fig)
     print(f"wrote {OUT}/sens_schedule_grid.png")
@@ -351,15 +361,21 @@ def state_visitation(nF=145, nR=101, na=41, nq=7, n_paths=40000, seed=7,
     print(f"    wrote {OUT}/sens_visitation_years.png")
 
 
+# The three robustness checks below ask whether a parameter TREND is a mesh / anchor /
+# entry-state artefact. Under constant rates they test the G trend; under a rate model
+# G is path-wise, so they test the excess-return noise, the one rate lever left free.
+_ROBUST = (("G", (0.0175, 0.025, 0.0375)) if c.RATES == "constant"
+           else ("SIGMA_R_RATES", (0.0, 0.05, 0.10)))
+
 _ALL = {
     "tornado": lambda: tornado(),
     "interaction": lambda: interaction("ETA", "GAMMA", [2, 3, 5], [0.10, 0.15, 0.20], tag="ETA_GAMMA"),
     "policy": lambda: [policy_map_sweep(p, v) for p, v in
                        (("ETA", [1, 2, 3, 5]), ("G", [0.0175, 0.025, 0.0375]), ("GAMMA", [0.25, 0.50, 0.75]))],
     "frontier": lambda: frontier_shift("ETA", [2, 3, 5]),
-    "resolution": lambda: resolution_check("G"),
-    "anchor": lambda: anchor_check("G"),
-    "entrydist": lambda: entry_dist_check("G"),
+    "resolution": lambda: resolution_check(*_ROBUST),
+    "anchor": lambda: anchor_check(*_ROBUST),
+    "entrydist": lambda: entry_dist_check(*_ROBUST),
     "schedule": lambda: schedule_grid(),
     "visits": lambda: state_visitation(),
 }

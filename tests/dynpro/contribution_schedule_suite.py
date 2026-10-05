@@ -232,6 +232,7 @@ def backload_vs_baseline(de=0.05, lam=0.3, nF=121, nR=91, nq=5, n_paths=40000, s
 def schedule_vs_macro(param="G", values=(0.020, 0.025, 0.030, 0.035), fixed=0.025,
                       nF=121, nR=91, band_pct=(0.02, 0.15), n_paths=30000, seed=7):
     assert param in ("MU", "G")
+    if c.rate_owned(param): return
     Fg, rg, _ = c.grids(nF, nR)
     lo, hi = band_pct[0] / c.dp.GAMMA, band_pct[1] / c.dp.GAMMA
     agb = np.linspace(lo, hi, 26)
@@ -363,6 +364,7 @@ def signal_schedule(betas=(0.0001, 0.001, 0.01, 0.03, 0.10, 0.30), nF=145, nR=10
 # ============ 9. (mu,G) x discount scenario grid ============
 @c.restores
 def scenario_grid(discounts=(0.025, 0.04), nF=121, nR=91, band_pct=(0.02, 0.15), n_paths=15000, seed=7):
+    if c.rate_owned("MU", "G"): return
     scen = [("B21 underwater", dict(MU=0.01, G=0.03)), ("neutral", dict(MU=0.02, G=0.02)),
             ("baseline", dict(MU=0.03, G=0.03)), ("B23", dict(MU=0.05, G=0.03))]
     Fg, rg, _ = c.grids(nF, nR)

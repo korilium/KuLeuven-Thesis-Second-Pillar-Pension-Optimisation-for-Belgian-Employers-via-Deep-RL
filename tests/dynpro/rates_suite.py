@@ -25,6 +25,8 @@ Run:  python rates_suite.py [checks|fan|table]
 import numpy as np
 import common as c
 
+# This suite compares the regimes itself, so it always starts from constant rates.
+assert c.RATES == "constant", "rates_suite compares the rate regimes itself; run it without --rates"
 OUT = f"{c.OUT}/rates"   # this suite writes only here
 
 GRID, N_PATHS, SEED = c.GRID, c.N_PATHS, c.SEED
@@ -128,7 +130,7 @@ def table():
     designs = {"DP (constant rates)": c.solve(Fg, rg, ag, GRID["nq"])["policy"]}
     for m in MODELS:
         sol = c.dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=GRID["nq"], rates=_scen(m))
-        designs[f"DP (CE {m})"] = sol["policy"]
+        designs[f"DP (CE {m})"] = sol["policy"]       # explicit scenario: CE to that model
         ce = sol["ce"]
         print(f"  CE {m:10s}: G={ce['G']:.2%} MU={ce['MU']:.2%} "
               f"SIGMA_L={ce['SIGMA_L']:.2%} SIGMA_R={ce['SIGMA_R']:.2%}")

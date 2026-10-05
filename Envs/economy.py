@@ -82,6 +82,7 @@ BOOK_SPREAD = 0.0           # book yield over the 10Y OLO (credit/illiquidity pi
 SIGMA_R_RATES = SIGMA_R     # excess-return noise on top of the book yield (profit sharing,
                             # asset-mix risk); kept equal to SIGMA_R so the two regimes carry
                             # the same asset risk. 0 = pure book-yield crediting.
+RATE_CE_PATHS = 5000        # scenarios behind the certainty-equivalent moments DynPro.solve uses
 
  
 # --- plan rules: c(t, S) -> premium --------------------------------------
@@ -161,6 +162,22 @@ def draw_rate_scenarios(n_paths=N_EVAL, seed=RATE_SEED, model=None, horizon=None
     """
     model = RATE_MODEL if model is None else model
     H = T if horizon is None else horizon
+    # memoised: the suites call this once per simulate(), hundreds of times per run.
+    # The key holds every input the scenario depends on (the WAP constants are
+    # module constants of liability/WAP.py and are not swept). Callers must treat
+    # the returned arrays as read-only.
+    key = (model, n_paths, seed, H, BOOK_DURATION, BOOK_SPREAD) + \
+          ((G, MU) if model == "constant" else ())
+    if key not in _SCENARIOS:
+        _SCENARIOS[key] = _draw_rate_scenarios(n_paths, seed, model, H)
+    return _SCENARIOS[key]
+
+_SCENARIOS = {}
+
+
+def _draw_rate_scenarios(n_paths, seed, model, H, chunk=10000):
+    """Uncached draw (see draw_rate_scenarios). Paths are simulated in blocks of
+    `chunk` so a 40k-path cohort does not hold ~1 GB of monthly arrays at once."""
     if model == "constant":
         G_ = np.full((H, n_paths), G); mu_ = np.full((H, n_paths), MU)
         return dict(model=model, G=G_, mu=mu_, y10=np.full((H + 1, n_paths), np.nan),
@@ -173,29 +190,34 @@ def draw_rate_scenarios(n_paths=N_EVAL, seed=RATE_SEED, model=None, horizon=None
     cal = rate_calibration(); vas = cal["vasicek"]
     rng = np.random.default_rng(seed)
     mpy = int(round(1 / RATE_DT))
-    if model == "hull_white":
-        r_m = simulateHullWhite(cal["curve"], vas["kappa"], vas["sigma"], T=H,
-                                n_paths=n_paths, dt=RATE_DT, rng=rng)
-        y10_m = reconstructFutureYield(r_m, vas["kappa"], vas["sigma"], cal["curve"],
-                                       tau=10.0, dt=RATE_DT)
-    elif model == "vasicek":
-        r_m = simulateVasicek(vas["kappa"], vas["theta"], vas["sigma"], vas["r0"], T=H,
-                              n_paths=n_paths, dt=RATE_DT, rng=rng)
-        y10_m = r_m
-    else:
-        raise ValueError(f"unknown RATE_MODEL {model!r}")
-
-    # observed months up to t0, then simulated months 1..12H (row 0 of the simulation
-    # is t0 itself, which the history already holds as an observation)
     hist = cal["hist10Y"]
-    full = np.vstack([np.repeat(hist[:, None], n_paths, axis=1), y10_m[1:]])
     start = len(hist) - 1                                # row of model year 0
-    G_ = computeWAPRate(full, start, H, months_per_year=mpy)
     n_book = BOOK_DURATION * mpy
-    cs = np.vstack([np.zeros((1, n_paths)), np.cumsum(full, axis=0)])
+    assert start + 1 >= n_book, "OLO history shorter than BOOK_DURATION"
     rows = start + mpy * np.arange(H)                    # start month of each year
-    assert rows[0] + 1 >= n_book, "OLO history shorter than BOOK_DURATION"
-    mu_ = (cs[rows + 1] - cs[rows + 1 - n_book]) / n_book + BOOK_SPREAD
     yearly = np.arange(H + 1) * mpy
-    return dict(model=model, G=G_, mu=mu_, y10=y10_m[yearly], r=r_m[yearly], t0=cal["t0"])
- 
+
+    parts = []
+    for lo in range(0, n_paths, chunk):
+        n = min(chunk, n_paths - lo)
+        if model == "hull_white":
+            r_m = simulateHullWhite(cal["curve"], vas["kappa"], vas["sigma"], T=H,
+                                    n_paths=n, dt=RATE_DT, rng=rng)
+            y10_m = reconstructFutureYield(r_m, vas["kappa"], vas["sigma"], cal["curve"],
+                                           tau=10.0, dt=RATE_DT)
+        elif model == "vasicek":
+            r_m = simulateVasicek(vas["kappa"], vas["theta"], vas["sigma"], vas["r0"], T=H,
+                                  n_paths=n, dt=RATE_DT, rng=rng)
+            y10_m = r_m
+        else:
+            raise ValueError(f"unknown RATE_MODEL {model!r}")
+
+        # observed months up to t0, then simulated months 1..12H (row 0 of the
+        # simulation is t0 itself, which the history already holds as an observation)
+        full = np.vstack([np.repeat(hist[:, None], n, axis=1), y10_m[1:]])
+        G_ = computeWAPRate(full, start, H, months_per_year=mpy)
+        cs = np.vstack([np.zeros((1, n)), np.cumsum(full, axis=0)])
+        mu_ = (cs[rows + 1] - cs[rows + 1 - n_book]) / n_book + BOOK_SPREAD
+        parts.append((G_, mu_, y10_m[yearly], r_m[yearly]))
+    G_, mu_, y10_, r_ = (np.hstack(x) for x in zip(*parts))
+    return dict(model=model, G=G_, mu=mu_, y10=y10_, r=r_, t0=cal["t0"])

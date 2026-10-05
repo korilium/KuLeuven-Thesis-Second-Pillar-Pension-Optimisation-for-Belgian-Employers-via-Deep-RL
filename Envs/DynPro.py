@@ -29,7 +29,7 @@ import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 from economy import (T, G, MU, W, DISC_EMP, DISC_ER, DISC, SIGMA_R, SIGMA_L,
                      GAMMA, LAMBDA, S0, ETA, ANNUITY, RR_LEGAL, SATIATE, RR_TARGET,
-                     BETA, RATE_MODEL, RATE_SEED, SIGMA_R_RATES)
+                     BETA, RATE_MODEL, RATE_SEED, SIGMA_R_RATES, RATE_CE_PATHS)
 import economy as _economy      # draw_rate_scenarios: the rate engine is loaded only on use
 
 
@@ -251,18 +251,30 @@ def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
           hazard=tenure_hazard, beta=None, betas=None, rates=None):
     """Backward induction for the committed (churn-aware) objective.
 
-    `rates`: None (default) solves the constant-rate model with the module's G, MU,
-    SIGMA_R, SIGMA_L -- the original oracle, whatever RATE_MODEL says. A scenario
-    dict from economy.draw_rate_scenarios solves the CERTAINTY-EQUIVALENT model
-    instead (see certainty_equivalent); the overrides are applied for this call
-    only and the module globals are restored on the way out.
+    `rates` follows the RATE_MODEL switch, exactly like simulate():
+      * None with RATE_MODEL == "constant" (default): the original constant-rate
+        oracle with the module's G, MU, SIGMA_R, SIGMA_L;
+      * None with a rate model: RATE_CE_PATHS scenarios of that model are drawn
+        (RATE_SEED, memoised) and the CERTAINTY-EQUIVALENT model is solved;
+      * a scenario dict from economy.draw_rate_scenarios: certainty-equivalent
+        to that scenario;
+      * "constant": force the constant-rate oracle whatever the switch says.
+    The certainty-equivalent overrides (see certainty_equivalent) hold for this
+    call only; the module globals are restored on the way out, and the moments
+    used are returned under "ce". Under a rate model G, MU, SIGMA_L and SIGMA_R
+    are therefore SET by the scenario: overriding them has no effect.
 """
+    if isinstance(rates, str) and rates == "constant":
+        rates = None
+    elif rates is None and RATE_MODEL != "constant":
+        rates = _economy.draw_rate_scenarios(RATE_CE_PATHS, seed=RATE_SEED,
+                                             model=RATE_MODEL, horizon=T)
     if rates is not None:
         ce = certainty_equivalent(rates)
         saved = {k: globals()[k] for k in ce}
         try:
             globals().update(ce)
-            out = solve(mode, plan_rule, Fg, rg, ag, n_quad, hazard, beta, betas, rates=None)
+            out = _solve(mode, plan_rule, Fg, rg, ag, n_quad, hazard, beta, betas)
         finally:
             globals().update(saved)
         out["ce"] = ce
@@ -414,7 +426,8 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
     """
     use_rates = rates is not None or RATE_MODEL != "constant"
     if use_rates and rates is None:
-        rates = _economy.draw_rate_scenarios(n_paths, seed=RATE_SEED, model=RATE_MODEL)
+        rates = _economy.draw_rate_scenarios(n_paths, seed=RATE_SEED, model=RATE_MODEL,
+                                             horizon=T)
     if use_rates:
         Gr, mur = np.asarray(rates["G"]), np.asarray(rates["mu"])
         assert Gr.shape[0] >= T and Gr.shape[1] == n_paths, \

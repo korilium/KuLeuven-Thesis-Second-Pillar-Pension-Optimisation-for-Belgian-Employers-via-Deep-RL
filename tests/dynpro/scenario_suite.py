@@ -9,7 +9,7 @@ DISC_EMP vs MU -- which one-at-a-time sweeps cannot reach.
 
 Groups:
   A  analytic anchors     exact predictions (lambda=0 -> band floor, lambda=1 ->
-                          ceiling, GAMMA->0 -> RR_LEGAL). These PASS/FAIL.
+                          ceiling, GAMMA->0 -> the no-contribution RR). These PASS/FAIL.
   B  drift gap MU - G     does the reserve out-grow the guarantee?
   C  discount structure   sign of (DISC_ER - MU) sets front-load vs back-load
   D  specification        SATIATE, ETA (incl. eta=1 log), BETA
@@ -23,7 +23,13 @@ Figures (-> figs/scenarios/):
                                  new_plan_profile, dca_schedules,
                                  sens_visitation_years, lambda_threshold)
 
-Run:  python scenario_suite.py [invariants|table|shapes|rates|figures]
+Rate regime: every group runs under the regime chosen with --rates (see
+common.RATES). Under a rate model G and MU are path-wise, so group B and the
+(G x delta_f) figure are constant-rate experiments and are skipped; SIGMA_R maps
+to the excess-return noise SIGMA_R_RATES and SIGMA_L is dropped (common.rate_overrides),
+and the "deterministic" anchor keeps the rate risk -- only the asset noise goes.
+
+Run:  python scenario_suite.py [invariants|table|shapes|rates|figures] [--rates=hull_white|vasicek]
 """
 import contextlib
 import re
@@ -47,7 +53,7 @@ SCENARIOS = [
 
     ("lambda=0  pure employer",      "A", dict(LAMBDA=0.0),                          "floor"),
     ("lambda=1  pure employee",      "A", dict(LAMBDA=1.0),                          "ceiling"),
-    ("GAMMA->0  no capacity",        "A", dict(GAMMA=0.01),                          "legal"),
+    ("GAMMA->0  no capacity",        "A", dict(GAMMA=0.001),                         "legal"),
     ("deterministic sigma=0",        "A", dict(SIGMA_R=0.0, SIGMA_L=0.0),            None),
 
     ("MU<G  underwater (1%/3%)",     "B", dict(MU=0.01, G=0.03),                     None),
@@ -72,6 +78,16 @@ _GROUP_TITLE = {"base": "committed baseline",
                 "D": "D. specification toggles"}
 
 
+def _active(rows):
+    """The SCENARIOS rows that exist under the active regime, overrides translated."""
+    out = []
+    for label, grp, ov, exp in rows:
+        tov = c.rate_overrides(ov)
+        if tov is not None:
+            out.append((label, grp, tov, exp))
+    return out
+
+
 def _evaluate(overrides, **grid):
     """Solve + simulate under one set of dp.* overrides, always restoring them."""
     g = {**GRID, **grid}
@@ -85,6 +101,10 @@ def _evaluate(overrides, **grid):
         r = c.simulate(pol, Fg, rg, **c.entry(N_PATHS, SEED), band=(lo, hi),
                        n_paths=N_PATHS, seed=SEED, track=True)
         r["band"] = (lo * c.dp.GAMMA * 100, hi * c.dp.GAMMA * 100)
+        # the no-contribution outcome under the SAME overrides and regime: the legal
+        # pillar plus whatever the entry reserve grows into on its own
+        r["sty_zero"] = c.simulate(c.const_policy(0.0, c.dp.T, len(Fg), len(rg)), Fg, rg,
+                                   **c.entry(N_PATHS, SEED), n_paths=N_PATHS, seed=SEED)["sty"]
         r["early"] = float(np.mean(r["c_by"][:10]))
         r["late"] = float(np.mean(r["c_by"][35:]))
         return r
@@ -97,7 +117,13 @@ def _verdict(kind, r):
     floor, ceiling = r["band"]
     if kind == "floor":    ok = abs(r["avg"] - floor) < 0.2          # funds the minimum
     elif kind == "ceiling":ok = abs(r["avg"] - ceiling) < 0.2        # funds to capacity
-    elif kind == "legal":  ok = abs(r["sty"] - c.dp.RR_LEGAL) < 0.05  # RR collapses to legal
+    # no capacity: contributions add (almost) nothing on top of the zero-contribution
+    # outcome, i.e. RR_LEGAL plus the entry reserve grown at the credited rate.
+    # GAMMA must be small for this to be a limit: the 2% band floor exceeds any GAMMA
+    # below 2%, so the band collapses and the plan is FORCED to pay GAMMA of salary.
+    # At GAMMA=0.01 that forced 1% added 0.036 RR at constant rates but 0.056 under
+    # Hull-White (higher book yield) -- the check then measured the return, not the limit.
+    elif kind == "legal":  ok = abs(r["sty"] - r["sty_zero"]) < 0.01
     else:                  return "", True
     return ("PASS" if ok else "FAIL"), ok
 
@@ -105,12 +131,16 @@ def _verdict(kind, r):
 # ============ 1. the table ============
 def table():
     c.ensure_out(OUT)
-    print(f"grid {GRID}   band {BAND_PCT[0]:.0%}-{BAND_PCT[1]:.0%}   {N_PATHS} paths")
+    print(f"grid {GRID}   band {BAND_PCT[0]:.0%}-{BAND_PCT[1]:.0%}   {N_PATHS} paths   "
+          f"rates {c.RATES}")
+    skipped = [lb for lb, _, ov, _ in SCENARIOS if c.rate_overrides(ov) is None]
+    if skipped:
+        print(f"skipped under {c.RATES} (G/MU are path-wise): {', '.join(skipped)}")
     print("early/late = mean contribution %% over years 0-9 and 35-44\n")
     hdr = "  %-30s %7s %7s %8s %7s %7s %7s  %s" % (
         "scenario", "styRR", "leaRR", "avg", "cost", "early", "late", "check")
     results, failures, group = {}, [], None
-    for label, grp, ov, exp in SCENARIOS:
+    for label, grp, ov, exp in _active(SCENARIOS):
         if grp != group:
             group = grp
             print(("\n" if results else "") + f"  --- {_GROUP_TITLE[grp]} ---")
@@ -144,12 +174,15 @@ def shapes():
     # and hide it. The baseline is drawn last, on top, as the explicit reference.
     panels = [("B", "drift gap  $\\mu - G$", ("MU=G  at the money",)),
               ("C", "employer discount  $\\delta_f$", ("DISC_ER>MU  (0.05 committed)",))]
+    # a panel whose every scenario is skipped under this regime is dropped
+    panels = [p for p in panels
+              if any(g == p[0] for _, g, _, _ in _active(SCENARIOS))]
     fig, axes = c.plt.subplots(1, len(panels), figsize=(6.4 * len(panels), 4.8),
                                sharey=True, constrained_layout=True)
     yrs = np.arange(c.dp.T)
     base = _evaluate({})
     for ax, (grp, title, skip) in zip(np.atleast_1d(axes), panels):
-        rows = [(lb, ov) for lb, g, ov, _ in SCENARIOS if g == grp and lb not in skip]
+        rows = [(lb, ov) for lb, g, ov, _ in _active(SCENARIOS) if g == grp and lb not in skip]
         cols = c.plt.cm.viridis(np.linspace(0.12, 0.80, len(rows)))
         for (lb, ov), col in zip(rows, cols):
             r = _evaluate(ov)
@@ -174,6 +207,7 @@ def rates(Gs=(0.0175, 0.03, 0.045), DERs=(0.02, 0.05)):
     """G and delta_f do not form a regime boundary by their ORDERING -- the schedule
     tracks delta_f alone (front-loaded at 0.02 for every G, back-loaded at 0.05 for
     every G) while G shifts the LEVEL. This grid shows that separation directly."""
+    if c.rate_owned("G"): return
     c.ensure_out(OUT)
     yrs = np.arange(c.dp.T)
     fig, axes = c.plt.subplots(1, len(DERs), figsize=(6.4 * len(DERs), 4.8),
@@ -247,7 +281,7 @@ def figures(only=("base", "B", "C"), grid=None, figs=None):
     `figs`   subset of FIGURES names to render.
     """
     g = {**FIG_GRID, **(grid or {})}
-    picked = [x for x in SCENARIOS if only == "all" or x[1] in only or x[0] in only]
+    picked = [x for x in _active(SCENARIOS) if only == "all" or x[1] in only or x[0] in only]
     chosen = [f for f in FIGURES if figs is None or f[0] in figs]
     print("%d scenario(s) x %d figure(s), grid %s, %d paths"
           % (len(picked), len(chosen), g, FIG_PATHS))
@@ -329,6 +363,11 @@ def invariants(nF=73, nR=71, na=15, nq=5, n_paths=8000, seed=3, tol=1e-6):
 
     # 6. frictionless benchmark: with delta_f = delta_e = mu the benefit/cost ratio
     #    exp((mu-d_e)T + (d_f-mu)t) is 1 for every t, so timing must be neutral
+    # Under a rate model mu is path-wise, so there is no single mu to set the discounts
+    # to; the invariant is a constant-rate property and is not run.
+    if c.RATES != "constant":
+        print(f"  (timing-neutrality invariant skipped under {c.RATES}: mu is path-wise)")
+        return _report(rows)
     lo, hi = 0.02 / c.dp.GAMMA, 0.15 / c.dp.GAMMA
     with c.overrides(DISC_ER=c.dp.MU, DISC_EMP=c.dp.MU):
         p = c.solve(Fg, rg, np.linspace(lo, hi, 20), nq)["policy"]
@@ -338,7 +377,10 @@ def invariants(nF=73, nR=71, na=15, nq=5, n_paths=8000, seed=3, tol=1e-6):
     tilt = abs(early - late) / max(early, late)
     check("timing neutral when delta_f = delta_e = mu", tilt < 0.25,
           f"early {early:.1f}% vs late {late:.1f}% (tilt {tilt:.0%})")
+    return _report(rows)
 
+
+def _report(rows):
     print("  %-46s %-6s %s" % ("invariant", "result", "detail"))
     for name, ok, detail in rows:
         print("  %-46s %-6s %s" % (name, "PASS" if ok else "FAIL", detail))

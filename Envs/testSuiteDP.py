@@ -11,6 +11,11 @@ these numbers are directly comparable with the suites'.
 Run from this directory:
     python testSuiteDP.py            # everything
     python testSuiteDP.py cohort     # one section
+    python testSuiteDP.py --rates=hull_white   # under a rate model (also: vasicek)
+
+Under a rate model dp.solve is certainty-equivalent and dp.simulate path-wise
+(see DynPro.RATE_MODEL); the mu sweep in diagnostics is then skipped, since mu
+is a path-wise book yield rather than a parameter.
 """
 import numpy as np
 
@@ -105,17 +110,20 @@ def diagnostics(nF=73, nR=91, na=15, nq=5, n_paths=8000, seed=3):
     print(f"    stayer RR vs constant a=0.2/0.4/0.6/0.8   {' '.join(f'{x:.3f}' for x in sty)}")
     print(f"    increasing in a                            {bool(np.all(np.diff(sty) > 0))}")
 
-    mu0 = dp.MU
-    try:
-        p = dp.const_policy(0.6, dp.T, len(Fg), len(rg))
-        dp.MU = 0.01
-        lo_rr = dp.simulate(p, Fg, rg, S0=20.0, n_paths=n_paths, seed=seed)["tot"]
-        dp.MU = 0.05
-        hi_rr = dp.simulate(p, Fg, rg, S0=20.0, n_paths=n_paths, seed=seed)["tot"]
-    finally:
-        dp.MU = mu0                      # never leak a mutated global into later sections
-    print(f"    median RR at mu=1% / mu=5%                 {lo_rr:.3f} / {hi_rr:.3f}")
-    print(f"    dp.MU restored to {dp.MU}")
+    if dp.RATE_MODEL != "constant":
+        print(f"    mu sweep skipped under RATE_MODEL={dp.RATE_MODEL}: mu is path-wise")
+    else:
+        mu0 = dp.MU
+        try:
+            p = dp.const_policy(0.6, dp.T, len(Fg), len(rg))
+            dp.MU = 0.01
+            lo_rr = dp.simulate(p, Fg, rg, S0=20.0, n_paths=n_paths, seed=seed)["tot"]
+            dp.MU = 0.05
+            hi_rr = dp.simulate(p, Fg, rg, S0=20.0, n_paths=n_paths, seed=seed)["tot"]
+        finally:
+            dp.MU = mu0                  # never leak a mutated global into later sections
+        print(f"    median RR at mu=1% / mu=5%                 {lo_rr:.3f} / {hi_rr:.3f}")
+        print(f"    dp.MU restored to {dp.MU}")
 
     print("\nleaver vs stayer (banded policy)")
     LO, HI = 0.02 / dp.GAMMA, 0.15 / dp.GAMMA
@@ -137,4 +145,8 @@ def main(which=None):
 
 if __name__ == "__main__":
     import sys
+    for arg in list(sys.argv[1:]):
+        if arg.startswith("--rates="):
+            dp.RATE_MODEL = arg.split("=", 1)[1]; sys.argv.remove(arg)
+    print(f"RATE_MODEL = {dp.RATE_MODEL}")
     main(sys.argv[1] if len(sys.argv) > 1 else None)
