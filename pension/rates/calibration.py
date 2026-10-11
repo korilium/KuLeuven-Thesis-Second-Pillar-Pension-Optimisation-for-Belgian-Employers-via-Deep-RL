@@ -7,7 +7,7 @@ from scipy.optimize import differential_evolution, minimize
 
 
 
-def calibrateVasicek(df10Y: pd.DataFrame, verbose: bool = True):
+def calibrateVasicek(df10Y: pd.DataFrame, verbose: bool = True, dt = 1/12):
 
     """
     Calibrate Vasicek parameters from a 10Y OLO yield time series using OLS.
@@ -27,7 +27,6 @@ def calibrateVasicek(df10Y: pd.DataFrame, verbose: bool = True):
     #preperation for calibration of Vasicek model 
     r = df10Y["YIELD"].values / 100 # type: ignore # % -> decimal (0.01 = 1%)
 
-    dt = 1/12 # Monthly timestep (1 year = 12 months)
 
     r_t = r[:-1] # t = 0, 1, ..., T-1
 

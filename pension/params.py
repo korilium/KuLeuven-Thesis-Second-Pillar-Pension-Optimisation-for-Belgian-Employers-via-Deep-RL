@@ -40,15 +40,15 @@ class Params:
     S0: float = 1.0             # starting salary (the model is scale-free in it)
 
     # --- discounting ----------------------------------------------------------
-    DISC_EMP: float = 0.03      # EMPLOYEE discount: values future retirement income at the risk-free/OLO rate
-    DISC_ER: float = 0.05       # EMPLOYER discount: firm cost of capital (contributions + shortfall)
+    DISC_EMP: float = 0.03      # EMPLOYEE discount: values future retirement income at the risk-free/OLO rate legacy
+    DISC_ER: float = 0.05       # EMPLOYER discount: firm cost of capital (contributions + shortfall) legacy 
     DISC: float = 0.05          # single numeraire of the tabular rung (= DISC_ER), legacy alias.
                                 # DISC, SIGMA, N_EVAL are TABULAR DEFAULTS: read once, at import, into
                                 # economy's module globals; changing them on a Params does nothing
 
     # --- shocks ---------------------------------------------------------------
-    SIGMA_R: float = 0.05       # asset (reserve) shock
-    SIGMA_L: float = 0.02       # guarantee (liability) shock -- constant-rate model only
+    SIGMA_R: float = 0.05       # asset (reserve) shock legacy 
+    SIGMA_L: float = 0.02       # guarantee (liability) shock -- constant-rate model only legacy 
     SIGMA: float = 0.05         # the tabular rung's ONE shock, on the reserve (= SIGMA_R)
 
     # --- contribution capacity and preferences (rung 2) -----------------------

@@ -70,8 +70,8 @@ def grids():
 def part_a():
     blocks = {}
     p = P_V
-    df10Y, mats, ylds = load_olo()
-    t0 = df10Y["DATE"].iloc[-1]
+    df10Y, mats, ylds = load_olo()   #load in the 10Y OLO yields, the maturiry and their yields 
+    t0 = df10Y["DATE"].iloc[-1]  #last date from history equals t0 
     hist = df10Y["YIELD"].values / 100.0
     show = [1, 2, 5, 10, 20, 30]
     blocks["data"] = "\n".join([
@@ -85,7 +85,7 @@ def part_a():
               [["yield"] + [f"{ylds[list(mats).index(m)]:.2f}" for m in show]]),
     ])
 
-    vas = calibrateVasicek(df10Y, verbose=False)
+    vas = calibrateVasicek(df10Y, verbose=False, dt= p.RATE_DT)
     d = vas["diagnostics"]
     vp = economy.vasicek_params(p)
     blocks["vasicek"] = table(
