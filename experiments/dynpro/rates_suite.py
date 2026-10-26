@@ -25,6 +25,11 @@ Figures (-> figs/rates/):
                    each scored under constant, vasicek and hull_white_p rates
 
 Run:  python rates_suite.py [checks|fan|table]
+
+These suites run the DP stack: the constant-rate single-vehicle rung, and with
+--rates=... the rate mode frozen as pension.legacy_v1 (contribution-level action,
+(t, F, rho) state). Their figures are results of that design, not of the baseline
+(pension/baseline.py).
 """
 import numpy as np
 import common as c

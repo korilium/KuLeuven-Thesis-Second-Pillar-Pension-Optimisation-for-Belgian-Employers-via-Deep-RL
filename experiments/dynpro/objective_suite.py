@@ -28,6 +28,11 @@ Figures (-> figs/objectives/, or figs/rates_<model>/objectives/):
                                        1 = no better than funding the band floor)
 
 Run:  python objective_suite.py [checks|maps|schedules|frontier|cross] [--rates=...]
+
+These suites run the DP stack: the constant-rate single-vehicle rung, and with
+--rates=... the rate mode frozen as pension.legacy_v1 (contribution-level action,
+(t, F, rho) state). Their figures are results of that design, not of the baseline
+(pension/baseline.py).
 """
 import numpy as np
 import common as c

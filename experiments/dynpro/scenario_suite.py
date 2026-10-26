@@ -30,6 +30,11 @@ to the excess-return noise SIGMA_R_RATES and SIGMA_L is dropped (common.rate_ove
 and the "deterministic" anchor keeps the rate risk -- only the asset noise goes.
 
 Run:  python scenario_suite.py [invariants|table|shapes|rates|figures] [--rates=hull_white|vasicek]
+
+These suites run the DP stack: the constant-rate single-vehicle rung, and with
+--rates=... the rate mode frozen as pension.legacy_v1 (contribution-level action,
+(t, F, rho) state). Their figures are results of that design, not of the baseline
+(pension/baseline.py).
 """
 import contextlib
 import re

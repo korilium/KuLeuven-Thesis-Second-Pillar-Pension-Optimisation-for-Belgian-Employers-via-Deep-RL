@@ -16,6 +16,11 @@ Run:
 Under a rate model dp.solve is certainty-equivalent and dp.simulate path-wise
 (see Params.RATE_MODEL); the mu sweep in diagnostics is then skipped, since mu
 is a path-wise book yield rather than a parameter.
+
+These suites run the DP stack: the constant-rate single-vehicle rung, and with
+--rates=... the rate mode frozen as pension.legacy_v1 (contribution-level action,
+(t, F, rho) state). Their figures are results of that design, not of the baseline
+(pension/baseline.py).
 """
 import numpy as np
 

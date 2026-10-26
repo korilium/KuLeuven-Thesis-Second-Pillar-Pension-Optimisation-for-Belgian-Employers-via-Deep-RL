@@ -33,6 +33,11 @@ Figures (-> figs/benchmark/):
              benchmark_misfunding.png  a_design - a* on the states each design visits
 
 Run:  python benchmark_suite.py [table|frontier|schedules|visitation]
+
+These suites run the DP stack: the constant-rate single-vehicle rung, and with
+--rates=... the rate mode frozen as pension.legacy_v1 (contribution-level action,
+(t, F, rho) state). Their figures are results of that design, not of the baseline
+(pension/baseline.py).
 """
 import numpy as np
 import common as c

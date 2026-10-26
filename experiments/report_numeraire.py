@@ -1,6 +1,7 @@
 """Reports for the retirement-numeraire change (Option 1), stage by stage.
 
-    python experiments/report_numeraire.py stage1    # the real-world short-rate model
+    python experiments/report_numeraire.py stage1    # vasicek_short, the real-world short-rate robustness model
+                                                     # (the canonical vasicek models the 10Y; r = y10 - spread)
     python experiments/report_numeraire.py stage1b   # Hull-White under P, side by side
     python experiments/report_numeraire.py stage3    # verification of the retirement numeraire
 """

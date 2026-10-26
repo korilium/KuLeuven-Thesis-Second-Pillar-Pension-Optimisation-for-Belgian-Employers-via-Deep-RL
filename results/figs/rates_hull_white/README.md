@@ -6,3 +6,6 @@ correction, level-dispersion CE moments). They are not results of the canonical
 configuration. Regenerate them with `--rates=vasicek` (robustness: `--rates=hull_white_p`)
 once `LONG_RATE_P` is set (docs/REVIEW.md, M7 and M9). `hull_white` (risk-neutral)
 cannot be scored under the retirement-date objective.
+
+The rate mode itself (horizontal ledger, reserve shock, contribution-level action) is the
+design frozen in `pension/legacy_v1`; the current model is the baseline (`docs/MODEL.md`).

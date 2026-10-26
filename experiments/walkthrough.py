@@ -397,7 +397,7 @@ def reference_blocks():
 
 
 API_MODULES = ["pension.params", "pension.objective", "pension.numeraire", "pension.dynamics",
-               "pension.economy", "pension.dp", "pension.checks", "pension.baseline", "pension.legacy_v1.env",
+               "pension.economy", "pension.dp", "pension.checks", "pension.baseline",
                "pension.envs.tabular", "pension.rates.data", "pension.rates.calibration",
                "pension.rates.simulation", "pension.rates.pricing", "pension.rates.wap",
                "pension.rates.accrual"]

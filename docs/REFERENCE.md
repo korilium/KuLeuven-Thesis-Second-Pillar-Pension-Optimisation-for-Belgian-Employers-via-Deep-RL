@@ -59,7 +59,7 @@ when the employer's money is valued: the timing around the objective.
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
 | `premium_factor(t, r_t, p)` | The factor on a premium paid in year t: A(t, T) given the short rate r_t (scalar or one per path) under "retirement", e^{-DISC_ER t} under "discounted". | dp.py, exp/walkthrough.py, legacy_v1/dp.py, legacy_v1/env.py, legacy_v1/numeraire.py, tests/test_mechanisms.py |
-| `premium_schedule(p, rates=None)` | One deterministic factor per year t = 0..T-1, for the DP's Bellman flow. Without a scenario: the constant-rate (or discounted) factor. With a scenario (the certainty-equivalent solve): the scenario MEAN of A(t, T; r_t... | checks.py, dp.py, exp/walkthrough.py, legacy_v1/dp.py, legacy_v1/numeraire.py, tests/test_mechanisms.py |
+| `premium_schedule(p, rates=None)` | One deterministic factor per year t = 0..T-1, for the DP's Bellman flow. Without a scenario: the constant-rate (or discounted) factor. With a scenario (the certainty-equivalent solve): the scenario MEAN of A(t, T; r_t... | checks.py, dp.py, exp/walkthrough.py, legacy_v1/dp.py, legacy_v1/numeraire.py, tests/test_legacy_v1.py |
 | `retirement(p)` |  | dynamics.py, legacy_v1/dynamics.py, legacy_v1/numeraire.py |
 | `terminal_factors(p)` | (employee, employer) factors on the terminal legs. | checks.py, dp.py, legacy_v1/dp.py, legacy_v1/env.py, legacy_v1/numeraire.py |
 
@@ -137,7 +137,7 @@ the known-answer checks of the model, as functions that MEASURE.
 | `eta_log_limit(p, x=(0.4, 1.0, 2.5), eps=0.0001)` | (/u - log/ at eta=1, /u(eta=1) - u(eta=1+eps)/): u is log at eta=1 and continuous there. | exp/dynpro/scenario_suite.py, tests/test_invariants.py |
 | `face_value_premiums(p, Fg, rg, entry, n_paths, seed, a=0.4)` | (c) SHORT_RATE = s = 0: every premium factor of the retirement numeraire is exactly 1, i.e. premiums count at face value (per unit of final salary). The same face value is the discounted objective at DISC_ER = DISC_EM... | exp/report_numeraire.py, tests/test_numeraire.py |
 | `headline(p, Fg, rg, nq, entry, n_paths, seed, band_pct=(0.02, 0.15), na=20, score_p=None)` | (f) The banded optimum under p, scored under score_p (default p): employer cost, joint value, median stayer / leaver total RR, mean contribution (% of salary) by decade. | exp/report_numeraire.py, tests/test_numeraire.py |
-| `horizontal_closed_form(p, G_before=0.03, G_after=0.0175, switch=20, a=0.4, S0=20.0)` | One career, no churn, no shocks, with G stepping G_before -> G_after at year `switch`. Returns (relative error of the horizontal ledger against L_T = L0 e^{G_0 T} + sum_s c_s e^{G_s (T-s)}, and how far the VERTICAL me... | exp/dynpro/rates_suite.py, tests/test_dynamics.py |
+| `horizontal_closed_form(p, G_before=0.03, G_after=0.0175, switch=20, a=0.4, S0=20.0)` | One career, no churn, no shocks, with G stepping G_before -> G_after at year `switch`. Returns (relative error of the horizontal ledger against L_T = L0 e^{G_0 T} + sum_s c_s e^{G_s (T-s)}, and how far the VERTICAL me... | exp/dynpro/rates_suite.py |
 | `hw_p_drift(p, n=4000, years=(1, 5, 10, 20, 30, 44))` | (c) Per year: the scenario mean of r_t (with its standard error) against E^P[r_t] = alpha(t + d) + m (1 - e^{-kappa (t + d)})  (E^Q[r_t] = alpha(t + d)), d = economy.year_offset(p) the calendar time from the curve dat... | exp/report_numeraire.py, tests/test_rates.py |
 | `hw_p_link(n=200)` | (a) With phi = 0 and the legacy sigma, hull_white_p's simulation IS hull_white's: max /difference/ of the monthly short rate and 10Y (must be 0), and of the annual r against the hull_white scenarios (same seed). | exp/report_numeraire.py, tests/test_rates.py |
 | `hw_p_t0_fit(p)` | (b) The model 10Y at t0 against the NSS 10Y (equal: exact fit to today's curve) and against the last observed 10Y (the NSS fitting error). | exp/report_numeraire.py, tests/test_rates.py |
@@ -166,7 +166,7 @@ the bare-bone baseline: one member, a fixed premium, and each year the share of 
 | `Noise(eps: numpy.ndarray, u: numpy.ndarray) -> None` | Everything random about n careers: eps (premonths() + 12 T, n) monthly normals of the 10Y, u (T, n) exit uniforms. No look-ahead: year t reads only its own rows. | tests/test_baseline.py |
 | `Params(T: int = 45, W: float = 0.025, C: float = 0.05, I_TARIFF: float = 0.01, M: float = 0.0...)` | dataclass (fields: see the signature and the tables in this document) | checks.py, dp.py, exp/walkthrough.py, legacy_v1/dp.py, legacy_v1/objective.py, legacy_v1/params.py ... |
 | `PensionEnv(p=Params(T=45, W=0.025, C=0.05, I_TARIFF=0.01, M=0.0, BOOK_WEIGHT=0.020833333333333332...)` | One career per episode, gamma = 1. Observation = State.obs (9,), action = alpha_t. The reward is 0 until T; when the member leaves, the remaining years are rolled forward on the episode's own noise and the reward at T... | checks.py, exp/walkthrough.py, legacy_v1/env.py, tests/regression/make_golden_v1.py, tests/test_baseline.py, tests/test_legacy_v1.py |
-| `State(t: int, y: numpy.ndarray, G: numpy.ndarray, H: numpy.ndarray, K: numpy.ndarray, mu: nu...)` | n careers in January of year t. y, G, H, K, mu, L, R21, N are (n,) arrays; H and K are the sums of the observed months in the windows of G_{t+1} and G_{t+2}. inforce and tau only drive the roll-forward after exit: eve... | checks.py, dp.py, exp/walkthrough.py, legacy_v1/dp.py, legacy_v1/env.py, tests/test_dynamics.py |
+| `State(t: int, y: numpy.ndarray, G: numpy.ndarray, H: numpy.ndarray, K: numpy.ndarray, mu: nu...)` | n careers in January of year t. y, G, H, K, mu, L, R21, N are (n,) arrays; H and K are the sums of the observed months in the windows of G_{t+1} and G_{t+2}. inforce and tau only drive the roll-forward after exit: eve... | checks.py, dp.py, exp/walkthrough.py, legacy_v1/dp.py, legacy_v1/env.py, tests/test_dynamics.py ... |
 | `accrue(X, P, rate, p)` | Eq. (6), MODEL.md: X_{t+1} = (X_t + P_t) e^{rate}, in units of S_{t+1}. The ONE recursion of the liability (rate G_t) and the Branch 21 reserve (rate i_t). |  |
 | `bond_price(y, t, p)` | Eq. (7), MODEL.md: P(t, T) = exp(-y_t (T - t)), flat at the 10Y; P(T, T) = 1. | tests/test_baseline.py |
 | `book_yield(mu, y, p)` | Eq. (4), MODEL.md: monthly exponential filter of the 10Y, mu <- mu + w (y - mu). |  |
@@ -184,16 +184,6 @@ the bare-bone baseline: one member, a fixed premium, and each year the share of 
 | `utility(x, eta)` | Normalised CRRA, u(1) = 0, u'(1) = 1 (log at eta = 1). | exp/dynpro/sensitivity_suite.py, legacy_v1/objective.py, legacy_v1/params.py, objective.py, params.py |
 | `vasicek_month(y, eps, vp)` | Eq. (1), MODEL.md: exact monthly Vasicek step of the 10Y OLO under P. |  |
 | `wap_rate(sum24)` | Eq. (3), MODEL.md: G = statutory map of the 24-month mean 10Y (rates/wap.py). |  |
-
-### `pension.legacy_v1.env` (pension/legacy_v1/env.py)
-
-the funding problem as a gymnasium environment (the RL rung).
-
-| function / class | purpose (first docstring paragraph) | used in |
-|---|---|---|
-| `DPPolicyAgent(policy, Fg, rg, T)` | Runs a solved DP policy a*(t, F, rho) inside the environment: the oracle as an agent, for benchmarking learned policies on identical episodes. | checks.py, exp/walkthrough.py, tests/test_legacy_v1.py |
-| `PensionEnv(p=Params(T=45, G=0.03, MU=0.03, W=0.025, S0=1.0, DISC_EMP=0.03, DISC_ER=0.05, DISC=0.0...)` | The main Gymnasium class for implementing Reinforcement Learning Agents environments. | baseline.py, checks.py, exp/walkthrough.py, tests/regression/make_golden_v1.py, tests/test_baseline.py, tests/test_legacy_v1.py |
-| `make_env(**kw)` | PensionEnv(**kw) -- convenience for gymnasium.vector / RL libraries. |  |
 
 ### `pension.envs.tabular` (pension/envs/tabular.py)
 
@@ -356,7 +346,7 @@ Each check returns what it measures; the tests assert on it. "Tolerance" is the 
 | `eta_log_limit` | (∣u - log∣ at eta=1, ∣u(eta=1) - u(eta=1+eps)∣): u is log at eta=1 and continuous there. | `assert to_log < 1e-12 and jump < 1e-3` | `test_invariants.py::test_eta_one_is_log` |
 | `face_value_premiums` | (c) SHORT_RATE = s = 0: every premium factor of the retirement numeraire is exactly 1, i.e. premiums count at face value (per unit of final salary). The same face value is the discounted objective at DISC_ER = DISC_EMP = 0, so the two must give the same cost and joint value. Returns (max ∣factor - 1∣, max ∣difference∣ in cost and joint). | `assert f == 0.0 and d < 1e-12` | `test_numeraire.py::test_face_value_premiums` |
 | `headline` | (f) The banded optimum under p, scored under score_p (default p): employer cost, joint value, median stayer / leaver total RR, mean contribution (% of salary) by decade. | `assert len(h["by_decade"]) == 5 and h["cost"] > 0` | `test_numeraire.py::test_headline_runs` |
-| `horizontal_closed_form` | One career, no churn, no shocks, with G stepping G_before -> G_after at year `switch`. Returns (relative error of the horizontal ledger against L_T = L0 e^{G_0 T} + sum_s c_s e^{G_s (T-s)}, and how far the VERTICAL method -- every euro at the current rate -- would land from it). | `assert rel < 1e-12 and abs(vertical_gap) > 0.05` | `test_dynamics.py::test_horizontal_ledger_closed_form` |
+| `horizontal_closed_form` | One career, no churn, no shocks, with G stepping G_before -> G_after at year `switch`. Returns (relative error of the horizontal ledger against L_T = L0 e^{G_0 T} + sum_s c_s e^{G_s (T-s)}, and how far the VERTICAL method -- every euro at the current rate -- would land from it). |  | **none** |
 | `hw_p_drift` | (c) Per year: the scenario mean of r_t (with its standard error) against E^P[r_t] = alpha(t + d) + m (1 - e^{-kappa (t + d)})  (E^Q[r_t] = alpha(t + d)), d = economy.year_offset(p) the calendar time from the curve date to model year 0. | `assert abs(d["mc"] - d["analytic"]) < 4 * d["se"]` | `test_rates.py::test_hw_p_real_world_drift` |
 | `hw_p_link` | (a) With phi = 0 and the legacy sigma, hull_white_p's simulation IS hull_white's: max ∣difference∣ of the monthly short rate and 10Y (must be 0), and of the annual r against the hull_white scenarios (same seed). | `assert checks.hw_p_link(n=50) == dict(r=0.0, y10=0.0, scenario_r=0.0)` | `test_rates.py::test_hw_p_reproduces_hull_white_at_phi_zero_and_legacy_sigma` |
 | `hw_p_t0_fit` | (b) The model 10Y at t0 against the NSS 10Y (equal: exact fit to today's curve) and against the last observed 10Y (the NSS fitting error). | `assert abs(f["model_10y_t0"] - f["nss_10y"]) < 1e-12 and abs(f["r0"] - f["f00"]) < 1e-12` | `test_rates.py::test_hw_p_fits_todays_curve` |

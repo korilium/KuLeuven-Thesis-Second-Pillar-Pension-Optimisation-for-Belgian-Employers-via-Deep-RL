@@ -1,6 +1,8 @@
 # Calibrating the Hull-White Model to the Belgian OLO Curve
  
 *First draft — methodology section*
+
+> *Update (October 2026): the baseline (`docs/MODEL.md`) models the 10Y OLO directly with a Vasicek process under $P$ and takes the short rate as the 10Y minus a constant term spread; Hull-White remains a robustness model.*
  
 ## 0. Why Hull-White, and what "calibration" means here
  

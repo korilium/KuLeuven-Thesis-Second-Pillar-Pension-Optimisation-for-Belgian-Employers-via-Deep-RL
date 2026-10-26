@@ -20,6 +20,11 @@ and 0.349 at 0.80 and 0.90, employer cost 2.860 at 0.70 against 2.875 at 0.80.
 (Under the old discounted objective the same stretch was lambda 0.15-0.62.)
 
 Run:  python lambda_dial_suite.py [threshold|pareto|crowding|entrydist]
+
+These suites run the DP stack: the constant-rate single-vehicle rung, and with
+--rates=... the rate mode frozen as pension.legacy_v1 (contribution-level action,
+(t, F, rho) state). Their figures are results of that design, not of the baseline
+(pension/baseline.py).
 """
 import numpy as np
 import common as c

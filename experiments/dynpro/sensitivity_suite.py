@@ -14,6 +14,11 @@ Figures (-> figs/sens/):
 
 Run:  python sensitivity_suite.py [tornado|interaction|policy|frontier|resolution|anchor|entrydist|schedule]
       python -c "import sensitivity_suite as s; s.policy_map_sweep('ETA',[2,3,5])"
+
+These suites run the DP stack: the constant-rate single-vehicle rung, and with
+--rates=... the rate mode frozen as pension.legacy_v1 (contribution-level action,
+(t, F, rho) state). Their figures are results of that design, not of the baseline
+(pension/baseline.py).
 """
 import numpy as np
 import common as c
