@@ -10,18 +10,18 @@ year starting in January; the 10Y OLO is simulated monthly.
     action alpha_t in [0, 1]: the Branch 21 share of the premium c S_t
     reward at T only: lambda target ann u(RR_tot / target) - (1 - lambda) (L_tau - R_T)^+ / S_T
 
-Only the rate engine is used (read-only): the Vasicek calibration of the 10Y
-(pension.economy.vasicek_params) and the statutory WAP map (pension.rates.wap).
+Only the rate engine is used: the Vasicek calibration of the 10Y and the term
+spread (pension.rates.calibration) and the statutory WAP map (pension.rates.wap).
 """
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Optional
 
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-from pension.economy import rate_calibration, vasicek_params
+from pension.rates.calibration import calibration
 from pension.rates.wap import WAP_FLOOR, wap_formula
 
 
@@ -52,9 +52,20 @@ BASELINE = Params()
 
 
 # --- rates ---------------------------------------------------------------------------
+def vasicek_params(p):
+    """The parameters of Eqs. (1)-(2): kappa, sigma, y0 (last observed 10Y) from the
+    OLS calibration; s_term = SPREAD_10Y_SHORT, or the historical mean (10Y - 1Y);
+    theta = the OLS estimate, or LONG_RATE_P + s_term (LONG_RATE_P: long-run short rate)."""
+    cal = calibration()
+    v = cal["vasicek"]
+    spread = cal["spread"] if p.SPREAD_10Y_SHORT is None else p.SPREAD_10Y_SHORT
+    theta = v["theta"] if p.LONG_RATE_P is None else p.LONG_RATE_P + spread
+    return dict(kappa=v["kappa"], sigma=v["sigma"], theta=theta, y0=v["y0"], spread=spread)
+
+
 def premonths():
     """Simulated months from the last OLO observation to January of model year 0."""
-    return (13 - rate_calibration()["t0"].month) % 12
+    return (13 - calibration()["t0"].month) % 12
 
 
 def vasicek_month(y, eps, vp):
@@ -156,7 +167,7 @@ class State:
 def initial_state(eps_pre, p):
     """January of year 0 from the observed OLO history and the pre-roll months
     eps_pre (premonths(), n). Zero balances: a new member."""
-    vp, hist = vasicek_params(p), rate_calibration()["hist10Y"]
+    vp, hist = vasicek_params(p), calibration()["hist10Y"]
     n = eps_pre.shape[1]
     y = [np.full(n, h) for h in hist]
     for e in eps_pre:

@@ -7,11 +7,8 @@ import pytest
 from gymnasium.utils.env_checker import check_env
 
 from pension import baseline as b
-from pension.economy import rate_calibration, vasicek_params
-from pension.params import DEFAULT
-from pension.rates.accrual import closed_form_accrual
-from pension.rates.simulation import simulateVasicek
-from pension.rates.wap import computeWAPRate
+from pension.rates.calibration import calibration
+from pension.rates.wap import computeWAPRate, wap_formula
 
 p = b.BASELINE
 N = 200
@@ -110,24 +107,50 @@ def test_episode_return_equals_simulate_reward(noise):
         assert abs(total - sim["reward"][j]) <= 1e-12 * max(1.0, abs(total))
 
 
-def test_rates_match_the_rate_engine():
-    """The monthly 10Y equals simulateVasicek on the same normals, G_t equals
-    computeWAPRate on that path, and A(t,T) equals the engine's closed form."""
+def test_wap_calendar_matches_the_statute_window():
+    """G_t from the partial window sums H, K equals computeWAPRate (24 months ending
+    in May of the year before) on the same monthly path, observed history first."""
     n, pre = 5, b.premonths()
-    vp = vasicek_params(p)
-    y_eng = simulateVasicek(vp["kappa"], vp["theta"], vp["sigma"], vp["y0"], T=p.T + 1, n_paths=n,
-                            rng=np.random.default_rng(1))
-    eps = np.random.default_rng(1).standard_normal((12 * (p.T + 1), n))[:pre + 12 * p.T]
-    nz = b.Noise(eps, np.ones((p.T, n)))                   # u = 1: nobody leaves
-    states = run(nz, 0.5)
-    assert np.allclose([s.y for s in states], y_eng[pre::12][:p.T + 1], rtol=1e-12)
-    full = np.vstack([np.repeat(rate_calibration()["hist10Y"][:, None], n, 1), y_eng[1:]])
-    G = computeWAPRate(full, len(rate_calibration()["hist10Y"]) - 1 + pre, p.T)
-    assert np.array_equal(np.array([s.G for s in states[:p.T]]), G)
-    q = DEFAULT.replace(RATE_MODEL="vasicek")
-    for t in (0, 20, 44):
-        assert np.allclose(b.premium_accrual(states[t].y, t, vp, p),
-                           closed_form_accrual(t, b.short_rate(states[t].y, vp), q), rtol=1e-12)
+    vp = b.vasicek_params(p)
+    eps = np.random.default_rng(1).standard_normal((pre + 12 * p.T, n))
+    y = [np.full(n, vp["y0"])]
+    for e in eps:
+        y.append(b.vasicek_month(y[-1], e, vp))
+    states = run(b.Noise(eps, np.ones((p.T, n))), 0.5)
+    hist = calibration()["hist10Y"]
+    full = np.vstack([np.repeat(hist[:, None], n, 1), np.array(y[1:])])
+    assert np.array_equal(np.array([s.G for s in states[:p.T]]),
+                          computeWAPRate(full, len(hist) - 1 + pre, p.T))
+
+
+def test_premium_accrual_matches_monte_carlo():
+    """A(t,T) (Eq. 11) against the mean of exp(sum of monthly r / 12) over simulated
+    months, from y = y0 at t = 20: within 4 standard errors plus 0.1% discretisation."""
+    t, n = 20, 40000
+    vp = b.vasicek_params(p)
+    rng = np.random.default_rng(3)
+    y, I = np.full(n, vp["y0"]), np.zeros(n)
+    for _ in range(12 * (p.T - t)):
+        I += b.short_rate(y, vp) / 12
+        y = b.vasicek_month(y, rng.standard_normal(n), vp)
+    mc, A = np.exp(I), b.premium_accrual(vp["y0"], t, vp, p)
+    assert abs(mc.mean() / A - 1) < 4 * mc.std() / np.sqrt(n) / A + 1e-3
+
+
+FSMA_PUBLISHED = {2016: 1.75, 2017: 1.75, 2018: 1.75, 2019: 1.75, 2020: 1.75, 2021: 1.75,
+                  2022: 1.75, 2023: 1.75, 2024: 1.75, 2025: 2.50, 2026: 2.50}
+
+
+def test_wap_formula_reproduces_fsma_rates():
+    """The 85% rule on the NBB 10Y reproduces every FSMA rate 2016-2026 (2027 differs:
+    formula 2.75%, published 2.50%; docs/REVIEW.md C1)."""
+    from pension.rates.data import load_olo
+    df = load_olo()[0]
+    y = df["YIELD"].values / 100.0
+    for yr, pub in FSMA_PUBLISHED.items():
+        win = ((df["DATE"] >= f"{yr - 3}-06-01") & (df["DATE"] <= f"{yr - 1}-05-01")).values
+        assert win.sum() == 24
+        assert float(wap_formula(y[win].mean())) * 100 == pytest.approx(pub), yr
 
 
 def test_train_and_eval_noise_are_separate():
