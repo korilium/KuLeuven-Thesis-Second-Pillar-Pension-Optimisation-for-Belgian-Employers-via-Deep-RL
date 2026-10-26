@@ -2,7 +2,7 @@
 
 The baseline as `pension/baseline.py` implements it: one member, a fixed premium, and each year the agent chooses the share of that premium that goes to Branch 21. It is a fully observed MDP. Every equation below names the function that implements it.
 
-The baseline's DP reference is `pension/baseline_dp.py` (Sec. 7). Other rungs: the tabular rung (`pension/envs/tabular.py`), the constant-rate single-vehicle DP (`pension/dp.py`, the first-principles reference), and the pre-October-2026 model frozen in `pension/legacy_v1/` (its model document is `pension/legacy_v1/MODEL.md`).
+The baseline's DP reference is `pension/baseline_dp.py` (Sec. 7). Also kept: the tabular rung (`pension/envs/tabular.py`) and the pre-October-2026 model frozen in `pension/legacy_v1/` (its model document is `pension/legacy_v1/MODEL.md`).
 
 ## 1. Units and timing
 
@@ -78,7 +78,6 @@ $$
 
 All parameters are in `baseline.Params`; the default is `BASELINE`. The statutory WAP constants live in `pension/rates/wap.py`.
 
-<!-- gen:defaults -->
 | symbol | field | default |
 |---|---|---|
 | $T$ | `T` | 45 |
@@ -96,11 +95,8 @@ All parameters are in `baseline.Params`; the default is `BASELINE`. The statutor
 | long-run short rate | `LONG_RATE_P` | None |
 | $s_{\text{term}}$ | `SPREAD_10Y_SHORT` | None |
 | seeds | `TRAIN_SEED`, `EVAL_SEED` | 2026, 7 |
-<!-- /gen -->
 
-<!-- gen:vasicek_params -->
 Calibration (OLS on 321 monthly 10Y observations up to Sep 2026): $\kappa$ = 0.1104, $\theta$ = 2.23% (`LONG_RATE_P` = None: the OLS estimate; long-run short rate 0.95%), $\sigma$ = 0.61%, $y_0$ = 4.12%; $s_{\text{term}}$ = 128.4 bp (mean 10Y - 1Y over the same months).
-<!-- /gen -->
 
 ## 7. DP reference (`pension/baseline_dp.py`)
 

@@ -13,9 +13,7 @@ from 2016 to 2026 (1.75% to 2024, 2.50% for 2025 and 2026); it gives 2.75% for
 reference series on the FSMA side.
 
 The baseline (pension/baseline.py) accrues ONE vertical WAP liability at the current
-G_t. Under the horizontal method of legacy_v1 a contribution keeps the rate in
-force when it was paid until retirement; that bookkeeping lives in the liability
-ledger (pension.dynamics.HorizontalLedger), not here. This module only produces the rate.
+G_t. This module only produces the rate.
 """
 
 import numpy as np

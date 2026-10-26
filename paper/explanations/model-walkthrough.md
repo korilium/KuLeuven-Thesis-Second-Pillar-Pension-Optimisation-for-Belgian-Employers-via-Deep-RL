@@ -1,5 +1,7 @@
 # Model walkthrough: from the OLO data to the objective, and one career by hand
 
+> *The code this note describes (the DP stack and its generator/suite scripts) was removed in the October 2026 clean-up; it is in tag `v2-before-cleanup`.*
+
 > This note walks through the DP stack and the pre-October-2026 rate mode, frozen in `pension/legacy_v1/` (contribution-level action, horizontal ledger, $\sigma_R$ shock, $(t,F,\rho)$ state). The baseline is specified in `docs/MODEL.md`.
 
 This note follows the model in its **canonical configuration**: `RATE_MODEL = "vasicek"`, with the 10Y OLO modelled directly and calibrated on its history, and both legs of the objective valued at the **retirement date** under the real-world measure.

@@ -1,5 +1,7 @@
 # The Scenario Battery — What Each Regime Is, and Why It Was Chosen
 
+> *The code this note describes (the DP stack and its generator/suite scripts) was removed in the October 2026 clean-up; it is in tag `v2-before-cleanup`.*
+
 `experiments/dynpro/scenario_suite.py` runs a fixed set of named parameter regimes rather
 than a sweep. This note explains the selection: what each group tests, why those
 particular configurations, and what the model actually does in each.

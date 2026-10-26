@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "DynPro: current file",
+      "name": "Python: current file",
       "type": "debugpy",
       "request": "launch",
       "program": "${file}",
@@ -11,77 +11,25 @@
       "justMyCode": true
     },
     {
-      "name": "DynPro: report cohort",
+      "name": "Baseline report",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/experiments/dynpro/report.py",
-      "args": [
-        "cohort"
-      ],
+      "program": "${workspaceFolder}/experiments/baseline_report.py",
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "justMyCode": true
     },
     {
-      "name": "DynPro: report diagnostics",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/experiments/dynpro/report.py",
-      "args": [
-        "diagnostics"
-      ],
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-      "justMyCode": true
-    },
-    {
-      "name": "DynPro: suite section (prompts for name)",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/experiments/dynpro/${input:suiteFile}",
-      "args": [
-        "${input:section}"
-      ],
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-      "justMyCode": true
-    },
-    {
-      "name": "pytest: all fast tests",
+      "name": "pytest: all tests",
       "type": "debugpy",
       "request": "launch",
       "module": "pytest",
       "args": [
-        "-q",
-        "-m",
-        "not slow"
+        "-q"
       ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "justMyCode": true
-    }
-  ],
-  "inputs": [
-    {
-      "id": "suiteFile",
-      "type": "pickString",
-      "description": "Which suite?",
-      "options": [
-        "contribution_schedule_suite.py",
-        "sensitivity_suite.py",
-        "lambda_dial_suite.py",
-        "scenario_suite.py",
-        "benchmark_suite.py",
-        "rates_suite.py",
-        "objective_suite.py"
-      ],
-      "default": "contribution_schedule_suite.py"
-    },
-    {
-      "id": "section",
-      "type": "promptString",
-      "description": "Section to run (e.g. signal, baseline, pareto). Leave blank to run all - slow.",
-      "default": "signal"
     }
   ]
 }
