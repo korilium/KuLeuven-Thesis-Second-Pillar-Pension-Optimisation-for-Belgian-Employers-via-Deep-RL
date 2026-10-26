@@ -6,20 +6,13 @@
    mean i_t - G_t, mean r_t.
 2. Constant policies alpha = 1, 0, 0.5: J, both legs, mean shortfall and its
    frequency, mean premium cost.
-3. Removing sigma_R: legacy_v1 at the same premium, all in Branch 21, with and
-   without its reserve shock, next to the baseline at alpha = 1 with the tariff
-   floor switched off (I_TARIFF = -1, so i_t = mu_t as in legacy_v1).
-4. The DP (pension/baseline_dp.py, 20 000 training paths): its policy scored out
+3. The DP (pension/baseline_dp.py, 20 000 training paths): its policy scored out
    of sample, its in-sample V_0, and its mean alpha by year.
 """
-import dataclasses
-
 import numpy as np
 
 from pension import baseline as b
 from pension import baseline_dp as bdp
-import pension.legacy_v1.dp as ldp
-from pension.legacy_v1.params import DEFAULT as LEGACY
 
 N = 20000
 
@@ -43,28 +36,6 @@ def policies():
               f"{r['shortfall_freq']:.4f}      {r['premium_cost']:.4f}")
 
 
-def legacy_at_fixed_premium(sigma_r):
-    """legacy_v1, vasicek, constant contribution a = C / GAMMA (all in Branch 21), a
-    near-empty entry (R0 = L0 = 1e-9, S0 = 1), its own book yield and horizontal ledger."""
-    p = LEGACY.replace(RATE_MODEL="vasicek", SIGMA_R_RATES=sigma_r)
-    Fg, rg = ldp.make_F_grid(n=31), ldp.make_rho_grid(n=25)
-    pol = ldp.const_policy(b.BASELINE.C / p.GAMMA, p.T, len(Fg), len(rg))
-    s = ldp.simulate(pol, Fg, rg, R0=1e-9, L0=1e-9, S0=1.0, n_paths=N, seed=b.BASELINE.EVAL_SEED, p=p)
-    ST = (1 + p.W) ** p.T
-    short = np.maximum(s["L_T"] - s["R_T"], 0.0) / ST
-    return s["benefit"], short.mean(), (short > 0).mean()
-
-
-def sigma_r_effect():
-    print("model                                   employee  shortfall  P(short>0)")
-    for name, sig in (("legacy_v1, sigma_R = 0.05 (as frozen)", 0.05), ("legacy_v1, sigma_R = 0", 0.0)):
-        e, sh, f = legacy_at_fixed_premium(sig)
-        print(f"{name:<40}{e:+.4f}   {sh:.5f}    {f:.4f}")
-    r = b.simulate(const(1.0), n=N, p=dataclasses.replace(b.BASELINE, I_TARIFF=-1.0))
-    print(f"{'baseline, alpha = 1, no tariff floor':<40}{r['employee']:+.4f}   {r['shortfall']:.5f}    "
-          f"{r['shortfall_freq']:.4f}")
-
-
 def dp_section():
     sol = bdp.solve(n=20000)
     pol = bdp.policy(sol)
@@ -84,5 +55,4 @@ def dp_section():
 if __name__ == "__main__":
     rates_table(); print()
     policies(); print()
-    sigma_r_effect(); print()
     dp_section()

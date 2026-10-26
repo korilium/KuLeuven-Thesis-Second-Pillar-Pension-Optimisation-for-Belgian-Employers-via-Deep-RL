@@ -44,7 +44,7 @@ The model is now the bare-bone baseline of `pension/baseline.py`, specified in `
 | 0 | −0.2166 | −0.4319 | 0.00120 | 1.2% | 0.5437 |
 | 0.5 | −0.2755 | −0.5497 | 0.00136 | 1.7% | 0.5437 |
 
-**Removing $\sigma_R$:** the same 5% premium, all in Branch 21.
+**Removing $\sigma_R$:** the same 5% premium, all in Branch 21. (Produced by `experiments/baseline_report.py` as it stood at tag `v2-before-cleanup`; the current report is baseline-only.)
 
 | model | employee leg | mean shortfall / $S_T$ | P(shortfall > 0) |
 |---|---|---|---|
