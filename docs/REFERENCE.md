@@ -33,7 +33,7 @@ every parameter of the model, as ONE immutable object.
 
 ### `pension.objective` (pension/objective.py)
 
-the value function of the funding problem, as swappable parts.
+the reward function of the funding problem (constant-rate DP rung), as swappable parts.
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
@@ -98,7 +98,7 @@ the economic scenario (exogenous world).
 
 ### `pension.dp` (pension/dp.py)
 
-Rung-2 benchmark: DP oracle over (t, F, rho).
+Rung-2 benchmark: the first-principles DP reference over (t, F, rho), for the constant-rate single-vehicle rung.
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
@@ -305,7 +305,7 @@ the real-world accrual factor of a premium paid at t until retirement T.
 | `RR_LEGAL` | `0.43` | - | first-pillar replacement rate | dp, simulate, env | no |
 | `RR_TARGET` | `0.7` | - | total-adequacy target | dp, simulate, env | no |
 | `SATIATE` | `False` | bool | cap RR at the target in crra() | objective.crra | no |
-| `OBJECTIVE` | `'baseline'` | name | value function in objective.OBJECTIVES | dp, env | no |
+| `OBJECTIVE` | `'baseline'` | name | reward function in objective.OBJECTIVES | dp, env | no |
 | `BETA` | `0.01` | - | policy extraction temperature (relative) | dp._solve | no |
 | `RATE_MODEL` | `'constant'` | name | rate regime | economy, numeraire, dp, env | no |
 | `RATE_DT` | `0.08333333333333333` | years | rate time step (must be 1/12: the data are monthly) | economy | no (not free) |

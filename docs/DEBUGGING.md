@@ -65,14 +65,14 @@ r = dp.simulate(pol, Fg, rg, R0=R0, L0=L0, S0=S0, n_paths=200, seed=7, p=p)
 <!-- gen:bp_constant -->
 | # | where | inspect | expect |
 |---|---|---|---|
-| 1 | `pension/dp.py:507` | `exo.zR[0]`, `exo.zL[0]`, `exo.u[0]`, `exo.r[0]` | `exo.r` = `SHORT_RATE` everywhere; `exo.G is None` (vertical ledger) |
-| 2 | `pension/dp.py:517` | `t`, `F`, `rho`, `a` | `F = R/L`, `rho = S/L`; a in the band |
-| 3 | `pension/dp.py:522` | `numeraire.premium_factor(t, r_t, p)`, `obj.contribution(a, t, p)` | factor e^{(r+s)(T-t)} (t = 0: table below); reward of a = 1 at t = 0: table below |
-| 4 | `pension/dynamics.py:172` | `c`, `state.S` | c = a Γ S; 0 for paths that have left |
-| 5 | `pension/dynamics.py:182` | `state.R` before/after, `mu`, `sig`, `drift` | in force: (R + c) e^{μ - σ_R²/2 + σ_R z_R} (mean e^μ); paid-up: R e^{μ} |
-| 6 | `pension/dynamics.py:102` | `self.L`, `g` | (L + c) e^{G - σ_L²/2 + σ_L z_L} (mean e^G); frozen when absent |
-| 7 | `pension/dynamics.py:185` | `exo.u[t]`, `hazard(t)`, `lv` | leaves iff u < h(t); `leave_t` becomes t + 1 |
-| 8 | `pension/dp.py:524` | `state.F`, `state.rho`, `end` | after one step: F' = dp.F_next(F, aΓρ, zR, zL, p), ρ' = dp.rho_next(...) (identity, table below); paid-up roll-forward F e^{μm}, ρ(1+W)^m |
+| 1 | `pension/dp.py:509` | `exo.zR[0]`, `exo.zL[0]`, `exo.u[0]`, `exo.r[0]` | `exo.r` = `SHORT_RATE` everywhere; `exo.G is None` (vertical ledger) |
+| 2 | `pension/dp.py:519` | `t`, `F`, `rho`, `a` | `F = R/L`, `rho = S/L`; a in the band |
+| 3 | `pension/dp.py:524` | `numeraire.premium_factor(t, r_t, p)`, `obj.contribution(a, t, p)` | factor e^{(r+s)(T-t)} (t = 0: table below); reward of a = 1 at t = 0: table below |
+| 4 | `pension/dynamics.py:176` | `c`, `state.S` | c = a Γ S; 0 for paths that have left |
+| 5 | `pension/dynamics.py:186` | `state.R` before/after, `mu`, `sig`, `drift` | in force: (R + c) e^{μ - σ_R²/2 + σ_R z_R} (mean e^μ); paid-up: R e^{μ} |
+| 6 | `pension/dynamics.py:106` | `self.L`, `g` | (L + c) e^{G - σ_L²/2 + σ_L z_L} (mean e^G); frozen when absent |
+| 7 | `pension/dynamics.py:189` | `exo.u[t]`, `hazard(t)`, `lv` | leaves iff u < h(t); `leave_t` becomes t + 1 |
+| 8 | `pension/dp.py:526` | `state.F`, `state.rho`, `end` | after one step: F' = dp.F_next(F, aΓρ, zR, zL, p), ρ' = dp.rho_next(...) (identity, table below); paid-up roll-forward F e^{μm}, ρ(1+W)^m |
 <!-- /gen -->
 
 ### (b) One career, one year, vasicek
@@ -80,11 +80,11 @@ r = dp.simulate(pol, Fg, rg, R0=R0, L0=L0, S0=S0, n_paths=200, seed=7, p=p)
 <!-- gen:bp_vasicek -->
 | # | where | inspect | expect |
 |---|---|---|---|
-| 1 | `pension/economy.py:265` | `vp`, `y10_m[0]`, `r_m[0]` | `y10_m[0]` = last observed 10Y; `r_m = y10_m - spread`; `pre` = months to the first 1 January |
-| 2 | `pension/economy.py:281` | `G_[0]`, `G_[1]` | G_0 = 2.75% (1 January 2027, observed window Jun 2024 - May 2026); later years on the 25 bp grid in [1.75%, 3.75%] |
-| 3 | `pension/economy.py:285` | `acc_[0]` | exp(Σ of the 12 monthly r·dt) |
-| 4 | `pension/dynamics.py:86` | `r[0]`, `acc[0]`, `G[0]`, `mu[0]` | the scenario's annual r, acc, G, μ for these paths |
-| 5 | `pension/dynamics.py:126` | `self.Lv[:t+2]`, `self.lock[:t+2]` | a new vintage locked at G_t; every in-force vintage grows at its own lock |
+| 1 | `pension/economy.py:266` | `vp`, `y10_m[0]`, `r_m[0]` | `y10_m[0]` = last observed 10Y; `r_m = y10_m - spread`; `pre` = months to the first 1 January |
+| 2 | `pension/economy.py:282` | `G_[0]`, `G_[1]` | G_0 = 2.75% (1 January 2027, observed window Jun 2024 - May 2026); later years on the 25 bp grid in [1.75%, 3.75%] |
+| 3 | `pension/economy.py:286` | `acc_[0]` | exp(Σ of the 12 monthly r·dt) |
+| 4 | `pension/dynamics.py:90` | `r[0]`, `acc[0]`, `G[0]`, `mu[0]` | the scenario's annual r, acc, G, μ for these paths |
+| 5 | `pension/dynamics.py:130` | `self.Lv[:t+2]`, `self.lock[:t+2]` | a new vintage locked at G_t; every in-force vintage grows at its own lock |
 | 6 | `pension/rates/accrual.py:67` | `r_t`, `y_t`, `mean`, `tau` | A(0,T; r_0) (table below); = numeraire.premium_factor(0, r_0, p) |
 | 7 | `pension/legacy_v1/env.py:106` | the 6 components | r_t = y_t - spread; at reset: obs[5] = r_0 (table below) |
 | 8 | `pension/legacy_v1/env.py:122` | `reward`, `r_t` | -(1-λ) a Γ (1+W)^{-(T-t)} A(t,T; r_t) |
@@ -97,12 +97,12 @@ r = dp.simulate(pol, Fg, rg, R0=R0, L0=L0, S0=S0, n_paths=200, seed=7, p=p)
 |---|---|---|---|
 | 1 | `pension/rates/data.py:77` | `dfYield`, `cache` | the cached NBB vintage (block `calibration` of ARCHITECTURE.md) |
 | 2 | `pension/rates/calibration.py:41` | `a`, `b`, `dt` | kappa = -b/dt, theta = -a/b |
-| 3 | `pension/economy.py:73` | `df10Y`, `short_label` | computed once per process |
-| 4 | `pension/economy.py:172` | `spread`, `p.LONG_RATE_P` | theta = LONG_RATE_P + spread if set; spread = historical mean (10Y - 1Y) if SPREAD_10Y_SHORT is None |
+| 3 | `pension/economy.py:74` | `df10Y`, `short_label` | computed once per process |
+| 4 | `pension/economy.py:173` | `spread`, `p.LONG_RATE_P` | theta = LONG_RATE_P + spread if set; spread = historical mean (10Y - 1Y) if SPREAD_10Y_SHORT is None |
 | 5 | `pension/rates/simulation.py:58` | `paths[t]`, `eps[t]` | exact OU step |
-| 6 | `pension/rates/wap.py:64` | `k`, `lo`, `end` | window ends WAP_LAG = 8 months before the year's 1 January: May of the year before |
-| 7 | `pension/dp.py:335` | `ce`, `prem[:3]` | CE moments and the scenario-mean premium factor (walkthrough block `ce`) |
-| 8 | `pension/dp.py:534` | `benefit_paths`, `cost` | joint = mean of the per-path env returns (contract C1) |
+| 6 | `pension/rates/wap.py:65` | `k`, `lo`, `end` | window ends WAP_LAG = 8 months before the year's 1 January: May of the year before |
+| 7 | `pension/dp.py:337` | `ce`, `prem[:3]` | CE moments and the scenario-mean premium factor (walkthrough block `ce`) |
+| 8 | `pension/dp.py:536` | `benefit_paths`, `cost` | joint = mean of the per-path env returns (contract C1) |
 <!-- /gen -->
 
 ## 4. Values and identities to expect
