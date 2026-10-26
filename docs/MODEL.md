@@ -2,7 +2,7 @@
 
 The baseline as `pension/baseline.py` implements it: one member, a fixed premium, and each year the agent chooses the share of that premium that goes to Branch 21. It is a fully observed MDP. Every equation below names the function that implements it.
 
-Other rungs: the tabular rung (`pension/envs/tabular.py`), the constant-rate single-vehicle DP (`pension/dp.py`, the first-principles reference), and the pre-October-2026 model frozen in `pension/legacy_v1/` (its model document is `pension/legacy_v1/MODEL.md`).
+The baseline's DP reference is `pension/baseline_dp.py` (Sec. 7). Other rungs: the tabular rung (`pension/envs/tabular.py`), the constant-rate single-vehicle DP (`pension/dp.py`, the first-principles reference), and the pre-October-2026 model frozen in `pension/legacy_v1/` (its model document is `pension/legacy_v1/MODEL.md`).
 
 ## 1. Units and timing
 
@@ -44,6 +44,7 @@ Nine variables (`State.obs`, which divides $t$, $H$ and $K$ by $T$, 20 and 8). E
 | (9) | $h(t) = h_\infty + (h_0 - h_\infty)\,e^{-t/\tau_h}$ | `hazard` |
 | (10) | reward at $T$ (Sec. 4) | `reward_legs` |
 | (11) | $A(t,T) = \mathbb E^P_t[e^{\int_t^T r_u du}] = \exp\!\big(\theta\tau + (y_t-\theta)B + \tfrac12 V - s_{\text{term}}\tau\big)$, with $\tau = T-t$, $B = \tfrac{1-e^{-\kappa\tau}}{\kappa}$, $V = \tfrac{\sigma^2}{\kappa^2}(\tau - B) - \tfrac{\sigma^2}{2\kappa}B^2$ | `premium_accrual` |
+| (12) | DP: $Q_t(s,\alpha_k) = \mathbb E\big[(1-h(t))\,V_{t+1}(s') + h(t)\,\Phi_{t+1}(s')\big]$, $V_t = \max_k Q_t$, $V_T$ = reward (Sec. 7) | `baseline_dp.solve` |
 
 In salary units, (6) and (8) are divided by $1+W$. Out of force, $P_t = 0$, $L$ accrues at rate 0, and $R^{21}$ still accrues at $i_t$. The year (premium, accrual, 12 months, exit) is `step`; January of year 0 comes from the observed history plus the pre-roll months (`initial_state`).
 
@@ -100,3 +101,20 @@ All parameters are in `baseline.Params`; the default is `BASELINE`. The statutor
 <!-- gen:vasicek_params -->
 Calibration (OLS on 321 monthly 10Y observations up to Sep 2026): $\kappa$ = 0.1104, $\theta$ = 2.23% (`LONG_RATE_P` = None: the OLS estimate; long-run short rate 0.95%), $\sigma$ = 0.61%, $y_0$ = 4.12%; $s_{\text{term}}$ = 128.4 bp (mean 10Y - 1Y over the same months).
 <!-- /gen -->
+
+## 7. DP reference (`pension/baseline_dp.py`)
+
+Backward induction on the **exact** nine-variable state. A grid over nine dimensions cannot run (about $10^8$ points per year), so the value function is fitted by regression on simulated states (regression Monte Carlo):
+
+$$
+Q_t(s,\alpha_k) = \mathbb E\big[(1-h(t))\,V_{t+1}(s') + h(t)\,\Phi_{t+1}(s') \,\big|\, s, \alpha_k\big],\qquad V_t(s) = \max_k Q_t(s,\alpha_k),\qquad V_T = \text{reward at } T. \tag{12}
+$$
+
+- **Next state.** $s'$ is the state after year $t$, from `baseline.step` itself.
+- **Exit branch.** $\Phi_{t+1}$ is the value of leaving at $\tau = t+1$. Nothing is decided after exit, so it is rolled forward exactly: $L$ and $N$ are fixed in money, and $R^{21}$ grows by $\prod_{s>t} e^{i_s}$ (`paidup_growth`).
+- **Training states.** Paths are simulated in force with exploratory actions on the action grid (11 points). The exit hazard depends on $t$ only, so the in-force state distribution is the same with or without exit.
+- **Fit.** For each year and action, the target is realised on the same noise for every action. $Q_t(\cdot,\alpha_k)$ is its least-squares fit on `features(s)`. The features are the state, the projected terminal $L$ and $R$ at the current rates, the reward legs there, and all pairwise products.
+- **Policy.** `policy(sol)` is the greedy $\alpha$, a function of the observation (the exact state) only.
+
+This is the MDP itself: no state variable is dropped. The only error is the fit of $V$. The policy is scored out of sample by `simulate()`, which gives a lower bound on the optimum. The in-sample $V_0$ is reported next to it.
+

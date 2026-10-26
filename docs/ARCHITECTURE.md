@@ -16,6 +16,7 @@ Three rungs, each validating the next:
 |---|---|---|---|
 | 1 | `pension/envs/tabular.py` | tabular Monte Carlo control on a binary contribute/skip decision, deterministic or one shock | that an agent recovers a known optimum (sweep / local-search benchmarks) |
 | 2 | `pension/dp.py` | dynamic programming on the reduced state (t, F, ρ), with Gauss-Hermite quadrature and churn | the first-principles reference: the exact optimum at constant rates; a certainty-equivalent policy under stochastic rates |
+| 2b | `pension/baseline_dp.py` | DP on the baseline's exact state, value function fitted by regression | the reference a learned baseline policy is checked against |
 | 3 | `pension/baseline.py` (legacy: `pension/legacy_v1/env.py`) | baseline: the Branch 21 share MDP. Legacy: a gymnasium environment on the same dynamics and objective as the DP | that a learned policy is scored on exactly the DP's scale (the episode-return contract); RL can use the information the DP cannot carry (rate history, ledger mix) |
 
 The canonical configuration:

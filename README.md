@@ -22,6 +22,7 @@ pytest -m "not slow"          # about 10 s; plain `pytest` also runs the slow ch
 | Path | What it is |
 |---|---|
 | `pension/baseline.py` | The baseline: parameters (`BASELINE`), the equations of `docs/MODEL.md`, `simulate()` and `PensionEnv`. |
+| `pension/baseline_dp.py` | The baseline's DP reference: backward induction on the exact state with a fitted value function (`docs/MODEL.md` Sec. 7). |
 | `pension/legacy_v1/` | The pre-October-2026 model, self-contained and frozen (see its README). |
 | `pension/params.py` | `Params` of the DP and tabular rungs: every parameter in one immutable object. `DEFAULT` is the committed calibration; vary it with `DEFAULT.replace(ETA=3)`. |
 | `pension/objective.py` | The reward function of the DP rung as swappable parts: employee utility, shortfall cost, contribution cost, leg weights. Comes with a registry of named objectives. |

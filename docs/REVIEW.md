@@ -56,6 +56,20 @@ The model is now the bare-bone baseline of `pension/baseline.py`, specified in `
 - Within legacy_v1, removing the shock cuts the expected shortfall by 43%.
 - The remaining gap to the baseline comes from the vertical liability at the current $G_t$ (against horizontal vintages), the exponential book-yield filter and the zero entry balances.
 
+**DP reference** (`pension/baseline_dp.py`, the exact nine-variable state, value function fitted by regression on 20 000 training paths; scored on 20 000 evaluation careers):
+
+| | value |
+|---|---|
+| $J$ of the greedy policy (out of sample) | −0.2027 |
+| employee leg | −0.4052 |
+| mean shortfall / $S_T$ | 0.00016 |
+| P(shortfall > 0) | 0.27% |
+| in-sample $V_0$ | −0.2150 |
+
+- The policy beats the best constant policy ($\alpha \equiv 0$: −0.2166).
+- Mean $\alpha$ in force by year: 0.00 (year 0), 0.17 (5), 0.50 (10), 0.53 (20), 0.47 (30), 0.50 (44). Everything goes to Branch 23 while the 10Y is high early in the career; later the premium is split about evenly, as the yield falls towards $\theta$ and the tariff floor makes Branch 21 the better hedge of $G_t$.
+- The fitted $V_0$ moves by about 0.01 with the number of training paths (−0.199 at 4 000, −0.215 at 20 000), while the policy's $J$ is stable (−0.2047, −0.2033). Read the policy's $J$, not $V_0$.
+
 **Future work (not built).**
 - horizontal liability ledger;
 - per-vintage Branch 21 crediting;

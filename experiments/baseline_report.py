@@ -9,12 +9,15 @@
 3. Removing sigma_R: legacy_v1 at the same premium, all in Branch 21, with and
    without its reserve shock, next to the baseline at alpha = 1 with the tariff
    floor switched off (I_TARIFF = -1, so i_t = mu_t as in legacy_v1).
+4. The DP (pension/baseline_dp.py, 20 000 training paths): its policy scored out
+   of sample, its in-sample V_0, and its mean alpha by year.
 """
 import dataclasses
 
 import numpy as np
 
 from pension import baseline as b
+from pension import baseline_dp as bdp
 import pension.legacy_v1.dp as ldp
 from pension.legacy_v1.params import DEFAULT as LEGACY
 
@@ -62,7 +65,24 @@ def sigma_r_effect():
           f"{r['shortfall_freq']:.4f}")
 
 
+def dp_section():
+    sol = bdp.solve(n=20000)
+    pol = bdp.policy(sol)
+    r = b.simulate(pol, n=N)
+    print(f"DP policy: J {r['joint']:+.4f}, employee {r['employee']:+.4f}, shortfall {r['shortfall']:.5f}, "
+          f"P(short>0) {r['shortfall_freq']:.4f}; in-sample V_0 {sol['V0']:+.4f}")
+    noise = b.draw_noise(N, b.BASELINE.EVAL_SEED)
+    s = b.initial_state(noise.eps[:b.premonths()], b.BASELINE)
+    print("year  mean alpha (in force)")
+    for t in range(b.BASELINE.T):
+        a = pol(s.obs(b.BASELINE))
+        if t in (0, 5, 10, 20, 30, 44):
+            print(f"{t:>4}  {a[s.inforce].mean():.3f}")
+        s = b.step(s, a, *noise.year(t), b.BASELINE)
+
+
 if __name__ == "__main__":
     rates_table(); print()
     policies(); print()
-    sigma_r_effect()
+    sigma_r_effect(); print()
+    dp_section()
