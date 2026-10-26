@@ -24,6 +24,7 @@ include = ["pension*"]
 
 [tool.setuptools.package-data]
 "pension.rates" = ["data/*.csv"]
+"pension.legacy_v1.rates" = ["data/*.csv"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
