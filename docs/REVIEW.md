@@ -6,7 +6,7 @@ The model is now the bare-bone baseline of `pension/baseline.py`, specified in `
 
 **Decisions taken.**
 - Book yield: an exponential filter with monthly weight $w = 1/48$ (mean age about 4 years, like the former 8-year window). It replaces the 96-month rolling mean, which would have added 95 monthly variables to the exact state.
-- Defaults: $c = 5\%$ (`economy.plan_fixed`), $m = 0$ (= −`BOOK_SPREAD`), $i^{\text{tariff}} = 1\%$, `LONG_RATE_P = None`, and a new member starting with zero balances.
+- Defaults (confirmed): $c = 5\%$ (`economy.plan_fixed`), $m = 0$ (= −`BOOK_SPREAD`), $i^{\text{tariff}} = 1\%$, `LONG_RATE_P = None`, and a new member starting with zero balances.
 - The premium cost carries no Γ: $c$ is a share of salary.
 
 **C1. WAP formula** (`rates/wap.py`): $0.85\times$ the 24-month mean of the 10Y ending in May of the year before, rounded to the nearest 25 bp, clipped to [1.75%, 3.75%], fixed on 1 January.

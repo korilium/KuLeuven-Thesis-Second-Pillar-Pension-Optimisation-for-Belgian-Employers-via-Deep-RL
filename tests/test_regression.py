@@ -1,9 +1,8 @@
 """The refactor contract: the current code reproduces the golden outputs recorded
 from the pre-refactor model (tests/regression/make_golden.py).
 
-Scope: the DP stack (pension.dp / dynamics / economy) at constant rates, the
-single-vehicle rung. Its rate mode is tested on pension.legacy_v1 (tests/test_legacy_v1.py);
-the baseline in tests/test_baseline.py.
+Scope: the DP stack. Constant-rate cases run pension.dp; the rate-mode cases run
+both pension.dp and its frozen copy pension.legacy_v1.dp.
 
 Policies and every action-valued output must be IDENTICAL; values may move by
 floating-point reassociation only (<= 1e-12 relative).
@@ -20,21 +19,23 @@ import make_golden as golden   # noqa: E402
 RTOL = 1e-12
 
 
-def _current(model, objective):
-    """The same case through the CURRENT API. This adapter is the one place that
-    follows the refactor; the recorded files never change. Constant-rate cases run
-    the DP rung (pension.dp); rate-mode cases run the frozen pension.legacy_v1.dp."""
-    if model == "constant":
-        import pension.dp as dp
-    else:
-        import pension.legacy_v1.dp as dp
-    return golden.run(dp, model, objective)
+def _current(model, objective, pkg):
+    """The same case through the CURRENT API of `pkg` (pension or pension.legacy_v1).
+    This adapter is the one place that follows the refactor; the recorded files
+    never change."""
+    import importlib
+    return golden.run(importlib.import_module(f"{pkg}.dp"), model, objective)
 
 
-@pytest.mark.parametrize("model,objective", golden.CASES, ids=[f"{m}-{o}" for m, o in golden.CASES])
-def test_matches_golden(model, objective):
+# constant-rate cases: the DP rung; rate-mode cases: pension.dp AND the frozen legacy_v1.dp
+CASES = [(m, o, pkg) for m, o in golden.CASES
+         for pkg in (["pension"] if m == "constant" else ["pension", "pension.legacy_v1"])]
+
+
+@pytest.mark.parametrize("model,objective,pkg", CASES, ids=[f"{m}-{o}-{k}" for m, o, k in CASES])
+def test_matches_golden(model, objective, pkg):
     ref = np.load(golden.path(model, objective))
-    cur = _current(model, objective)
+    cur = _current(model, objective, pkg)
     assert set(ref.files) == set(cur), set(ref.files) ^ set(cur)
     for k in ref.files:
         a, b = ref[k], np.asarray(cur[k])

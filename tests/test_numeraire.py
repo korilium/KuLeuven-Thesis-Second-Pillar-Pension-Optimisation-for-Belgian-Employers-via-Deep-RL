@@ -1,7 +1,7 @@
 """The valuation date (pension/numeraire.py, VALUATION_DATE): stage-3 checks a-e.
 
 Scope: the DP stack (pension.dp / dynamics / economy) at constant rates, the
-single-vehicle rung. Its rate mode is tested on pension.legacy_v1 (tests/test_legacy_v1.py);
+single-vehicle rung. Its rate mode is tested in tests/test_dp_rate_mode.py (= legacy_v1);
 the baseline in tests/test_baseline.py."""
 import numpy as np
 import pytest
