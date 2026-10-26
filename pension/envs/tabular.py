@@ -48,13 +48,25 @@ contributions — both need Monte Carlo averaging at the stochastic rung.
 """
  
 # ---------------------------------------------------------------------------
-# Parameters -- sourced from pension.economy (the shared economic scenario).
-# They are imported as module globals on purpose: every function below reads
-# them as bare globals, and experiments/tabular/run_tabular.apply_config() rebinds
-# them here via env.__dict__.update(cfg) to swap in a whole economy per config.
+# Parameters -- module globals on purpose: every function below reads them as
+# bare globals, and experiments/tabular/run_tabular.apply_config() rebinds them
+# here via env.__dict__.update(cfg) to swap in a whole economy per config.
 # ---------------------------------------------------------------------------
-from pension.economy import T, G, MU, LAMBDA, S0, W, DISC, SIGMA, N_EVAL
-from pension.economy import plan_fixed, plan_step, plan_age
+T, G, MU, W, S0 = 45, 0.03, 0.03, 0.025, 1.0
+LAMBDA, DISC, SIGMA, N_EVAL = 0.5, 0.05, 0.05, 2000
+
+
+# --- plan rules: c(t, S) -> premium ----------------------------------------
+def plan_fixed(rate=0.05):
+    return lambda t, S: rate * S
+
+def plan_step(rate_low=0.04, rate_high=0.10, ceiling=1.5):
+    # tranche-based, like real plans split around the pension ceiling
+    return lambda t, S: rate_low * min(S, ceiling) + rate_high * max(S - ceiling, 0.0)
+
+def plan_age(rate0=0.03, step=0.01, band=10):
+    # banded age scale; keep step within the WAP non-discrimination bound
+    return lambda t, S: (rate0 + step * (t // band)) * S
 
 ALPHA = 0.02    # WEIGHT DECAY (agent hyperparameter, not part of the economy)
 
@@ -63,10 +75,8 @@ _RESULTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", 
 
 #stochastic paths
 
-# NOTE: defined here, not imported from economy, on purpose. A function reads
-# globals from the module it was DEFINED in, so this must live in basicEnv for
-# apply_config()'s `env.SIGMA = ...` patch to reach it. Importing economy's
-# version would silently keep drawing noise after a SIGMA=0 config.
+# NOTE: a function reads globals from the module it was DEFINED in, so this must
+# live here for apply_config()'s `env.SIGMA = ...` patch to reach it.
 def draw_shock_batch(n_paths=N_EVAL, seed=12345):
     """One frozen batch of noise paths (SAA + common random numbers).
     None at SIGMA = 0 -> deterministic single-episode evaluation."""
@@ -96,10 +106,6 @@ def run_batch(policy, plan, shocks):
     return values
 
 
-# --- plan rules: c(t, S) -> premium ---
-# plan_fixed / plan_step / plan_age are imported from economy.py above; they
-# close over their own arguments and read no module globals, so sourcing them
-# from there is safe under apply_config()'s namespace patching.
 
 
  # ---------------------------------------------------------------------------
