@@ -1,7 +1,8 @@
 """
 economy.py -- the economic scenario (exogenous world).
  
-Shared by the tabular rung and the DP oracle. Holds:
+Shared by the tabular rung and the DP reference (and read by pension/baseline.py
+for the Vasicek calibration). Holds:
   * the parameter names of the tabular rung (values from pension/params.py),
   * the contribution plan rules c(t, S),
   * the exogenous credited-return shock process,

@@ -1,11 +1,11 @@
-"""Objective suite: how the value function shapes the optimal funding policy.
+"""Objective suite: how the reward function shapes the optimal funding policy.
 
 Every objective in pension/objective.py (OBJECTIVES) is solved on the common
 protocol (common.GRID / N_PATHS / SEED / BAND_PCT, new-plan entry cohort, the
 --rates regime) and compared on what it DOES, not on its value: values of
 different objectives are in different units, policies and outcomes are not.
 
-To try your own value function: add an Objective to OBJECTIVES in objective.py
+To try your own reward function: add an Objective to OBJECTIVES in objective.py
 (or pass one in `names` below as an Objective instance) and rerun.
 
 Checks (asserted; the suite stops on the first failure):
@@ -13,7 +13,7 @@ Checks (asserted; the suite stops on the first failure):
   leaver     Phi[T] == terminal for EVERY objective (leaver at full service = stayer)
   lambda     delta_e is still exactly a LAMBDA change under "baseline"
   diagonal   each objective's own policy scores best under that objective
-             (up to Monte-Carlo / grid noise), i.e. the oracle optimises what
+             (up to Monte-Carlo / grid noise), i.e. the DP reference optimises what
              simulate() scores
 
 Figures (-> figs/objectives/, or figs/rates_<model>/objectives/):
@@ -145,7 +145,7 @@ def maps(years=(5, 22), names=NAMES):
             if j == 0: ax.set_ylabel(f"year {t}\n$\\rho = S/L$")
             if i == len(years) - 1: ax.set_xlabel("$F = R/L$")
     fig.colorbar(mesh, ax=axes, shrink=0.8, label="optimal contribution (% of salary)")
-    fig.suptitle("Optimal funding a*(F, rho) per value function  "
+    fig.suptitle("Optimal funding a*(F, rho) per reward function  "
                  "(white: RR = target; magenta: where the cohort is, 50/90/99%)", fontsize=11)
     fig.savefig(f"{OUT}/objective_maps.png", dpi=c.DPI); c.plt.close(fig)
     print(f"  wrote {OUT}/objective_maps.png")
@@ -180,7 +180,7 @@ def schedules(names=NAMES):
                 label=f"{n}  (avg {m['avg']:.1f}%, stayer RR {m['sty']:.2f})")
     ax.set_xlabel("career year $t$"); ax.set_ylabel("contribution (% of salary)")
     ax.legend(frameon=False, fontsize=8); ax.grid(True, alpha=0.25)
-    ax.set_title(f"Contribution schedule per value function  (rates: {c.RATES})")
+    ax.set_title(f"Contribution schedule per reward function  (rates: {c.RATES})")
     fig.savefig(f"{OUT}/objective_schedules.png", dpi=c.DPI); c.plt.close(fig)
     print(f"\n  wrote {OUT}/objective_schedules.png")
 
@@ -201,7 +201,7 @@ def frontier(names=NAMES, lambdas=_bm.FRONTIER_LAMBDAS[::2]):
     ax.set_xlabel("employer cost (PV per final salary, baseline units)")
     ax.set_ylabel("median stayer total RR")
     ax.legend(frameon=False, fontsize=8, loc="lower right"); ax.grid(True, alpha=0.25)
-    ax.set_title("Is a value function just a different $\\lambda$?\n"
+    ax.set_title("Is a reward function just a different $\\lambda$?\n"
                  "on the grey curve: yes;  above/below: it buys a different trade-off")
     fig.savefig(f"{OUT}/objective_frontier.png", dpi=c.DPI); c.plt.close(fig)
     print(f"  wrote {OUT}/objective_frontier.png")
@@ -226,7 +226,7 @@ def cross(names=NAMES):
     ax.set_yticks(range(len(names)), names)
     ax.set_xlabel("scored under"); ax.set_ylabel("policy optimised under")
     fig.colorbar(im, ax=ax, label="regret (0 = own optimum, 1 = band floor)")
-    ax.set_title(f"What each value function gives up under the others  (rates: {c.RATES})", fontsize=10)
+    ax.set_title(f"What each reward function gives up under the others  (rates: {c.RATES})", fontsize=10)
     fig.savefig(f"{OUT}/objective_cross.png", dpi=c.DPI); c.plt.close(fig)
     print(f"  wrote {OUT}/objective_cross.png")
 

@@ -1,5 +1,8 @@
 """The DP's reduced (F, rho) transitions are the SAME dynamics as pension.dynamics.
 
+Scope: the DP stack (pension.dp / dynamics / economy); its rate mode is the design
+frozen in pension.legacy_v1. The baseline is tested in tests/test_baseline.py.
+
 The DP works on F = R/L and rho = S/L with closed-form transitions (F_next,
 rho_next) and a closed-form paid-up value (paidup_service); simulate() and the RL
 environment step the levels (R, L, S) through dynamics.step(). These tests pin the

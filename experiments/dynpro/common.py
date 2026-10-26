@@ -241,9 +241,9 @@ def iso_rr(Fg, rg, total=True):
 
 
 def solve(Fg, rg, ag, nq=5, beta=None, betas=None, objective=None):
-    """The committed (churn-aware, paid-up service-pro-rated) policy oracle.
+    """The committed (churn-aware, paid-up service-pro-rated) DP reference policy.
     `betas` additionally returns soft (signal) readouts of the same Q-values;
     it leaves V and the hard policy untouched -- see dp.solve. `objective` picks
-    the value function (None follows P.OBJECTIVE; see pension/objective.py)."""
+    the reward function (None follows P.OBJECTIVE; see pension/objective.py)."""
     return dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq, beta=beta, betas=betas, objective=objective,
                     p=P)

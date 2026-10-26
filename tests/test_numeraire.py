@@ -1,4 +1,7 @@
-"""The employer's numeraire (pension/numeraire.py): stage-3 checks a-e."""
+"""The valuation date (pension/numeraire.py, VALUATION_DATE): stage-3 checks a-e.
+
+Scope: the DP stack (pension.dp / dynamics / economy); its rate mode is the design
+frozen in pension.legacy_v1. The baseline is tested in tests/test_baseline.py."""
 import numpy as np
 import pytest
 

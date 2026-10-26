@@ -334,7 +334,7 @@ PARAM_DOC = {   # unit, meaning, used by, inert under the canonical configuratio
     "RR_LEGAL": ("-", "first-pillar replacement rate", "dp, simulate, env", "no"),
     "RR_TARGET": ("-", "total-adequacy target", "dp, simulate, env", "no"),
     "SATIATE": ("bool", "cap RR at the target in crra()", "objective.crra", "no"),
-    "OBJECTIVE": ("name", "value function in objective.OBJECTIVES", "dp, env", "no"),
+    "OBJECTIVE": ("name", "reward function in objective.OBJECTIVES", "dp, env", "no"),
     "BETA": ("-", "policy extraction temperature (relative)", "dp._solve", "no"),
     "RATE_MODEL": ("name", "rate regime", "economy, numeraire, dp, env", "no"),
     "RATE_DT": ("years", "rate time step (must be 1/12: the data are monthly)", "economy", "no (not free)"),

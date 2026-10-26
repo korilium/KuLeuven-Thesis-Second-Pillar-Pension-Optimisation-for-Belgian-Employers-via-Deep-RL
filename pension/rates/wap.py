@@ -12,7 +12,8 @@ from 2016 to 2026 (1.75% to 2024, 2.50% for 2025 and 2026); it gives 2.75% for
 2027 where the FSMA published 2.50%, i.e. one notch off -- most likely a different
 reference series on the FSMA side.
 
-Under the HORIZONTAL method (Branch 21 insurance) a contribution keeps the rate in
+The baseline (pension/baseline.py) accrues ONE vertical WAP liability at the current
+G_t. Under the horizontal method of legacy_v1 a contribution keeps the rate in
 force when it was paid until retirement; that bookkeeping lives in the liability
 ledger (pension.dynamics.HorizontalLedger), not here. This module only produces the rate.
 """

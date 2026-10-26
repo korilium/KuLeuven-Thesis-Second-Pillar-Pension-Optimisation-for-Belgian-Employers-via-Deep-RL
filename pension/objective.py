@@ -1,5 +1,6 @@
 """
-objective.py -- the value function of the funding problem, as swappable parts.
+objective.py -- the reward function of the funding problem (constant-rate DP rung), as
+swappable parts. The baseline's reward is baseline.reward_legs.
 
 pension.dp optimises (solve) and scores (simulate) one objective, per unit of final
 salary S_T. Under the default numeraire ("retirement", pension/numeraire.py) both
@@ -15,7 +16,7 @@ terminal legs. The Objective says what each leg is worth; the numeraire is appli
 around it.
 
 An Objective names the four parts. pension.dp calls the SAME object in terminal(),
-paidup_service(), the Bellman flow and simulate(), so the oracle and the
+paidup_service(), the Bellman flow and simulate(), so the reference and the
 evaluation can never drift apart again.
 
 Every part receives `p`, the run's pension.params.Params, and reads parameters

@@ -1,5 +1,7 @@
 """
-pension/dp.py -- Rung-2 benchmark: DP oracle over (t, F, rho).
+pension/dp.py -- Rung-2 benchmark: the first-principles DP reference over (t, F, rho),
+for the constant-rate single-vehicle rung. Rate mode (horizontal ledger, SIGMA_R_RATES, CE solve) is the pre-October-2026
+design, frozen in pension/legacy_v1; the stochastic-rate model is now pension/baseline.py.
 
 Employee objective: mortality-weighted lifecycle CRRA over the
 ANNUITISED total replacement rate  RR_total = RR_LEGAL + max(F,1)/(ANNUITY*rho),  judged
@@ -296,19 +298,19 @@ def solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
 
     `p` (pension.params.Params): the model parameters.
 
-    `objective`: the value function -- None follows the OBJECTIVE switch (default
+    `objective`: the reward function -- None follows the OBJECTIVE switch (default
     "baseline"), or pass a registry name / an objective.Objective. The same object
     sets the terminal value, the leaver value and the contribution flow; its name
     is returned under "objective".
 
     `rates` follows the RATE_MODEL switch, exactly like simulate():
       * None with RATE_MODEL == "constant" (default): the original constant-rate
-        oracle with p's G, MU, SIGMA_R, SIGMA_L;
+        reference with p's G, MU, SIGMA_R, SIGMA_L;
       * None with a rate model: RATE_CE_PATHS scenarios of that model are drawn
         (RATE_SEED, memoised) and the CERTAINTY-EQUIVALENT model is solved;
       * a scenario dict from economy.draw_rate_scenarios: certainty-equivalent
         to that scenario;
-      * "constant": force the constant-rate oracle whatever the switch says.
+      * "constant": force the constant-rate reference whatever the switch says.
     The certainty-equivalent overrides (see certainty_equivalent) are applied as
     p.replace(**ce) for this call only, and the moments used are returned under
     "ce". Under a rate model G, MU, SIGMA_L and SIGMA_R
@@ -350,7 +352,7 @@ def _solve(mode="optimize", plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5,
     where Phi is the paid-up companion value (see paidup_service). Both branches
     pay year t's contribution and land at the same in-force state -- the worker
     earned the year -- so the freeze applies only from t+1. Pass hazard=None for
-    the no-churn benchmark, which reduces this to the plain oracle exactly.
+    the no-churn benchmark, which reduces this to the plain reference exactly.
 
     `beta` (defaults to p.BETA): the policy-EXTRACTION temperature, given
     RELATIVE to the local Q-spread -- "blend actions within this fraction of the

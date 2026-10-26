@@ -1,4 +1,7 @@
-"""Every value function: the oracle optimises what simulate() scores."""
+"""Every reward function: the DP reference optimises what simulate() scores.
+
+Scope: the DP stack (pension.dp / dynamics / economy); its rate mode is the design
+frozen in pension.legacy_v1. The baseline is tested in tests/test_baseline.py."""
 import numpy as np
 import pytest
 

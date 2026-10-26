@@ -18,6 +18,10 @@ The constant-rate model credits mu_t = MU with asset noise SIGMA_R and grows the
 liability VERTICALLY at G with its own shock SIGMA_L. A rate model credits the
 path's book yield mu_t (noise SIGMA_R_RATES) and books every contribution
 HORIZONTALLY at the WAP rate G_t of its payment year, until retirement.
+Rate mode (horizontal ledger, SIGMA_R_RATES, CE solve) is the pre-October-2026
+design, frozen in pension/legacy_v1; the stochastic-rate model is now pension/baseline.py.
+There the liability is one vertical WAP liability at the current G_t, and only
+the reserves are split.
 
 Every consumer runs on this module: dp.simulate (the policy evaluator), the RL
 environment (pension.envs.pension_env), and the tests that pin the DP's reduced

@@ -1,4 +1,7 @@
-"""The rate engine as the pension contract sees it: WAP rates and degenerate scenarios."""
+"""The rate engine as the pension contract sees it: WAP rates and degenerate scenarios.
+
+Scope: the DP stack (pension.dp / dynamics / economy); its rate mode is the design
+frozen in pension.legacy_v1. The baseline is tested in tests/test_baseline.py."""
 import pytest
 
 from pension import checks

@@ -1,6 +1,9 @@
 """The refactor contract: the current code reproduces the golden outputs recorded
 from the pre-refactor model (tests/regression/make_golden.py).
 
+Scope: the DP stack (pension.dp / dynamics / economy); its rate mode is the design
+frozen in pension.legacy_v1. The baseline is tested in tests/test_baseline.py.
+
 Policies and every action-valued output must be IDENTICAL; values may move by
 floating-point reassociation only (<= 1e-12 relative).
 """

@@ -1,6 +1,9 @@
 """Known answers for canonical mechanisms that had no test of their own (REVIEW M11):
 the financing spread, the vasicek calibration knobs, the CE premium schedule, the
-evaluate mode, the soft readout, and the scenario guards (REVIEW M2-M4)."""
+evaluate mode, the soft readout, and the scenario guards (REVIEW M2-M4).
+
+Scope: the DP stack (pension.dp / dynamics / economy); its rate mode is the design
+frozen in pension.legacy_v1. The baseline is tested in tests/test_baseline.py."""
 import numpy as np
 import pytest
 

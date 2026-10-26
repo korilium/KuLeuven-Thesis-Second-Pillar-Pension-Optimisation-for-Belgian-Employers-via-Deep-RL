@@ -63,7 +63,7 @@ class Params:
     RR_TARGET: float = 0.70     # total-adequacy target across all pillars (OECD/EU ~70%);
                                 # the employee's lifecycle utility is judged against this.
     SATIATE: bool = False       # if True, cap RR at the target in the utility (no reward for overshoot)
-    OBJECTIVE: str = "baseline" # the value function: a name in pension.objective.OBJECTIVES
+    OBJECTIVE: str = "baseline" # the reward function: a name in pension.objective.OBJECTIVES
 
     # --- policy extraction ----------------------------------------------------
     BETA: float = 0.01          # policy-EXTRACTION temperature, RELATIVE to the local Q-spread:
@@ -75,6 +75,9 @@ class Params:
 
     # --- interest-rate regime -------------------------------------------------
     # "constant" is the original model (G, MU, SIGMA_R, SIGMA_L as above).
+    # The rate modes below are the legacy_v1 design (horizontal ledger, SIGMA_R_RATES);
+    # the stochastic-rate model is now pension/baseline.py. "vasicek" models the 10Y,
+    # the short rate is r = y10 - SPREAD_10Y_SHORT.
     # "hull_white" / "vasicek" drive G and MU path-wise from ONE simulated 10Y OLO:
     #   G_t  = the statutory WAP filter (pension/rates/wap.py), applied HORIZONTALLY;
     #   mu_t = the insurer's book yield, a rolling mean of the same OLO over

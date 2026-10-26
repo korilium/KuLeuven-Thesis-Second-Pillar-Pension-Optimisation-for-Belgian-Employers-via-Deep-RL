@@ -1,4 +1,7 @@
-"""Structural properties the DP oracle must have (pension.checks), small grid."""
+"""Structural properties the DP reference must have (pension.checks), small grid.
+
+Scope: the DP stack (pension.dp / dynamics / economy); its rate mode is the design
+frozen in pension.legacy_v1. The baseline is tested in tests/test_baseline.py."""
 import numpy as np
 import pytest
 

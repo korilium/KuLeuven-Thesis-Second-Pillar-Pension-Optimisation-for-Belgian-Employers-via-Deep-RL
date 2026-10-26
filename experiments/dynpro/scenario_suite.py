@@ -315,7 +315,7 @@ def figures(only=("base", "B", "C"), grid=None, figs=None):
 # ============ 0. invariants: properties the model must satisfy ============
 # These are not scenarios -- they are structural properties the solver is REQUIRED
 # to have. Each is a PASS/FAIL. They are what makes the DP credible as a benchmark
-# for a learned policy: a number from an unverified oracle is not a benchmark.
+# for a learned policy: a number from an unverified reference is not a benchmark.
 def invariants(nF=73, nR=71, na=15, nq=5, n_paths=8000, seed=3, tol=1e-6):
     """The structural invariants (pension.checks) on the protocol grid, printed as
     a PASS/FAIL table. tests/test_invariants.py asserts the same checks on a small
