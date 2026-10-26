@@ -29,7 +29,7 @@ every parameter of the model, as ONE immutable object.
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
-| `Params(T: int = 45, G: float = 0.03, MU: float = 0.03, W: float = 0.025, S0: float = 1.0, DIS...)` | dataclass (fields: see the signature and the tables in this document) | dp.py, exp/walkthrough.py, objective.py |
+| `Params(T: int = 45, G: float = 0.03, MU: float = 0.03, W: float = 0.025, S0: float = 1.0, DIS...)` | dataclass (fields: see the signature and the tables in this document) | baseline.py, dp.py, exp/walkthrough.py, legacy_v1/dp.py, legacy_v1/objective.py, legacy_v1/params.py ... |
 
 ### `pension.objective` (pension/objective.py)
 
@@ -37,20 +37,20 @@ the value function of the funding problem, as swappable parts.
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
-| `Objective(name: str, employee: Callable, shortfall: Callable, contribution: Callable, weights: C...)` | dataclass (fields: see the signature and the tables in this document) | dp.py, envs/pension_env.py, numeraire.py |
-| `convex_contribution(k=2.0)` | Cash-flow strain: each euro costs (1 + k * aGAMMA), where aGAMMA is the contribution as a share of the CURRENT payroll. k=2: paying 15% of salary costs 30% extra per euro; paying 2% costs 4% extra. |  |
-| `convex_shortfall(k=1.0)` | short + k*short^2: large deficits hurt more than proportionally (balance- sheet stress, a lump-sum settlement at T). k=1: a shortfall of half a final salary costs 1.5x its face value. |  |
-| `crra(eta=None)` | target * ANNUITY * u(RR/target): the committed leg. u is in RELATIVE shortfall units; times the target it is in annual-RR units, times ANNUITY in capital (final-salary-years), the employer's numeraire. eta=None reads ... | exp/walkthrough.py |
-| `employer_only()` | Both legs at weight 1: meant for an employee leg that is ONLY a penalty (floor_penalty with base=None), i.e. minimise cost subject to a floor. |  |
-| `floor_penalty(k=1.0, rr_min=None, base=None)` | base minus k * ANNUITY * (rr_min - RR)+ : a replacement-rate floor as a Lagrangian penalty, in capital units. k=1 prices a missing point of RR at its actuarial cost. rr_min=None uses the target being judged against (p... |  |
-| `lambda_weights()` | The committed negotiation weight: lambda on the employee, 1-lambda on the employer. |  |
-| `linear_contribution()` | The committed leg: a contribution a*GAMMA*S_t, expressed per unit of final salary, i.e. a*GAMMA*(1+W)^-(T-t). |  |
-| `linear_shortfall()` | The committed leg: the employer pays the WAP shortfall, euro for euro. |  |
-| `loss_averse(k=2.5, base=None)` | Shortfalls below the target weigh k times more than the base curve says (a kink at the target, Kahneman-Tversky style); gains are unchanged. |  |
-| `resolve(obj, default)` | None -> OBJECTIVES[default]; a name -> its registry entry; an Objective as is. | dp.py |
-| `satiated(base=None)` | No value above the target: the employee is indifferent to overshoot. |  |
-| `threshold_shortfall(s0=0.1)` | Only the part of the shortfall above s0 final salaries costs anything (a deficit buffer the employer can absorb). |  |
-| `u(x, eta)` | Normalized (Box-Cox) CRRA utility, eta != 1:     u(x) = (x^(1-eta) - 1) / (1 - eta), which satisfies u(1) = 0 and u'(1) = 1 for every eta. The zero at the target makes "on target" the natural origin; the unit slope at... | checks.py, dp.py, exp/dynpro/benchmark_suite.py, exp/dynpro/lambda_dial_suite.py, exp/dynpro/objective_suite.py, exp/dynpro/scenario_suite.py ... |
+| `Objective(name: str, employee: Callable, shortfall: Callable, contribution: Callable, weights: C...)` | dataclass (fields: see the signature and the tables in this document) | dp.py, legacy_v1/dp.py, legacy_v1/env.py, legacy_v1/numeraire.py, legacy_v1/objective.py, numeraire.py |
+| `convex_contribution(k=2.0)` | Cash-flow strain: each euro costs (1 + k * aGAMMA), where aGAMMA is the contribution as a share of the CURRENT payroll. k=2: paying 15% of salary costs 30% extra per euro; paying 2% costs 4% extra. | legacy_v1/objective.py |
+| `convex_shortfall(k=1.0)` | short + k*short^2: large deficits hurt more than proportionally (balance- sheet stress, a lump-sum settlement at T). k=1: a shortfall of half a final salary costs 1.5x its face value. | legacy_v1/objective.py |
+| `crra(eta=None)` | target * ANNUITY * u(RR/target): the committed leg. u is in RELATIVE shortfall units; times the target it is in annual-RR units, times ANNUITY in capital (final-salary-years), the employer's numeraire. eta=None reads ... | exp/walkthrough.py, legacy_v1/objective.py |
+| `employer_only()` | Both legs at weight 1: meant for an employee leg that is ONLY a penalty (floor_penalty with base=None), i.e. minimise cost subject to a floor. | legacy_v1/objective.py |
+| `floor_penalty(k=1.0, rr_min=None, base=None)` | base minus k * ANNUITY * (rr_min - RR)+ : a replacement-rate floor as a Lagrangian penalty, in capital units. k=1 prices a missing point of RR at its actuarial cost. rr_min=None uses the target being judged against (p... | legacy_v1/objective.py |
+| `lambda_weights()` | The committed negotiation weight: lambda on the employee, 1-lambda on the employer. | legacy_v1/objective.py |
+| `linear_contribution()` | The committed leg: a contribution a*GAMMA*S_t, expressed per unit of final salary, i.e. a*GAMMA*(1+W)^-(T-t). | legacy_v1/objective.py |
+| `linear_shortfall()` | The committed leg: the employer pays the WAP shortfall, euro for euro. | legacy_v1/objective.py |
+| `loss_averse(k=2.5, base=None)` | Shortfalls below the target weigh k times more than the base curve says (a kink at the target, Kahneman-Tversky style); gains are unchanged. | legacy_v1/objective.py |
+| `resolve(obj, default)` | None -> OBJECTIVES[default]; a name -> its registry entry; an Objective as is. | dp.py, legacy_v1/dp.py, legacy_v1/objective.py |
+| `satiated(base=None)` | No value above the target: the employee is indifferent to overshoot. | legacy_v1/objective.py |
+| `threshold_shortfall(s0=0.1)` | Only the part of the shortfall above s0 final salaries costs anything (a deficit buffer the employer can absorb). | legacy_v1/objective.py |
+| `u(x, eta)` | Normalized (Box-Cox) CRRA utility, eta != 1:     u(x) = (x^(1-eta) - 1) / (1 - eta), which satisfies u(1) = 0 and u'(1) = 1 for every eta. The zero at the target makes "on target" the natural origin; the unit slope at... | baseline.py, checks.py, dp.py, exp/dynpro/benchmark_suite.py, exp/dynpro/lambda_dial_suite.py, exp/dynpro/objective_suite.py ... |
 
 ### `pension.numeraire` (pension/numeraire.py)
 
@@ -58,10 +58,10 @@ when the employer's money is valued: the timing around the objective.
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
-| `premium_factor(t, r_t, p)` | The factor on a premium paid in year t: A(t, T) given the short rate r_t (scalar or one per path) under "retirement", e^{-DISC_ER t} under "discounted". | dp.py, envs/pension_env.py, exp/walkthrough.py, tests/test_mechanisms.py |
-| `premium_schedule(p, rates=None)` | One deterministic factor per year t = 0..T-1, for the DP's Bellman flow. Without a scenario: the constant-rate (or discounted) factor. With a scenario (the certainty-equivalent solve): the scenario MEAN of A(t, T; r_t... | checks.py, dp.py, exp/walkthrough.py, tests/test_mechanisms.py |
-| `retirement(p)` |  | dynamics.py |
-| `terminal_factors(p)` | (employee, employer) factors on the terminal legs. | checks.py, dp.py, envs/pension_env.py |
+| `premium_factor(t, r_t, p)` | The factor on a premium paid in year t: A(t, T) given the short rate r_t (scalar or one per path) under "retirement", e^{-DISC_ER t} under "discounted". | dp.py, exp/walkthrough.py, legacy_v1/dp.py, legacy_v1/env.py, legacy_v1/numeraire.py, tests/test_mechanisms.py |
+| `premium_schedule(p, rates=None)` | One deterministic factor per year t = 0..T-1, for the DP's Bellman flow. Without a scenario: the constant-rate (or discounted) factor. With a scenario (the certainty-equivalent solve): the scenario MEAN of A(t, T; r_t... | checks.py, dp.py, exp/walkthrough.py, legacy_v1/dp.py, legacy_v1/numeraire.py, tests/test_mechanisms.py |
+| `retirement(p)` |  | dynamics.py, legacy_v1/dynamics.py, legacy_v1/numeraire.py |
+| `terminal_factors(p)` | (employee, employer) factors on the terminal legs. | checks.py, dp.py, legacy_v1/dp.py, legacy_v1/env.py, legacy_v1/numeraire.py |
 
 ### `pension.dynamics` (pension/dynamics.py)
 
@@ -69,12 +69,12 @@ THE career dynamics of a second-pillar plan, for n paths at once.
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
-| `Exogenous(zR: numpy.ndarray, zL: numpy.ndarray, u: numpy.ndarray, G: Optional[numpy.ndarray] = N...)` | Everything random about n careers over T years, drawn once. | checks.py, dp.py, envs/pension_env.py, exp/walkthrough.py, tests/test_dynamics.py, tests/test_env.py |
+| `Exogenous(zR: numpy.ndarray, zL: numpy.ndarray, u: numpy.ndarray, G: Optional[numpy.ndarray] = N...)` | Everything random about n careers over T years, drawn once. | checks.py, dp.py, exp/walkthrough.py, legacy_v1/dp.py, legacy_v1/dynamics.py, legacy_v1/env.py ... |
 | `HorizontalLedger(Lv: numpy.ndarray, lock: numpy.ndarray, _total: numpy.ndarray = None) -> None` | Rate model, Branch 21 horizontal method: slot 0 holds the opening liability (locked at G_0), slot t+1 the year-t contribution locked at G_t. Each slot keeps its own rate until retirement; L is their sum. | exp/walkthrough.py |
-| `State(t: int, R: numpy.ndarray, S: numpy.ndarray, ledger: object, present: numpy.ndarray, le...)` | n careers at the start of year t. | checks.py, dp.py, envs/pension_env.py, exp/walkthrough.py, tests/test_dynamics.py |
-| `VerticalLedger(L: numpy.ndarray) -> None` | Constant-rate model: the whole guaranteed reserve grows at G (+ SIGMA_L shock). |  |
-| `settle(state, p)` | Retirement: payout max(R, L), employer shortfall (L - R)+, and the service fraction tau/T that sets the leaver's pro-rated target. | dp.py, envs/pension_env.py, exp/walkthrough.py |
-| `step(state, a, exo, p, hazard)` | One year: contribute a (capacity fraction, already 0 for absent paths), credit, accrue the guarantee, grow salary, then draw churn. Mutates and returns `state` (arrays are replaced, never written in place, except the ... | checks.py, dp.py, envs/pension_env.py, envs/tabular.py, exp/dynpro/benchmark_suite.py, exp/walkthrough.py ... |
+| `State(t: int, R: numpy.ndarray, S: numpy.ndarray, ledger: object, present: numpy.ndarray, le...)` | n careers at the start of year t. | baseline.py, checks.py, dp.py, exp/walkthrough.py, legacy_v1/dp.py, legacy_v1/env.py ... |
+| `VerticalLedger(L: numpy.ndarray) -> None` | Constant-rate model: the whole guaranteed reserve grows at G (+ SIGMA_L shock). | legacy_v1/dynamics.py |
+| `settle(state, p)` | Retirement: payout max(R, L), employer shortfall (L - R)+, and the service fraction tau/T that sets the leaver's pro-rated target. | dp.py, exp/walkthrough.py, legacy_v1/dp.py, legacy_v1/dynamics.py, legacy_v1/env.py |
+| `step(state, a, exo, p, hazard)` | One year: contribute a (capacity fraction, already 0 for absent paths), credit, accrue the guarantee, grow salary, then draw churn. Mutates and returns `state` (arrays are replaced, never written in place, except the ... | baseline.py, checks.py, dp.py, envs/tabular.py, exp/dynpro/benchmark_suite.py, exp/walkthrough.py ... |
 
 ### `pension.economy` (pension/economy.py)
 
@@ -82,19 +82,19 @@ the economic scenario (exogenous world).
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
-| `check_scenario(rates, p)` | A scenario dict must come from p.RATE_MODEL (rates["model"]); otherwise the dynamics would follow one model's G_t, mu_t while the premiums accrue under another's short rate. | dp.py |
-| `data_vintage()` | Identity of the OLO data the calibration was built from: the cache file's path, size and modification time. Part of every scenario key, so a refreshed CSV can never be served stale scenarios (and it invalidates the ca... |  |
-| `draw_rate_scenarios(n_paths=2000, seed=None, model=None, horizon=None, p=None)` | Annual rate scenarios for the reserve/liability simulation. | checks.py, dp.py, envs/pension_env.py, exp/dynpro/rates_suite.py, exp/report_numeraire.py, exp/walkthrough.py ... |
-| `hull_white_p_params(p=None, legacy_sigma=False, phi=None)` | The parameters hull_white_p simulates with. | checks.py, exp/report_numeraire.py, rates/accrual.py |
-| `hull_white_paths(hp, H, n, dt, rng)` | Monthly short-rate paths and the repriced 10Y for Hull-White parameters hp (shared by hull_white and hull_white_p: only kappa, sigma and phi differ). | checks.py |
-| `plan_age(rate0=0.03, step=0.01, band=10)` |  | envs/tabular.py, exp/tabular/run_tabular.py |
-| `plan_fixed(rate=0.05)` |  | envs/tabular.py, exp/tabular/run_tabular.py |
-| `plan_step(rate_low=0.04, rate_high=0.1, ceiling=1.5)` |  | envs/tabular.py, exp/tabular/run_tabular.py |
-| `premonths(p=None)` | Months between the last OLO observation and the start of model year 0. YEAR_START = "january" (default): model years are calendar years, year 0 starts on the first 1 January after the last observation (0 if that obser... | checks.py, exp/walkthrough.py, tests/test_rates.py |
-| `rate_calibration()` | Calibrate once per process, from the cached NBB OLO data: Vasicek (kappa, sigma, theta, r0) on the monthly 10Y history and the NSS curve on the latest cross-section. The rate engine (pension.rates) is imported HERE, n... | checks.py, exp/walkthrough.py, tests/test_rates.py |
-| `vasicek_params(p=None)` | The parameters of the canonical "vasicek" model: kappa, sigma of the 10Y (OLS), y0 = the last observed 10Y, the spread to the short rate, r = y10 - spread (p.SPREAD_10Y_SHORT, or the historical mean 10Y - 1Y if None),... | exp/report_numeraire.py, exp/walkthrough.py, rates/accrual.py, tests/test_mechanisms.py, tests/test_rates.py |
-| `vasicek_short_params(p=None)` | The parameters vasicek_short simulates with: kappa, sigma, theta_Q and the t0 offset as calibrated; theta_P = p.LONG_RATE_P if set (else the OLS estimate), with phi = (theta_P - theta_Q) kappa / sigma recomputed from ... | checks.py, exp/report_numeraire.py, rates/accrual.py, tests/test_rates.py |
-| `year_offset(p=None)` | Calendar time (years) from the curve date (the last observation) to the start of model year 0 -- the shift between model year t and the time axis of a curve-fitted model (hull_white_p's alpha(t)). | checks.py, rates/accrual.py |
+| `check_scenario(rates, p)` | A scenario dict must come from p.RATE_MODEL (rates["model"]); otherwise the dynamics would follow one model's G_t, mu_t while the premiums accrue under another's short rate. | dp.py, legacy_v1/dp.py, legacy_v1/economy.py |
+| `data_vintage()` | Identity of the OLO data the calibration was built from: the cache file's path, size and modification time. Part of every scenario key, so a refreshed CSV can never be served stale scenarios (and it invalidates the ca... | legacy_v1/economy.py |
+| `draw_rate_scenarios(n_paths=2000, seed=None, model=None, horizon=None, p=None)` | Annual rate scenarios for the reserve/liability simulation. | checks.py, dp.py, exp/dynpro/rates_suite.py, exp/report_numeraire.py, exp/walkthrough.py, legacy_v1/dp.py ... |
+| `hull_white_p_params(p=None, legacy_sigma=False, phi=None)` | The parameters hull_white_p simulates with. | checks.py, exp/report_numeraire.py, legacy_v1/economy.py, legacy_v1/rates/accrual.py, rates/accrual.py |
+| `hull_white_paths(hp, H, n, dt, rng)` | Monthly short-rate paths and the repriced 10Y for Hull-White parameters hp (shared by hull_white and hull_white_p: only kappa, sigma and phi differ). | checks.py, legacy_v1/economy.py |
+| `plan_age(rate0=0.03, step=0.01, band=10)` |  | envs/tabular.py, exp/tabular/run_tabular.py, legacy_v1/economy.py |
+| `plan_fixed(rate=0.05)` |  | envs/tabular.py, exp/tabular/run_tabular.py, legacy_v1/economy.py |
+| `plan_step(rate_low=0.04, rate_high=0.1, ceiling=1.5)` |  | envs/tabular.py, exp/tabular/run_tabular.py, legacy_v1/economy.py |
+| `premonths(p=None)` | Months between the last OLO observation and the start of model year 0. YEAR_START = "january" (default): model years are calendar years, year 0 starts on the first 1 January after the last observation (0 if that obser... | baseline.py, checks.py, exp/walkthrough.py, legacy_v1/economy.py, tests/test_baseline.py, tests/test_rates.py |
+| `rate_calibration()` | Calibrate once per process, from the cached NBB OLO data: Vasicek (kappa, sigma, theta, r0) on the monthly 10Y history and the NSS curve on the latest cross-section. The rate engine (pension.rates) is imported HERE, n... | baseline.py, checks.py, exp/walkthrough.py, legacy_v1/economy.py, tests/test_baseline.py, tests/test_rates.py |
+| `vasicek_params(p=None)` | The parameters of the canonical "vasicek" model: kappa, sigma of the 10Y (OLS), y0 = the last observed 10Y, the spread to the short rate, r = y10 - spread (p.SPREAD_10Y_SHORT, or the historical mean 10Y - 1Y if None),... | baseline.py, exp/report_numeraire.py, exp/walkthrough.py, legacy_v1/economy.py, legacy_v1/rates/accrual.py, rates/accrual.py ... |
+| `vasicek_short_params(p=None)` | The parameters vasicek_short simulates with: kappa, sigma, theta_Q and the t0 offset as calibrated; theta_P = p.LONG_RATE_P if set (else the OLS estimate), with phi = (theta_P - theta_Q) kappa / sigma recomputed from ... | checks.py, exp/report_numeraire.py, legacy_v1/economy.py, legacy_v1/rates/accrual.py, rates/accrual.py, tests/test_rates.py |
+| `year_offset(p=None)` | Calendar time (years) from the curve date (the last observation) to the start of model year 0 -- the shift between model year t and the time axis of a curve-fitted model (hull_white_p's alpha(t)). | checks.py, legacy_v1/economy.py, legacy_v1/rates/accrual.py, rates/accrual.py |
 
 ### `pension.dp` (pension/dp.py)
 
@@ -102,26 +102,26 @@ Rung-2 benchmark: DP oracle over (t, F, rho).
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
-| `F_next(F, l, zR, zL, p=None)` |  | checks.py, exp/walkthrough.py, tests/test_dynamics.py |
-| `bilinear(Fg, lrg, V, Fq, lrq)` |  | envs/pension_env.py, exp/walkthrough.py |
-| `certainty_equivalent(rates, p=None)` | Constant-rate parameters that summarise a rate scenario for the DP. |  |
+| `F_next(F, l, zR, zL, p=None)` |  | checks.py, exp/walkthrough.py, legacy_v1/dp.py, tests/test_dynamics.py |
+| `bilinear(Fg, lrg, V, Fq, lrq)` |  | exp/walkthrough.py, legacy_v1/dp.py, legacy_v1/env.py |
+| `certainty_equivalent(rates, p=None)` | Constant-rate parameters that summarise a rate scenario for the DP. | legacy_v1/dp.py |
 | `const_policy(a, n_years, nF, nR)` |  | checks.py, exp/dynpro/contribution_schedule_suite.py, exp/dynpro/lambda_dial_suite.py, exp/dynpro/objective_suite.py, exp/dynpro/rates_suite.py, exp/dynpro/report.py ... |
-| `gauss_hermite_2d(n=15)` |  | exp/dynpro/report.py |
+| `gauss_hermite_2d(n=15)` |  | exp/dynpro/report.py, legacy_v1/dp.py |
 | `grids(nF=145, nR=91, na=31)` |  | exp/dynpro/benchmark_suite.py, exp/dynpro/common.py, exp/dynpro/contribution_schedule_suite.py, exp/dynpro/lambda_dial_suite.py, exp/dynpro/objective_suite.py, exp/dynpro/rates_suite.py ... |
-| `make_F_grid(F_max=3.0, n=241)` |  | exp/dynpro/report.py, exp/walkthrough.py, tests/conftest.py, tests/regression/make_golden.py, tests/test_dynamics.py, tests/test_env.py ... |
-| `make_a_grid(n=41)` |  | exp/dynpro/benchmark_suite.py, exp/dynpro/contribution_schedule_suite.py, exp/dynpro/lambda_dial_suite.py, exp/dynpro/report.py, tests/conftest.py, tests/regression/make_golden.py ... |
-| `make_rho_grid(lo=0.01, hi=35.0, n=91)` | Log-spaced grid for rho = S/L. | exp/dynpro/report.py, exp/walkthrough.py, tests/conftest.py, tests/regression/make_golden.py, tests/test_dynamics.py, tests/test_env.py ... |
-| `new_plan_init(n, rng, rho_lo=15.0, rho_hi=34.0, F_sd=0.08)` | Fresh plans: F0 ~ 1, high rho (liability small relative to salary). | envs/pension_env.py, exp/dynpro/common.py, exp/dynpro/contribution_schedule_suite.py, exp/dynpro/lambda_dial_suite.py, exp/dynpro/report.py, exp/dynpro/sensitivity_suite.py ... |
-| `paidup_service(Fg, rg, obj=None, p=None)` | Per-leave-cohort paid-up value Phi[tau](F,rho), in closed form. | checks.py, exp/dynpro/report.py, objective.py, tests/regression/make_golden.py |
-| `rho_next(rho, l, zL, p=None)` |  | checks.py, exp/walkthrough.py, tests/test_dynamics.py |
-| `sample_entry(rng, n, F_mu=1.0, F_sd=0.15, F_clip=(0.4, 2.5), rho_lo=3.0, rho_hi=30.0)` | Placeholder plan-entry distribution (NOT calibrated -- swap for DB2P aggregate stats when available). L0=1; the model is scale-free. | exp/dynpro/lambda_dial_suite.py, exp/dynpro/sensitivity_suite.py |
-| `schedule_policy(a_of_t, nF, nR, n_years=None, p=None)` | Lift a STATE-INDEPENDENT schedule a(t) to a (T, nF, nR) policy array. | exp/dynpro/benchmark_suite.py, exp/dynpro/common.py, exp/dynpro/rates_suite.py |
-| `simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000, seed=7, hazard=<fun...)` | Canonical forward Monte-Carlo of a reduced policy a*(t,F,rho) under the committed model: Belgian churn (immediate-vesting, paid-up leavers), the employer's numeraire (pension/numeraire.py), and the service-pro-rated a... | checks.py, dynamics.py, economy.py, envs/pension_env.py, exp/dynpro/benchmark_suite.py, exp/dynpro/common.py ... |
+| `make_F_grid(F_max=3.0, n=241)` |  | exp/dynpro/report.py, exp/walkthrough.py, legacy_v1/dp.py, tests/conftest.py, tests/regression/make_golden.py, tests/regression/make_golden_v1.py ... |
+| `make_a_grid(n=41)` |  | exp/dynpro/benchmark_suite.py, exp/dynpro/contribution_schedule_suite.py, exp/dynpro/lambda_dial_suite.py, exp/dynpro/report.py, legacy_v1/dp.py, tests/conftest.py ... |
+| `make_rho_grid(lo=0.01, hi=35.0, n=91)` | Log-spaced grid for rho = S/L. | exp/dynpro/report.py, exp/walkthrough.py, legacy_v1/dp.py, tests/conftest.py, tests/regression/make_golden.py, tests/regression/make_golden_v1.py ... |
+| `new_plan_init(n, rng, rho_lo=15.0, rho_hi=34.0, F_sd=0.08)` | Fresh plans: F0 ~ 1, high rho (liability small relative to salary). | exp/dynpro/common.py, exp/dynpro/contribution_schedule_suite.py, exp/dynpro/lambda_dial_suite.py, exp/dynpro/report.py, exp/dynpro/sensitivity_suite.py, exp/report_numeraire.py ... |
+| `paidup_service(Fg, rg, obj=None, p=None)` | Per-leave-cohort paid-up value Phi[tau](F,rho), in closed form. | checks.py, exp/dynpro/report.py, legacy_v1/dp.py, legacy_v1/objective.py, objective.py, tests/regression/make_golden.py |
+| `rho_next(rho, l, zL, p=None)` |  | checks.py, exp/walkthrough.py, legacy_v1/dp.py, tests/test_dynamics.py |
+| `sample_entry(rng, n, F_mu=1.0, F_sd=0.15, F_clip=(0.4, 2.5), rho_lo=3.0, rho_hi=30.0)` | Placeholder plan-entry distribution (NOT calibrated -- swap for DB2P aggregate stats when available). L0=1; the model is scale-free. | exp/dynpro/lambda_dial_suite.py, exp/dynpro/sensitivity_suite.py, legacy_v1/dp.py |
+| `schedule_policy(a_of_t, nF, nR, n_years=None, p=None)` | Lift a STATE-INDEPENDENT schedule a(t) to a (T, nF, nR) policy array. | exp/dynpro/benchmark_suite.py, exp/dynpro/common.py, exp/dynpro/rates_suite.py, legacy_v1/dp.py |
+| `simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000, seed=7, hazard=<fun...)` | Canonical forward Monte-Carlo of a reduced policy a*(t,F,rho) under the committed model: Belgian churn (immediate-vesting, paid-up leavers), the employer's numeraire (pension/numeraire.py), and the service-pro-rated a... | baseline.py, checks.py, dynamics.py, economy.py, exp/dynpro/benchmark_suite.py, exp/dynpro/common.py ... |
 | `solve(mode='optimize', plan_rule=None, Fg=None, rg=None, ag=None, n_quad=5, hazard=<function...)` | Backward induction for the committed (churn-aware) objective. | checks.py, exp/dynpro/benchmark_suite.py, exp/dynpro/common.py, exp/dynpro/contribution_schedule_suite.py, exp/dynpro/lambda_dial_suite.py, exp/dynpro/objective_suite.py ... |
-| `survival(hazard, p=None)` |  | exp/dynpro/benchmark_suite.py, exp/dynpro/contribution_schedule_suite.py, exp/dynpro/report.py |
-| `tenure_hazard(t, h0=0.12, hinf=0.025, tau=7.0)` | Belgian tenure hazard: ~12%/yr early -> ~2.5%/yr long-tenure floor, giving ~45% staying 10+ years and ~15% a full career (avg tenure ~11y, ~50% at 10+y; Goulart & Oesch 2024, OECD/Eurostat). | envs/pension_env.py, exp/walkthrough.py |
-| `terminal(Fg, rg, obj=None, p=None)` | Full-career stayer at T: the objective's employee leg at RR_TARGET minus its shortfall cost, combined by its weights (see objective.py). | checks.py, exp/dynpro/objective_suite.py, exp/dynpro/report.py, exp/dynpro/scenario_suite.py, objective.py, tests/regression/make_golden.py ... |
-| `u(x, p=None)` | The normalized CRRA utility at p.ETA (see objective.u). Kept for callers that read dp.u directly; the objective itself lives in objective.py. | checks.py, exp/dynpro/benchmark_suite.py, exp/dynpro/lambda_dial_suite.py, exp/dynpro/objective_suite.py, exp/dynpro/scenario_suite.py, exp/dynpro/sensitivity_suite.py ... |
+| `survival(hazard, p=None)` |  | exp/dynpro/benchmark_suite.py, exp/dynpro/contribution_schedule_suite.py, exp/dynpro/report.py, legacy_v1/dp.py |
+| `tenure_hazard(t, h0=0.12, hinf=0.025, tau=7.0)` | Belgian tenure hazard: ~12%/yr early -> ~2.5%/yr long-tenure floor, giving ~45% staying 10+ years and ~15% a full career (avg tenure ~11y, ~50% at 10+y; Goulart & Oesch 2024, OECD/Eurostat). | exp/walkthrough.py, legacy_v1/dp.py, legacy_v1/env.py |
+| `terminal(Fg, rg, obj=None, p=None)` | Full-career stayer at T: the objective's employee leg at RR_TARGET minus its shortfall cost, combined by its weights (see objective.py). | checks.py, exp/dynpro/objective_suite.py, exp/dynpro/report.py, exp/dynpro/scenario_suite.py, legacy_v1/dp.py, legacy_v1/objective.py ... |
+| `u(x, p=None)` | The normalized CRRA utility at p.ETA (see objective.u). Kept for callers that read dp.u directly; the objective itself lives in objective.py. | baseline.py, checks.py, exp/dynpro/benchmark_suite.py, exp/dynpro/lambda_dial_suite.py, exp/dynpro/objective_suite.py, exp/dynpro/scenario_suite.py ... |
 
 ### `pension.checks` (pension/checks.py)
 
@@ -156,14 +156,42 @@ the known-answer checks of the model, as functions that MEASURE.
 | `wap_scenario_stats(p, model, n=2000)` | min, max, distance from the 25 bp grid, and G_0 of the WAP rates of n scenarios of `model`; G0_observed is the statutory formula applied directly to year 0's window of the OLO history (None if that window reaches past... | exp/dynpro/rates_suite.py, exp/walkthrough.py, tests/test_rates.py |
 | `wap_vs_fsma(years={2016: 1.75, 2017: 1.75, 2018: 1.75, 2019: 1.75, 2020: 1.75, 2021: 1.75, 2022: 1...)` | {year: (WAP rate from the statutory formula on the cached NBB data, rate published by the FSMA)}, in %. 2027 is left out on purpose: the formula gives 2.75% against 2.50% published (see pension/rates/wap.py). | exp/dynpro/rates_suite.py, tests/test_rates.py |
 
-### `pension.envs.pension_env` (pension/envs/pension_env.py)
+### `pension.baseline` (pension/baseline.py)
+
+the bare-bone baseline: one member, a fixed premium, and each year the share of it that goes to Branch 21.
+
+| function / class | purpose (first docstring paragraph) | used in |
+|---|---|---|
+| `Noise(eps: numpy.ndarray, u: numpy.ndarray) -> None` | Everything random about n careers: eps (premonths() + 12 T, n) monthly normals of the 10Y, u (T, n) exit uniforms. No look-ahead: year t reads only its own rows. | tests/test_baseline.py |
+| `Params(T: int = 45, W: float = 0.025, C: float = 0.05, I_TARIFF: float = 0.01, M: float = 0.0...)` | dataclass (fields: see the signature and the tables in this document) | dp.py, exp/walkthrough.py, legacy_v1/dp.py, legacy_v1/objective.py, legacy_v1/params.py, objective.py ... |
+| `PensionEnv(p=Params(T=45, W=0.025, C=0.05, I_TARIFF=0.01, M=0.0, BOOK_WEIGHT=0.020833333333333332...)` | One career per episode, gamma = 1. Observation = State.obs (9,), action = alpha_t. The reward is 0 until T; when the member leaves, the remaining years are rolled forward on the episode's own noise and the reward at T... | checks.py, exp/walkthrough.py, legacy_v1/env.py, tests/regression/make_golden_v1.py, tests/test_baseline.py, tests/test_legacy_v1.py |
+| `State(t: int, y: numpy.ndarray, G: numpy.ndarray, H: numpy.ndarray, K: numpy.ndarray, mu: nu...)` | n careers in January of year t. y, G, H, K, mu, L, R21, N are (n,) arrays; H and K are the sums of the observed months in the windows of G_{t+1} and G_{t+2}. inforce and tau only drive the roll-forward after exit: eve... | checks.py, dp.py, exp/walkthrough.py, legacy_v1/dp.py, legacy_v1/env.py, tests/test_dynamics.py |
+| `accrue(X, P, rate, p)` | Eq. (6), MODEL.md: X_{t+1} = (X_t + P_t) e^{rate}, in units of S_{t+1}. The ONE recursion of the liability (rate G_t) and the Branch 21 reserve (rate i_t). |  |
+| `bond_price(y, t, p)` | Eq. (7), MODEL.md: P(t, T) = exp(-y_t (T - t)), flat at the 10Y; P(T, T) = 1. | tests/test_baseline.py |
+| `book_yield(mu, y, p)` | Eq. (4), MODEL.md: monthly exponential filter of the 10Y, mu <- mu + w (y - mu). |  |
+| `buy_units(N, P23, price, p)` | Eq. (8), MODEL.md: N_{t+1} = N_t + P23_t / P(t, T), in units of S_{t+1}. |  |
+| `credited_rate(mu, p)` | Eq. (5), MODEL.md: Branch 21 crediting i_t = max(i^tariff, mu_t - m). |  |
+| `draw_noise(n, seed, p=Params(T=45, W=0.025, C=0.05, I_TARIFF=0.01, M=0.0, BOOK_WEIGHT=0.020833333...)` |  | tests/test_baseline.py |
+| `hazard(t, p)` | Eq. (9), MODEL.md: exit hazard h(t) = h_inf + (h_0 - h_inf) e^{-t / tau_h}. | dp.py, dynamics.py, exp/walkthrough.py, legacy_v1/dp.py, legacy_v1/dynamics.py |
+| `initial_state(eps_pre, p)` | January of year 0 from the observed OLO history and the pre-roll months eps_pre (premonths(), n). Zero balances: a new member. | tests/test_baseline.py |
+| `premium_accrual(y, t, vp, p)` | Eq. (11), MODEL.md: A(t, T) = E^P_t[exp(int_t^T r_u du)] in closed form, r = y - s_term. | tests/test_baseline.py |
+| `premonths()` | Simulated months from the last OLO observation to January of model year 0. | checks.py, economy.py, exp/walkthrough.py, legacy_v1/economy.py, tests/test_baseline.py, tests/test_rates.py |
+| `reward_legs(L, R, tau, p)` | Eq. (10), MODEL.md: (employee leg, shortfall) at T, with L = L_tau / S_T and R = R_T / S_T: target_tau ann u(RR_tot / target_tau) and (L_tau - R_T)^+ / S_T. |  |
+| `short_rate(y, vp)` | Eq. (2), MODEL.md: r_t = y_t - s_term. | tests/test_baseline.py |
+| `simulate(policy, n=10000, seed=None, p=Params(T=45, W=0.025, C=0.05, I_TARIFF=0.01, M=0.0, BOOK...)` | Monte Carlo of a policy obs (n, 9) -> alpha (n,) over n careers (seed: EVAL_SEED). "joint" is the objective J (A5) and "reward" the per-path reward; the premium cost sum_{t<tau} C (1+W)^-(T-t) A(t,T), which no policy ... | checks.py, dp.py, dynamics.py, economy.py, exp/dynpro/benchmark_suite.py, exp/dynpro/common.py ... |
+| `step(s, alpha, eps, u, p)` | One year for every path: premium at the start, accrual over the year, twelve months of rates (eps: (12, n)), then exit with probability h(t) (u: (n,) uniforms). Out of force: no premium, L fixed (rate 0), units held, ... | checks.py, dp.py, dynamics.py, envs/tabular.py, exp/dynpro/benchmark_suite.py, exp/walkthrough.py ... |
+| `utility(x, eta)` | Normalised CRRA, u(1) = 0, u'(1) = 1 (log at eta = 1). | exp/dynpro/sensitivity_suite.py, legacy_v1/objective.py, legacy_v1/params.py, objective.py, params.py |
+| `vasicek_month(y, eps, vp)` | Eq. (1), MODEL.md: exact monthly Vasicek step of the 10Y OLO under P. |  |
+| `wap_rate(sum24)` | Eq. (3), MODEL.md: G = statutory map of the 24-month mean 10Y (rates/wap.py). |  |
+
+### `pension.legacy_v1.env` (pension/legacy_v1/env.py)
 
 the funding problem as a gymnasium environment (the RL rung).
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
-| `DPPolicyAgent(policy, Fg, rg, T)` | Runs a solved DP policy a*(t, F, rho) inside the environment: the oracle as an agent, for benchmarking learned policies on identical episodes. | checks.py, exp/walkthrough.py, tests/test_env.py |
-| `PensionEnv(p=Params(T=45, G=0.03, MU=0.03, W=0.025, S0=1.0, DISC_EMP=0.03, DISC_ER=0.05, DISC=0.0...)` | The main Gymnasium class for implementing Reinforcement Learning Agents environments. | checks.py, exp/walkthrough.py, tests/test_env.py |
+| `DPPolicyAgent(policy, Fg, rg, T)` | Runs a solved DP policy a*(t, F, rho) inside the environment: the oracle as an agent, for benchmarking learned policies on identical episodes. | checks.py, exp/walkthrough.py, tests/test_legacy_v1.py |
+| `PensionEnv(p=Params(T=45, G=0.03, MU=0.03, W=0.025, S0=1.0, DISC_EMP=0.03, DISC_ER=0.05, DISC=0.0...)` | The main Gymnasium class for implementing Reinforcement Learning Agents environments. | baseline.py, checks.py, exp/walkthrough.py, tests/regression/make_golden_v1.py, tests/test_baseline.py, tests/test_legacy_v1.py |
 | `make_env(**kw)` | PensionEnv(**kw) -- convenience for gymnasium.vector / RL libraries. |  |
 
 ### `pension.envs.tabular` (pension/envs/tabular.py)
@@ -191,10 +219,10 @@ the funding problem as a gymnasium environment (the RL rung).
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
-| `cache_path()` | The CSV cache of the NBB OLO yields. | economy.py |
-| `extractDataYieldNBB(startPeriod: str = '1993-03', endPeriod: str = '2026-10') -> pandas.core.frame.DataFrame` |  |  |
-| `load_olo(startPeriod: str = '2000-01', cache: str = None, refresh: bool = False)` | OLO data the economy needs, fetched from the NBB once and then read from a CSV cache, so environments build offline and every run calibrates on the SAME data. Delete the cache (or pass refresh=True) to pull a newer vi... | checks.py, economy.py, exp/olo/plots.py, exp/olo/validation.py, exp/walkthrough.py |
-| `load_olo_short(cache: str = None)` | The monthly history of the SHORTEST OLO maturity in the data -- the short-rate proxy of RATE_MODEL="vasicek_short". Returns (maturity label, DataFrame with DATE and YIELD in %), on the same dates as the 10Y series of ... | economy.py |
+| `cache_path()` | The CSV cache of the NBB OLO yields. | economy.py, legacy_v1/economy.py, legacy_v1/rates/data.py |
+| `extractDataYieldNBB(startPeriod: str = '1993-03', endPeriod: str = '2026-10') -> pandas.core.frame.DataFrame` |  | legacy_v1/rates/data.py |
+| `load_olo(startPeriod: str = '2000-01', cache: str = None, refresh: bool = False)` | OLO data the economy needs, fetched from the NBB once and then read from a CSV cache, so environments build offline and every run calibrates on the SAME data. Delete the cache (or pass refresh=True) to pull a newer vi... | checks.py, economy.py, exp/olo/plots.py, exp/olo/validation.py, exp/walkthrough.py, legacy_v1/economy.py ... |
+| `load_olo_short(cache: str = None)` | The monthly history of the SHORTEST OLO maturity in the data -- the short-rate proxy of RATE_MODEL="vasicek_short". Returns (maturity label, DataFrame with DATE and YIELD in %), on the same dates as the 10Y series of ... | economy.py, legacy_v1/economy.py, legacy_v1/rates/data.py |
 
 ### `pension.rates.calibration` (pension/rates/calibration.py)
 
@@ -202,13 +230,13 @@ the funding problem as a gymnasium environment (the RL rung).
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
-| `bootstrapForwardCurve(maturities: numpy.ndarray, yields: numpy.ndarray, t_grid: numpy.ndarray = None, verbos...)` | Bootstrap instantaneous forward curve f(0,T) using the Nelson-Siegel-Svensson (NSS) parametric model. | economy.py, exp/olo/plots.py, exp/olo/validation.py |
-| `calibrateVasicek(df10Y: pandas.core.frame.DataFrame, verbose: bool = True)` | Calibrate Vasicek parameters from a 10Y OLO yield time series using OLS. | economy.py, exp/olo/plots.py, exp/olo/validation.py, exp/walkthrough.py |
-| `calibrateVasicekShort(df_short: pandas.core.frame.DataFrame, df10Y: pandas.core.frame.DataFrame, tau: float ...)` | Real-world (P) Vasicek short rate for RATE_MODEL="vasicek_short". | economy.py |
-| `computeTheta(t_grid: numpy.ndarray, f: numpy.ndarray, df_dT: numpy.ndarray, kappa: float, sigma: fl...)` | Compute Hull-White time-dependent mean reversion target θ(t). | exp/olo/validation.py |
-| `nss_forward(T: numpy.ndarray, beta0, beta1, beta2, beta3, tau1, tau2) -> numpy.ndarray` | Instantaneous forward rate f(0,T) = −d/dT [T · Y(0,T)]. | exp/olo/plots.py, rates/accrual.py, rates/pricing.py, rates/simulation.py, tests/test_pricing.py |
-| `nss_forward_deriv(T: numpy.ndarray, beta0, beta1, beta2, beta3, tau1, tau2) -> numpy.ndarray` | df/dT — first derivative of the forward rate. |  |
-| `nss_yield(T: numpy.ndarray, beta0, beta1, beta2, beta3, tau1, tau2) -> numpy.ndarray` | Nelson-Siegel-Svensson yield Y(0,T). | checks.py, exp/olo/plots.py, rates/pricing.py, tests/test_pricing.py |
+| `bootstrapForwardCurve(maturities: numpy.ndarray, yields: numpy.ndarray, t_grid: numpy.ndarray = None, verbos...)` | Bootstrap instantaneous forward curve f(0,T) using the Nelson-Siegel-Svensson (NSS) parametric model. | economy.py, exp/olo/plots.py, exp/olo/validation.py, legacy_v1/economy.py, legacy_v1/rates/calibration.py |
+| `calibrateVasicek(df10Y: pandas.core.frame.DataFrame, verbose: bool = True, dt=0.08333333333333333)` | Calibrate Vasicek parameters from a 10Y OLO yield time series using OLS. | economy.py, exp/olo/plots.py, exp/olo/validation.py, exp/walkthrough.py, legacy_v1/economy.py, legacy_v1/rates/calibration.py |
+| `calibrateVasicekShort(df_short: pandas.core.frame.DataFrame, df10Y: pandas.core.frame.DataFrame, tau: float ...)` | Real-world (P) Vasicek short rate for RATE_MODEL="vasicek_short". | economy.py, legacy_v1/economy.py, legacy_v1/rates/calibration.py |
+| `computeTheta(t_grid: numpy.ndarray, f: numpy.ndarray, df_dT: numpy.ndarray, kappa: float, sigma: fl...)` | Compute Hull-White time-dependent mean reversion target θ(t). | exp/olo/validation.py, legacy_v1/rates/calibration.py |
+| `nss_forward(T: numpy.ndarray, beta0, beta1, beta2, beta3, tau1, tau2) -> numpy.ndarray` | Instantaneous forward rate f(0,T) = −d/dT [T · Y(0,T)]. | exp/olo/plots.py, legacy_v1/rates/accrual.py, legacy_v1/rates/calibration.py, legacy_v1/rates/pricing.py, legacy_v1/rates/simulation.py, rates/accrual.py ... |
+| `nss_forward_deriv(T: numpy.ndarray, beta0, beta1, beta2, beta3, tau1, tau2) -> numpy.ndarray` | df/dT — first derivative of the forward rate. | legacy_v1/rates/calibration.py |
+| `nss_yield(T: numpy.ndarray, beta0, beta1, beta2, beta3, tau1, tau2) -> numpy.ndarray` | Nelson-Siegel-Svensson yield Y(0,T). | checks.py, exp/olo/plots.py, legacy_v1/rates/calibration.py, legacy_v1/rates/pricing.py, rates/pricing.py, tests/test_pricing.py |
 
 ### `pension.rates.simulation` (pension/rates/simulation.py)
 
@@ -216,8 +244,8 @@ the funding problem as a gymnasium environment (the RL rung).
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
-| `simulateHullWhite(curve: dict, kappa: float, sigma: float, T: int = 40, n_paths: int = 1000, dt: float =...)` | Simulate Hull-White short-rate paths using EXACT step-wise discretisation via the shifted decomposition r(t) = x(t) + alpha(t). | checks.py, economy.py, exp/olo/plots.py |
-| `simulateVasicek(kappa: float, theta: float, sigma: float, r0: float, T: int = 40, n_paths: int = 1000,...)` | Simulate Vasicek short-rate paths using exact discretisation. | economy.py, exp/olo/plots.py, exp/walkthrough.py |
+| `simulateHullWhite(curve: dict, kappa: float, sigma: float, T: int = 40, n_paths: int = 1000, dt: float =...)` | Simulate Hull-White short-rate paths using EXACT step-wise discretisation via the shifted decomposition r(t) = x(t) + alpha(t). | checks.py, economy.py, exp/olo/plots.py, legacy_v1/economy.py, legacy_v1/rates/simulation.py |
+| `simulateVasicek(kappa: float, theta: float, sigma: float, r0: float, T: int = 40, n_paths: int = 1000,...)` | Simulate Vasicek short-rate paths using exact discretisation. | economy.py, exp/olo/plots.py, exp/walkthrough.py, legacy_v1/economy.py, legacy_v1/rates/simulation.py, tests/test_baseline.py |
 
 ### `pension.rates.pricing` (pension/rates/pricing.py)
 
@@ -225,10 +253,10 @@ the funding problem as a gymnasium environment (the RL rung).
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
-| `computeCumulativeDiscountFactors(paths, dt=0.08333333333333333)` | D(0,t) = exp(-∫₀ᵗ r ds) ≈ exp(-Σ r·dt)  per path  → feeds APV = Σ CF·D. | tests/test_pricing.py |
-| `hullWhiteBondPrice(r, t, kappa, sigma, tau, curve)` | Hull-White zero-coupon bond price P(t, t+τ) given the short rate r(t). | tests/test_pricing.py |
-| `reconstructFutureYield(paths: numpy.ndarray, kappa: float, sigma: float, curve: dict, tau: float = 10.0, dt: ...)` | Reconstruct the model-implied τ-year yield Y(t, t+τ) at every (time, path), from the simulated short rate via the Hull-White bond price: | checks.py, economy.py, tests/test_pricing.py |
-| `vasicekBondPrice(r, kappa, theta, sigma, tau)` | Vasicek zero-coupon bond price P(t, t+τ) = A(τ)·exp(-B(τ)·r(t)). Constant long-run mean θ → a single model-implied curve (does NOT fit market). | economy.py, rates/calibration.py, tests/test_pricing.py, tests/test_rates.py |
+| `computeCumulativeDiscountFactors(paths, dt=0.08333333333333333)` | D(0,t) = exp(-∫₀ᵗ r ds) ≈ exp(-Σ r·dt)  per path  → feeds APV = Σ CF·D. | legacy_v1/rates/pricing.py, tests/test_pricing.py |
+| `hullWhiteBondPrice(r, t, kappa, sigma, tau, curve)` | Hull-White zero-coupon bond price P(t, t+τ) given the short rate r(t). | legacy_v1/rates/pricing.py, tests/test_pricing.py |
+| `reconstructFutureYield(paths: numpy.ndarray, kappa: float, sigma: float, curve: dict, tau: float = 10.0, dt: ...)` | Reconstruct the model-implied τ-year yield Y(t, t+τ) at every (time, path), from the simulated short rate via the Hull-White bond price: | checks.py, economy.py, legacy_v1/economy.py, legacy_v1/rates/pricing.py, tests/test_pricing.py |
+| `vasicekBondPrice(r, kappa, theta, sigma, tau)` | Vasicek zero-coupon bond price P(t, t+τ) = A(τ)·exp(-B(τ)·r(t)). Constant long-run mean θ → a single model-implied curve (does NOT fit market). | economy.py, legacy_v1/economy.py, legacy_v1/rates/calibration.py, legacy_v1/rates/pricing.py, rates/calibration.py, tests/test_pricing.py ... |
 
 ### `pension.rates.wap` (pension/rates/wap.py)
 
@@ -236,8 +264,8 @@ the statutory WAP/LPC return guarantee rate G_t (art.
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
-| `computeWAPRate(y10_monthly, start_row, n_years, months_per_year=12)` | Annual WAP guarantee rate per path from a monthly 10Y yield series. | checks.py, economy.py, exp/walkthrough.py |
-| `wap_formula(avg10y)` | The statutory map from a 24-month average 10Y yield (decimal) to G (decimal). | checks.py, exp/walkthrough.py, tests/test_rates.py |
+| `computeWAPRate(y10_monthly, start_row, n_years, months_per_year=12)` | Annual WAP guarantee rate per path from a monthly 10Y yield series. | checks.py, economy.py, exp/walkthrough.py, legacy_v1/economy.py, legacy_v1/rates/wap.py, tests/test_baseline.py |
+| `wap_formula(avg10y)` | The statutory map from a 24-month average 10Y yield (decimal) to G (decimal). | baseline.py, checks.py, exp/walkthrough.py, legacy_v1/rates/wap.py, tests/test_rates.py |
 
 ### `pension.rates.accrual` (pension/rates/accrual.py)
 
@@ -245,9 +273,9 @@ the real-world accrual factor of a premium paid at t until retirement T.
 
 | function / class | purpose (first docstring paragraph) | used in |
 |---|---|---|
-| `closed_form_accrual(t, r_t, p, s=0.0)` | A(t, T) for p.RATE_MODEL in {"vasicek", "vasicek_short", "hull_white_p"}; r_t (the SHORT rate at t) scalar or array (one per path). T = p.T; the financing spread s is added per year. | checks.py, exp/walkthrough.py, numeraire.py, tests/test_mechanisms.py, tests/test_rates.py |
-| `hull_white_alpha(t, kappa, sigma, curve)` | alpha(t) = f(0,t) + sigma^2/(2 kappa^2) (1 - e^{-kappa t})^2. | checks.py |
-| `hull_white_alpha_integral(t, T, kappa, sigma, curve)` | int_t^T alpha(u) du, analytic. |  |
+| `closed_form_accrual(t, r_t, p, s=0.0)` | A(t, T) for p.RATE_MODEL in {"vasicek", "vasicek_short", "hull_white_p"}; r_t (the SHORT rate at t) scalar or array (one per path). T = p.T; the financing spread s is added per year. | checks.py, exp/walkthrough.py, legacy_v1/numeraire.py, legacy_v1/rates/accrual.py, numeraire.py, tests/test_baseline.py ... |
+| `hull_white_alpha(t, kappa, sigma, curve)` | alpha(t) = f(0,t) + sigma^2/(2 kappa^2) (1 - e^{-kappa t})^2. | checks.py, legacy_v1/rates/accrual.py |
+| `hull_white_alpha_integral(t, T, kappa, sigma, curve)` | int_t^T alpha(u) du, analytic. | legacy_v1/rates/accrual.py |
 
 <!-- /gen -->
 

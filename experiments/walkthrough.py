@@ -24,7 +24,7 @@ import pandas as pd
 import pension.dp as dp
 from pension import checks, economy, numeraire
 from pension.dynamics import Exogenous, HorizontalLedger, State, step
-from pension.envs.pension_env import DPPolicyAgent, PensionEnv
+from pension.legacy_v1.env import DPPolicyAgent, PensionEnv
 from pension.objective import OBJECTIVES
 from pension.params import DEFAULT, Params
 from pension.rates import wap
@@ -397,7 +397,7 @@ def reference_blocks():
 
 
 API_MODULES = ["pension.params", "pension.objective", "pension.numeraire", "pension.dynamics",
-               "pension.economy", "pension.dp", "pension.checks", "pension.envs.pension_env",
+               "pension.economy", "pension.dp", "pension.checks", "pension.baseline", "pension.legacy_v1.env",
                "pension.envs.tabular", "pension.rates.data", "pension.rates.calibration",
                "pension.rates.simulation", "pension.rates.pricing", "pension.rates.wap",
                "pension.rates.accrual"]
@@ -519,9 +519,9 @@ BREAKPOINTS = {
          "a new vintage locked at G_t; every in-force vintage grows at its own lock"),
         ("pension/rates/accrual.py", 'y_t = r_t + vp["spread"]', "`r_t`, `y_t`, `mean`, `tau`",
          "A(0,T; r_0) (table below); = numeraire.premium_factor(0, r_0, p)"),
-        ("pension/envs/pension_env.py", "return np.array([s.t / self.p.T, s.F[0], np.log(s.rho[0]), G_t, mu_t, r_t], dtype=np.float64)",
+        ("pension/legacy_v1/env.py", "return np.array([s.t / self.p.T, s.F[0], np.log(s.rho[0]), G_t, mu_t, r_t], dtype=np.float64)",
          "the 6 components", "r_t = y_t - spread; at reset: obs[5] = r_0 (table below)"),
-        ("pension/envs/pension_env.py", "reward = float(-self.w_er * self.obj.contribution(a, t, p)[0]",
+        ("pension/legacy_v1/env.py", "reward = float(-self.w_er * self.obj.contribution(a, t, p)[0]",
          "`reward`, `r_t`", "-(1-λ) a Γ (1+W)^{-(T-t)} A(t,T; r_t)"),
     ],
     "bp_flow": [

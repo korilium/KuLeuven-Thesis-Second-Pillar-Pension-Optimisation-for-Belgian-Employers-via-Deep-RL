@@ -326,7 +326,7 @@ def env_contract(p, Fg, rg, ag, nq, entry, n_paths, seed, objective=None):
     """(a) |mean PensionEnv episode return - simulate()["joint"]| on the same paths,
     with the solved policy (0 up to floating point)."""
     from pension.dynamics import Exogenous
-    from pension.envs.pension_env import DPPolicyAgent, PensionEnv
+    from pension.legacy_v1.env import DPPolicyAgent, PensionEnv
     rates = None if p.RATE_MODEL == "constant" else draw_rate_scenarios(n_paths, p=p)
     pol = dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq, objective=objective, p=p)["policy"]
     sim = dp.simulate(pol, Fg, rg, **entry, n_paths=n_paths, seed=seed, rates=rates,
