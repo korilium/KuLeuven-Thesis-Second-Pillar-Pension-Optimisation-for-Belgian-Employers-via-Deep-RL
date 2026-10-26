@@ -8,7 +8,7 @@ The tables between `gen` markers are generated from the code (`python experiment
 |---|---|---|
 | Is anything broken? | `pytest -m "not slow"` (then `pytest` for the slow checks) | ~15 s / ~25 s |
 | Do the old (discounted) numbers still come out? | `pytest tests/test_regression.py` | ~5 s |
-| Are the RL environment and the DP still on one scale? | `pytest tests/test_env.py tests/test_numeraire.py::test_env_contract_both_numeraires` | ~6 s |
+| Are the RL environment and the DP still on one scale? | `pytest tests/test_legacy_v1.py tests/test_numeraire.py::test_env_contract_both_numeraires` (baseline: `tests/test_baseline.py`) | ~6 s |
 | Does a known-answer property hold, and by how much? | the measuring function in `pension/checks.py`, called from a REPL (`docs/REFERENCE.md`, table "Checks") | seconds to a minute |
 | What does one scenario / one career look like, number by number? | `python experiments/walkthrough.py walkthrough` (prints Part A and Part B) | ~10 s |
 | Do the documents still match the code? | `python experiments/walkthrough.py --check` | ~80 s (the `review` producer re-runs the evidence) |

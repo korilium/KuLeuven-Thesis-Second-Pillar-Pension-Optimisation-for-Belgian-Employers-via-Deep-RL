@@ -76,7 +76,7 @@ These carry a PASS/FAIL, and they are the only entries that do.
 | `LAMBDA = 1` | employee alone funds to capacity → the band ceiling | avg **15.0%**, styRR 0.981 — PASS |
 | `GAMMA → 0` | no funding capacity → RR collapses to the first pillar | styRR **0.471** ≈ `RR_LEGAL` = 0.43 — PASS |
 | `SIGMA_R = SIGMA_L = 0` | deterministic; isolates option value | styRR 0.849 vs 0.875, schedule unchanged |
-| `hazard = None` | reduces exactly to the churn-free oracle | verified **bit-identical** to `dp.solve` |
+| `hazard = None` | reduces exactly to the churn-free reference | verified **bit-identical** to `dp.solve` |
 
 The first three are exact and parameter-free: they do not depend on any calibration
 choice, so they remain valid tests whatever else changes. The `σ = 0` case is not a

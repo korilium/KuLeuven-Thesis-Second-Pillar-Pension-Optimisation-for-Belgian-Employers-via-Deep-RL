@@ -1,9 +1,11 @@
 # Model walkthrough: from the OLO data to the objective, and one career by hand
 
+> This note walks through the DP stack and the pre-October-2026 rate mode, frozen in `pension/legacy_v1/` (contribution-level action, horizontal ledger, $\sigma_R$ shock, $(t,F,\rho)$ state). The baseline is specified in `docs/MODEL.md`.
+
 This note follows the model in its **canonical configuration**: `RATE_MODEL = "vasicek"`, with the 10Y OLO modelled directly and calibrated on its history, and both legs of the objective valued at the **retirement date** under the real-world measure.
 
 It follows the model in two ways:
-- one interest-rate scenario, end to end, from the NBB data to the joint value $J$ that the DP oracle and the RL agent are scored on (Sections 1–2);
+- one interest-rate scenario, end to end, from the NBB data to the joint value $J$ that the DP reference and the legacy RL environment are scored on (Sections 1–2);
 - one plan member, by hand, for three years under constant rates and under vasicek, with the same shocks (Section 3).
 
 It then uses those numbers to show:
@@ -16,7 +18,7 @@ The numbers come from the code. The blocks between `gen` markers are written by 
 - the hand-computed accrual equals `rates.accrual.closed_form_accrual` and `numeraire.premium_factor`;
 - the RL environment's mean return equals `simulate()["joint"]`.
 
-The model in full: `docs/MODEL.md`; known issues: `docs/REVIEW.md`.
+The model in full: `pension/legacy_v1/MODEL.md` (baseline: `docs/MODEL.md`); known issues: `docs/REVIEW.md`.
 
 ---
 

@@ -2,6 +2,8 @@
 
 ## Purpose
 
+> The baseline (`pension/baseline.py`, specified in `docs/MODEL.md`) is the model now: a fixed premium, the agent chooses its Branch 21 share, one vertical WAP liability, Branch 23 cash-flow matched to $T$, a 9-variable exact state. The rest of this document describes the DP/legacy stack, whose rate mode is frozen in `pension/legacy_v1/`.
+
 The code computes and evaluates how a Belgian employer should fund a second-pillar (WAP/LPC, Branch 21) plan for one member. The trade-off is between the employee's replacement rate and the employer's cost:
 - the premiums;
 - the statutory return guarantee, which the employer must top up at retirement.
@@ -13,12 +15,12 @@ Three rungs, each validating the next:
 | rung | code | what it is | what it validates |
 |---|---|---|---|
 | 1 | `pension/envs/tabular.py` | tabular Monte Carlo control on a binary contribute/skip decision, deterministic or one shock | that an agent recovers a known optimum (sweep / local-search benchmarks) |
-| 2 | `pension/dp.py` | dynamic programming on the reduced state (t, F, ρ), with Gauss-Hermite quadrature and churn | the oracle: the exact optimum at constant rates; a certainty-equivalent policy under stochastic rates |
-| 3 | `pension/envs/pension_env.py` | a gymnasium environment on the same dynamics and objective | that a learned policy is scored on exactly the DP's scale (the episode-return contract); RL can use the information the DP cannot carry (rate history, ledger mix) |
+| 2 | `pension/dp.py` | dynamic programming on the reduced state (t, F, ρ), with Gauss-Hermite quadrature and churn | the first-principles reference: the exact optimum at constant rates; a certainty-equivalent policy under stochastic rates |
+| 3 | `pension/baseline.py` (legacy: `pension/legacy_v1/env.py`) | baseline: the Branch 21 share MDP. Legacy: a gymnasium environment on the same dynamics and objective as the DP | that a learned policy is scored on exactly the DP's scale (the episode-return contract); RL can use the information the DP cannot carry (rate history, ledger mix) |
 
 The canonical configuration:
-- `VALUATION_DATE = "retirement"`; the name misdescribes it, it is a valuation date (`docs/REVIEW.md` m9);
-- `RATE_MODEL = "vasicek"`, with the constant-rate model as the DP-verifiable rung;
+- `VALUATION_DATE = "retirement"` (renamed from `EMPLOYER_NUMERAIRE`: it selects a valuation date, `docs/REVIEW.md` m9);
+- `RATE_MODEL = "vasicek"`: the 10Y OLO is modelled, the short rate is 10Y minus the term spread; the constant-rate model is the DP-verifiable rung;
 - `hull_white_p` is for robustness only;
 - `vasicek_short`, `hull_white` (Q) and "discounted" are legacy/regression only.
 
@@ -125,12 +127,12 @@ A full worked instance with every intermediate number: `paper/explanations/model
 
 | # | contract | why it matters | pinned by |
 |---|---|---|---|
-| C1 | mean `PensionEnv` episode return = `simulate(...)["joint"]` on the same paths | RL and the DP oracle are scored on one scale | `tests/test_env.py::test_episode_returns_equal_simulate_joint` (both valuation dates; constant, banded, vasicek), `tests/test_numeraire.py::test_env_contract_both_numeraires` |
+| C1 | mean `PensionEnv` episode return = `simulate(...)["joint"]` on the same paths | the legacy RL environment and the DP are scored on one scale (baseline: `tests/test_baseline.py::test_episode_return_equals_simulate_reward`) | `tests/test_legacy_v1.py::test_episode_returns_equal_simulate_joint` (both valuation dates; constant, banded, vasicek), `tests/test_numeraire.py::test_env_contract_both_numeraires` |
 | C2 | `dp.F_next` / `rho_next` = `dynamics.step` (vertical ledger, constant rates) | the DP's reduced transitions are the simulated dynamics | `tests/test_dynamics.py::test_one_year_in_force_matches_F_next_rho_next`, `tests/test_numeraire.py::test_reduced_form_matches_step` |
 | C3 | paid-up roll-forward = `dp.paidup_service`'s closed form | leavers are valued exactly | `tests/test_dynamics.py::test_paid_up_roll_forward_matches_paidup_service` |
 | C4 | the "discounted" valuation reproduces the pre-refactor model bit for bit | the old results stay reproducible | `tests/test_regression.py` (golden files from `8fbf451`) |
 | C5 | retirement-date valuation at λ′ = inception-date valuation at λ (constant rates) | the change of valuation date is a positive rescaling | `tests/test_numeraire.py::test_retirement_equals_discounted_at_lambda_prime` |
-| C6 | the horizontal ledger = its closed form, and = 9 rate buckets | the vintage bookkeeping is right | `tests/test_dynamics.py` |
+| C6 | the horizontal ledger (legacy rate mode) = its closed form, and = 9 rate buckets | the vintage bookkeeping is right | `tests/test_dynamics.py` |
 | C7 | the closed-form accrual = Monte Carlo of the realised accrual | the premium factor is the conditional expectation | `tests/test_numeraire.py::test_accrual_accuracy_vasicek`, `tests/test_rates.py` (no floor beyond 4 standard errors + 0.1 bp) |
 
 **What the DP optimises in rate mode** (`dp.solve`): the certainty-equivalent model. It is a constant-rate DP on (t, F, ρ) with:
