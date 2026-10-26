@@ -7,7 +7,7 @@ policies (and every action-valued output) exactly, values to 1e-12 relative.
 
 Each case is (rate model, objective) on a small grid -- enough to exercise every
 branch (constant / Hull-White / Vasicek rates, vertical / horizontal liability,
-four value functions, churn, the band, tracking) in seconds.
+four reward functions, churn, the band, tracking) in seconds.
 """
 import os
 import sys
@@ -31,8 +31,9 @@ def run(dp, model, objective):
     """The outputs of one case, through the current API. (The files were recorded
     with the pre-refactor API, which set dp.RATE_MODEL as a module global; the
     case definitions -- and therefore the files -- are unchanged.)"""
-    p = dp.DEFAULT.replace(RATE_MODEL=model, VALUATION_DATE="discounted",   # the recorded spec
-                           YEAR_START="t0", DRIFT_CORRECTION=False, CE_MOMENTS="levels")
+    date = "VALUATION_DATE" if hasattr(dp.DEFAULT, "VALUATION_DATE") else "EMPLOYER_NUMERAIRE"
+    p = dp.DEFAULT.replace(RATE_MODEL=model, YEAR_START="t0", DRIFT_CORRECTION=False,   # the recorded spec
+                           CE_MOMENTS="levels", **{date: "discounted"})
     Fg, rg = dp.make_F_grid(n=GRID["nF"]), dp.make_rho_grid(n=GRID["nR"])
     ag = dp.make_a_grid(n=GRID["na"])
     out = {}

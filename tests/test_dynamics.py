@@ -1,7 +1,8 @@
 """The DP's reduced (F, rho) transitions are the SAME dynamics as pension.dynamics.
 
-Scope: the DP stack (pension.dp / dynamics / economy); its rate mode is the design
-frozen in pension.legacy_v1. The baseline is tested in tests/test_baseline.py.
+Scope: the DP stack (pension.dp / dynamics / economy) at constant rates, the
+single-vehicle rung. Its rate mode is tested on pension.legacy_v1 (tests/test_legacy_v1.py);
+the baseline in tests/test_baseline.py.
 
 The DP works on F = R/L and rho = S/L with closed-form transitions (F_next,
 rho_next) and a closed-form paid-up value (paidup_service); simulate() and the RL
@@ -54,32 +55,6 @@ def test_paid_up_roll_forward_matches_paidup_service():
     np.testing.assert_allclose(s.rho, rho0 * (1 + p.W) ** p.T, rtol=1e-12)
 
 
-def test_degenerate_rates_equal_constant_rates():
-    """A rate scenario with G_t = G and mu_t = MU, SIGMA_L = 0: the horizontal
-    ledger with one rate is the vertical ledger, so the states coincide."""
-    p = DEFAULT.replace(SIGMA_L=0.0, SIGMA_R_RATES=DEFAULT.SIGMA_R)
-    rng = np.random.default_rng(0); n = 50
-    zR, zL, u = rng.standard_normal(n), rng.standard_normal(n), rng.random(n)
-    a = rng.random(n)
-    c_exo = _exo(p, zR, zL, u)
-    r_exo = _exo(p, zR, zL, u, G=np.full(n, p.G), mu=np.full(n, p.MU))
-    sc = State.initial(p, c_exo, 1.0, 1.0, 10.0); sr = State.initial(p, r_exo, 1.0, 1.0, 10.0)
-    for _ in range(p.T):
-        sc, _ = step(sc, np.where(sc.present, a, 0.0), c_exo, p, dp.tenure_hazard)
-        sr, _ = step(sr, np.where(sr.present, a, 0.0), r_exo, p, dp.tenure_hazard)
-    np.testing.assert_allclose(sr.R, sc.R, rtol=1e-13)
-    np.testing.assert_allclose(sr.L, sc.L, rtol=1e-13)
-    assert np.array_equal(sr.leave_t, sc.leave_t)
-
-
-def test_horizontal_ledger_closed_form():
-    """G steps 3% -> 1.75% at t = 20: old money keeps its rate,
-    L_T = L0 e^{G_0 T} + sum_s c_s e^{G_s (T - s)}; vertical would differ."""
-    from pension.checks import horizontal_closed_form
-    rel, vertical_gap = horizontal_closed_form(DEFAULT)
-    assert rel < 1e-12 and abs(vertical_gap) > 0.05
-
-
 def test_churn_freezes_liability():
     p = DEFAULT; n = 3
     exo = _exo(p, np.zeros(n), np.zeros(n), u=np.zeros(n))
@@ -89,28 +64,3 @@ def test_churn_freezes_liability():
     L1 = s.L.copy()
     s, c = step(s, np.zeros(n), exo, p, ALWAYS)
     assert np.all(c == 0) and np.array_equal(s.L, L1)
-
-
-def test_horizontal_ledger_compresses_into_rate_buckets():
-    """The WAP rate lives on a 25 bp grid in [1.75%, 3.75%], so the horizontal
-    ledger is exactly 9 buckets "liability locked at rate g": vintages with the
-    same rate grow identically (paper/explanations/model-walkthrough.md, sec. 5)."""
-    from pension.economy import draw_rate_scenarios
-    p = DEFAULT.replace(RATE_MODEL="hull_white")
-    n = 50
-    exo = Exogenous.draw(p, n, 3, draw_rate_scenarios(n, p=p))
-    grid = np.round(np.arange(0.0175, 0.03751, 0.0025), 6)
-    assert len(grid) == 9
-    s = State.initial(p, exo, 1.0, 1.0, 15.0)
-    buckets = np.zeros((len(grid), n))
-    buckets[np.searchsorted(grid, np.round(exo.G[0], 6)), np.arange(n)] = 1.0
-    rng = np.random.default_rng(0)
-    for t in range(p.T):
-        a = np.where(s.present, rng.random(n), 0.0)
-        present = s.present.copy()
-        s, c = step(s, a, exo, p, dp.tenure_hazard)
-        g = np.searchsorted(grid, np.round(exo.G[t], 6))
-        assert np.allclose(grid[g], exo.G[t], atol=1e-12)          # on the grid
-        buckets[g, np.arange(n)] += c
-        buckets = np.where(present, buckets * np.exp(grid[:, None]), buckets)
-        np.testing.assert_allclose(buckets.sum(axis=0), s.L, rtol=1e-12)

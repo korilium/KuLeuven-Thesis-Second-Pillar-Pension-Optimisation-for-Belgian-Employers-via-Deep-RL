@@ -1,8 +1,9 @@
 """The refactor contract: the current code reproduces the golden outputs recorded
 from the pre-refactor model (tests/regression/make_golden.py).
 
-Scope: the DP stack (pension.dp / dynamics / economy); its rate mode is the design
-frozen in pension.legacy_v1. The baseline is tested in tests/test_baseline.py.
+Scope: the DP stack (pension.dp / dynamics / economy) at constant rates, the
+single-vehicle rung. Its rate mode is tested on pension.legacy_v1 (tests/test_legacy_v1.py);
+the baseline in tests/test_baseline.py.
 
 Policies and every action-valued output must be IDENTICAL; values may move by
 floating-point reassociation only (<= 1e-12 relative).
@@ -21,8 +22,12 @@ RTOL = 1e-12
 
 def _current(model, objective):
     """The same case through the CURRENT API. This adapter is the one place that
-    follows the refactor; the recorded files never change."""
-    import pension.dp as dp
+    follows the refactor; the recorded files never change. Constant-rate cases run
+    the DP rung (pension.dp); rate-mode cases run the frozen pension.legacy_v1.dp."""
+    if model == "constant":
+        import pension.dp as dp
+    else:
+        import pension.legacy_v1.dp as dp
     return golden.run(dp, model, objective)
 
 

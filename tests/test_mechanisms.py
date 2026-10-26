@@ -2,14 +2,14 @@
 the financing spread, the vasicek calibration knobs, the CE premium schedule, the
 evaluate mode, the soft readout, and the scenario guards (REVIEW M2-M4).
 
-Scope: the DP stack (pension.dp / dynamics / economy); its rate mode is the design
-frozen in pension.legacy_v1. The baseline is tested in tests/test_baseline.py."""
+Scope: the DP stack (pension.dp / dynamics / economy) at constant rates, the
+single-vehicle rung. Its rate mode is tested on pension.legacy_v1 (tests/test_legacy_v1.py);
+the baseline in tests/test_baseline.py."""
 import numpy as np
 import pytest
 
 import pension.dp as dp
 from pension import economy, numeraire
-from pension.rates.accrual import closed_form_accrual
 
 
 @pytest.mark.parametrize("model", ["constant", "vasicek"])
@@ -31,15 +31,6 @@ def test_spread_override_sets_the_short_rate(p):
     np.testing.assert_allclose(sc["y10"] - sc["r"], 0.005, atol=1e-15)
 
 
-def test_ce_premium_is_the_scenario_mean_of_the_accrual(p):
-    q = p.replace(RATE_MODEL="vasicek")
-    sc = economy.draw_rate_scenarios(500, p=q)
-    prem = numeraire.premium_schedule(q, sc)
-    for t in (0, 7, 30, 44):
-        assert prem[t] == pytest.approx(closed_form_accrual(t, sc["r"][t], q, s=q.FINANCING_SPREAD).mean(),
-                                        rel=1e-12)
-
-
 def test_evaluate_mode_reproduces_the_optimum(p, grid):
     """Evaluating the argmax policy (beta = 0) as a plan rule gives back the
     optimised value function."""
@@ -57,16 +48,6 @@ def test_soft_readout_is_affine_invariant():
                                    dp._soft_readout(Q, ag, beta), rtol=1e-12)
     tied = dp._soft_readout(np.ones((7, 2, 2)), ag, 0.1)          # a tie: uniform weights
     np.testing.assert_allclose(tied, ag.mean())
-
-
-def test_scenario_of_another_model_is_refused(p, grid):
-    """REVIEW M2: dynamics and premiums must come from the same model."""
-    sc = economy.draw_rate_scenarios(20, p=p.replace(RATE_MODEL="vasicek"))
-    pol = dp.const_policy(0.4, p.T, len(grid["Fg"]), len(grid["rg"]))
-    with pytest.raises(ValueError):
-        dp.simulate(pol, grid["Fg"], grid["rg"], n_paths=20, rates=sc, p=p)
-    with pytest.raises(ValueError):
-        dp.solve(Fg=grid["Fg"], rg=grid["rg"], ag=grid["ag"], n_quad=grid["nq"], rates=sc, p=p)
 
 
 def test_cached_scenarios_are_read_only(p):

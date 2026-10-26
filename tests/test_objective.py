@@ -1,7 +1,8 @@
 """Every reward function: the DP reference optimises what simulate() scores.
 
-Scope: the DP stack (pension.dp / dynamics / economy); its rate mode is the design
-frozen in pension.legacy_v1. The baseline is tested in tests/test_baseline.py."""
+Scope: the DP stack (pension.dp / dynamics / economy) at constant rates, the
+single-vehicle rung. Its rate mode is tested on pension.legacy_v1 (tests/test_legacy_v1.py);
+the baseline in tests/test_baseline.py."""
 import numpy as np
 import pytest
 
