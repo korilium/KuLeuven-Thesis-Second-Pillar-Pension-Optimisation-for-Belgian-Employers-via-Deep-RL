@@ -1,172 +1,102 @@
 # The model
 
-This document describes the model as the code implements it in the canonical configuration: `EMPLOYER_NUMERAIRE = "retirement"`, `RATE_MODEL = "vasicek"`, and constant rates as the DP-verifiable rung. Where code and intention differ, it documents the code and refers to `docs/REVIEW.md`.
+The baseline as `pension/baseline.py` implements it: one member, a fixed premium, and each year the agent chooses the share of that premium that goes to Branch 21. It is a fully observed MDP. Every equation below names the function that implements it.
 
-## 1. Units and symbols
+Other rungs: the tabular rung (`pension/envs/tabular.py`), the constant-rate single-vehicle DP (`pension/dp.py`, the first-principles reference), and the pre-October-2026 model frozen in `pension/legacy_v1/` (its model document is `pension/legacy_v1/MODEL.md`).
 
-All money is expressed **per unit of final salary** $S_T$, and in **retirement-date money**, i.e. valued at $T$. A premium paid at $t$ is carried to $T$ at the short rate. The terminal payments are not discounted.
+## 1. Units and timing
 
-| symbol | meaning | unit | code |
-|---|---|---|---|
-| $t = 0,\dots,T-1$ | model year: a calendar year, year 0 starting on the first 1 January after the last OLO observation (`YEAR_START = "january"`; `"t0"`: at the observation itself, legacy) | years | loop index |
-| $R_t$, $L_t$, $S_t$ | reserve, guaranteed reserve (WAP liability), salary | money | `State.R`, `State.L`, `State.S` |
-| $F_t = R_t/L_t$, $\rho_t = S_t/L_t$ | funding ratio, salary-to-liability ratio | – | `State.F`, `State.rho` |
-| $a_t\in[0,1]$ | funding decision, share of capacity | – | action |
-| $c_t = a_t\,\Gamma\,S_t$ | premium | money | `step` |
-| $\mu_t$, $G_t$ | credited return (mean log-growth $e^{\mu}$), WAP guarantee rate | 1/yr | `Exogenous.mu`, `.G` (constant: `MU`, `G`) |
-| $r_t$, $s$ | short rate, financing spread | 1/yr | `Exogenous.r` (constant: `SHORT_RATE`), `FINANCING_SPREAD` |
-| $z_R$, $z_L$ | asset and guarantee shocks, $N(0,1)$ | – | `Exogenous.zR`, `.zL` |
-| $\tau$ | year of leaving ($T$ if the member stays) | years | `State.leave_t` |
-| $h(t)$ | churn hazard | 1/yr | `dp.tenure_hazard` |
-| $\lambda$ | employee weight; $(w_{emp}, w_{er}) = (\lambda, 1-\lambda)$ | – | `LAMBDA` |
-| $u$ | normalised CRRA utility, $u(x)=\frac{x^{1-\eta}-1}{1-\eta}$ ($\log$ at $\eta=1$) | – | `objective.u` |
-| $\ddot a$ | annuity factor | years | `ANNUITY` |
+- Model year $t = 0,\dots,T-1$ is a calendar year. Year 0 starts in the first January after the last OLO observation. The 10Y is simulated monthly. A year's state is read in January, with that month's yield observed.
+- Money is in units of the **current salary** $S_t$, and $S_{t+1} = (1+W)S_t$. The reward is in units of $S_T$, in retirement-date money under $P$. Terminal legs are undiscounted, and no market price of risk enters anywhere.
+- Premium $P_t = c\,S_t$, split as $P^{21}_t = \alpha_t P_t$ and $P^{23}_t = (1-\alpha_t)P_t$.
+- Within year $t$: the premium is paid in January; $L$ and $R^{21}$ accrue at the rates fixed in that January; twelve months of rates follow (February to next January); then the member leaves with probability $h(t)$, at service $\tau = t+1$.
+- After exit, premiums stop and $L$ is fixed at $L_\tau$, but the reserves accrue until $T$: $R^{21}$ at $i_t$, and $R^{23}$ by holding its units to $T$. This asymmetry is intended. The guarantee is frozen when the member leaves, but the assets are not liquidated.
+- New member: $L_0 = R^{21}_0 = N_0 = 0$.
 
-Defaults:
+## 2. State and action
+
+| variable | meaning | why it is needed |
+|---|---|---|
+| $t$ | year | horizon; $P(t,T)$, $h(t)$ and the target depend on $t$ |
+| $y_t$ | 10Y OLO, January | Vasicek is Markov in $y$; gives $r_t$ and $P(t,T)$ |
+| $G_t$ | WAP rate of year $t$ | accrual of $L$ this year |
+| $H_t$ | sum of the 20 observed months (Jun $t{-}2$ … Jan $t$) of $G_{t+1}$'s window | $G_{t+1}$ |
+| $K_t$ | sum of the 8 observed months (Jun $t{-}1$ … Jan $t$) of $G_{t+2}$'s window | $H_{t+1}$ |
+| $\mu_t$ | book yield (exponential filter) | $i_t$, and $\mu_{t+1}$ |
+| $L_t$, $R^{21}_t$, $N_t$ | liability, Branch 21 reserve, Branch 23 units | balances |
+
+Nine variables (`State.obs`, which divides $t$, $H$ and $K$ by $T$, 20 and 8). Every transition and the reward are functions of $(s_t,\alpha_t,\varepsilon_t)$, where $\varepsilon_t$ is the year's 12 monthly normals and one exit uniform. The in-force flag and $\tau$ are not needed: exit ends the episode, so every decision state is in force with $\tau = t$. `State` carries both only for the roll-forward to $T$.
+
+**Action:** $\alpha_t \in [0,1]$.
+
+## 3. Equations
+
+| # | equation | function |
+|---|---|---|
+| (1) | $y_{m+1} = y_m e^{-\kappa/12} + \theta(1-e^{-\kappa/12}) + \sigma\sqrt{\tfrac{1-e^{-\kappa/6}}{2\kappa}}\,\varepsilon_{m+1}$ (monthly, exact) | `vasicek_month` |
+| (2) | $r_t = y_t - s_{\text{term}}$ | `short_rate` |
+| (3) | $G_{t+1} = \mathrm{clip}\big(\mathrm{round}_{25\text{bp}}(0.85\cdot\tfrac{1}{24}\textstyle\sum_{\text{Jun }t-2}^{\text{May }t} y),\ 1.75\%,\ 3.75\%\big)$, i.e. $\tfrac{1}{24}(H_t + \sum_{\text{Feb}}^{\text{May}} y)$; then $H_{t+1} = K_t + \sum_{\text{Feb }t}^{\text{Jan }t+1} y$, $K_{t+1} = \sum_{\text{Jun }t}^{\text{Jan }t+1} y$ | `wap_rate`, `step` |
+| (4) | $\mu \leftarrow \mu + w\,(y - \mu)$ every month | `book_yield` |
+| (5) | $i_t = \max(i^{\text{tariff}},\ \mu_t - m)$ | `credited_rate` |
+| (6) | $L_{t+1} = (L_t + P_t)\,e^{G_t}$, $R^{21}_{t+1} = (R^{21}_t + P^{21}_t)\,e^{i_t}$: one recursion, two rates | `accrue` |
+| (7) | $P(t,T) = e^{-y_t (T-t)}$ (flat at the 10Y), $P(T,T) = 1$ | `bond_price` |
+| (8) | $N_{t+1} = N_t + P^{23}_t / P(t,T)$, $R^{23}_t = N_t P(t,T)$, so $R^{23}_T = N_T$ | `buy_units` |
+| (9) | $h(t) = h_\infty + (h_0 - h_\infty)\,e^{-t/\tau_h}$ | `hazard` |
+| (10) | reward at $T$ (Sec. 4) | `reward_legs` |
+| (11) | $A(t,T) = \mathbb E^P_t[e^{\int_t^T r_u du}] = \exp\!\big(\theta\tau + (y_t-\theta)B + \tfrac12 V - s_{\text{term}}\tau\big)$, with $\tau = T-t$, $B = \tfrac{1-e^{-\kappa\tau}}{\kappa}$, $V = \tfrac{\sigma^2}{\kappa^2}(\tau - B) - \tfrac{\sigma^2}{2\kappa}B^2$ | `premium_accrual` |
+
+In salary units, (6) and (8) are divided by $1+W$. Out of force, $P_t = 0$, $L$ accrues at rate 0, and $R^{21}$ still accrues at $i_t$. The year (premium, accrual, 12 months, exit) is `step`; January of year 0 comes from the observed history plus the pre-roll months (`initial_state`).
+
+## 4. Reward
+
+With $R_T = R^{21}_T + R^{23}_T$,
+
+$$
+\text{target}_\tau = \text{RR}_{\text{LEGAL}} + \tfrac{\tau}{T}\left(\text{RR}_{\text{TARGET}} - \text{RR}_{\text{LEGAL}}\right),\qquad
+\text{RR}_{\text{tot}} = \text{RR}_{\text{LEGAL}} + \frac{\max(R_T, L_\tau)}{\ddot a\,S_T},
+$$
+
+$$
+J = \lambda\,\mathbb E\!\left[\text{target}_\tau\,\ddot a\;u\!\left(\frac{\text{RR}_{\text{tot}}}{\text{target}_\tau}\right)\right] - (1-\lambda)\,\mathbb E\!\left[\frac{(L_\tau - R_T)^+}{S_T}\right],
+\qquad u(x) = \frac{x^{1-\eta}-1}{1-\eta}.
+$$
+
+- The shortfall $(L_\tau - R_T)^+$ is borne by the employer and settled at $T$.
+- The reward is paid once, at $T$; it is zero before. $\gamma = 1$.
+- The premium cost $\sum_{t<\tau} c\,(1+W)^{-(T-t)}A(t,T)$ does not depend on $\alpha$. It is left out of the reward and reported by `simulate()` as `premium_cost`.
+- The WAP minimum, the 80% rule and non-discrimination are not part of the optimisation.
+
+## 5. Environment and evaluation
+
+- `PensionEnv`: the observation is `State.obs` (9 values) and the action is $\alpha_t$.
+  - When the member leaves, the remaining years are rolled forward on the episode's own noise, and the reward at $T$ is paid in that step.
+  - Training episodes draw their noise from a pool seeded by `TRAIN_SEED`. `reset(options={"noise": ..., "state": ...})` replays given noise, optionally from a snapshot.
+- `simulate(policy)`: the same `step` over many careers on noise seeded by `EVAL_SEED`. It returns `joint` $= J$, the two legs, the mean shortfall and its frequency, `premium_cost`, the per-path `reward`, and per-year rate diagnostics.
+
+## 6. Parameters
+
+All parameters are in `baseline.Params`; the default is `BASELINE`. The statutory WAP constants live in `pension/rates/wap.py`.
 
 <!-- gen:defaults -->
-| symbol | Params field | default |
+| symbol | field | default |
 |---|---|---|
 | $T$ | `T` | 45 |
-| $\Gamma$ | `GAMMA` | 0.15 |
 | $W$ | `W` | 0.025 |
+| $c$ | `C` | 0.05 |
+| $i^{\text{tariff}}$ | `I_TARIFF` | 0.01 |
+| $m$ | `M` | 0.0 |
+| $w$ (per month) | `BOOK_WEIGHT` | 0.02083 (1/48) |
 | $\lambda$ | `LAMBDA` | 0.5 |
 | $\eta$ | `ETA` | 2.0 |
 | $\ddot a$ | `ANNUITY` | 15.0 |
-| $\text{RR}_{legal}$ | `RR_LEGAL` | 0.43 |
-| $\text{RR}^*$ | `RR_TARGET` | 0.7 |
-| $\mu$, $G$ (constant) | `MU`, `G` | 0.03, 0.03 |
-| $r$ (constant) | `SHORT_RATE` | 0.03 |
-| $s$ | `FINANCING_SPREAD` | 0.0 |
-| $\sigma_R$, $\sigma_L$ | `SIGMA_R`, `SIGMA_L` | 0.05, 0.02 |
-| $\sigma_R$ (rate mode) | `SIGMA_R_RATES` | 0.05 |
+| $\text{RR}_{\text{LEGAL}}$ | `RR_LEGAL` | 0.43 |
+| $\text{RR}_{\text{TARGET}}$ | `RR_TARGET` | 0.7 |
+| $h_0$, $h_\infty$, $\tau_h$ | `H0`, `HINF`, `HTAU` | 0.12, 0.025, 7.0 |
+| long-run short rate | `LONG_RATE_P` | None |
+| $s_{\text{term}}$ | `SPREAD_10Y_SHORT` | None |
+| seeds | `TRAIN_SEED`, `EVAL_SEED` | 2026, 7 |
 <!-- /gen -->
-
-## 2. The objective
-
-With $\text{RR}_\text{tot} = \text{RR}_\text{legal} + \dfrac{\max(R_T, L_\tau)}{\ddot a\, S_T}$, where $L_\tau$ is the liability frozen when the member leaves, and the service-pro-rated target
-$$\text{target}_\tau = \text{RR}_\text{legal} + \frac{\tau}{T}\left(\text{RR}^\* - \text{RR}_\text{legal}\right),$$
-the `baseline` objective that `dp.solve` maximises and `dp.simulate` scores is
-
-$$
-J \;=\; \lambda\,\mathbb E^P\!\left[\text{target}_\tau\,\ddot a\;u\!\left(\frac{\text{RR}_\text{tot}}{\text{target}_\tau}\right)\right]
-\;-\;(1-\lambda)\,\mathbb E^P\!\left[\sum_{t<\tau} a_t\,\Gamma\,(1+W)^{-(T-t)}\,A(t,T)
-\;+\;\frac{(L_\tau - R_T)^+}{S_T}\right],
-$$
-
-$$
-A(t,T) = \mathbb E^P_t\!\left[\exp\!\int_t^T (r_u + s)\,du\right].
-$$
-
-- $(1+W)^{-(T-t)}$ converts a year-$t$ premium into final-salary units. It is a change of units, not a discount.
-- $A(t,T)$ is the conditional expectation given $r_t$, so each reward is known when it is paid.
-- The terminal legs are paid at $T$ and are not discounted.
-
-The other registered objectives (`docs/REFERENCE.md`) replace the employee curve, the shortfall cost, the contribution cost or the weights. The valuation-date factors (`pension/numeraire.py`) are applied around them.
-
-**Closed forms of $A(t,T)$** (`rates/accrual.py`, $\tau = T-t$, $B(\tau) = (1-e^{-\kappa\tau})/\kappa$):
-- **constant rates:** $A = e^{(r+s)\tau}$.
-- **vasicek:** the modelled rate is the 10Y $y$ (κ, θ, σ under $P$), and $r = y - \text{spread}$:
-$$
-\text{mean}(I_y) = \theta\tau + (y_t-\theta)B(\tau),\quad
-\text{var}(I_y) = \frac{\sigma^2}{\kappa^2}\left(\tau - B(\tau)\right) - \frac{\sigma^2}{2\kappa}B(\tau)^2,
-$$
-$$
-A(t,T) = \exp\!\left(\text{mean} + \tfrac12\text{var} + (s - \text{spread})\,\tau\right).
-$$
 
 <!-- gen:vasicek_params -->
-Canonical vasicek: $\kappa$ = 0.1104, $\theta$ = 2.23% (OLS; `LONG_RATE_P` = None), $\sigma$ = 0.61%, $y_0$ = 4.12%, spread = 128.4 bp.
+Calibration (OLS on 321 monthly 10Y observations up to Sep 2026): $\kappa$ = 0.1104, $\theta$ = 2.23% (`LONG_RATE_P` = None: the OLS estimate; long-run short rate 0.95%), $\sigma$ = 0.61%, $y_0$ = 4.12%; $s_{\text{term}}$ = 128.4 bp (mean 10Y - 1Y over the same months).
 <!-- /gen -->
-
-`LONG_RATE_P` is the long-run real-world **short** rate in every model. Under vasicek it sets θ = `LONG_RATE_P` + spread, the asymptotic mean of the 10Y (`None`: the OLS θ, so the long-run short rate is θ − spread).
-
-## 3. Why the retirement date
-
-Both terminal payments, the pension $\max(R_T, L_\tau)$ and the employer's top-up $(L_\tau - R_T)^+$, fall at $T$, leavers included: the WAP shortfall is settled at retirement. So retirement-date money is the natural unit.
-
-Under constant rates the legacy inception-date objective ("discounted": premiums at $e^{-\delta_f t}$, the employee leg at $e^{-\delta_e T}$, the shortfall at $e^{-\delta_f T}$) with $\delta_f = r$ equals the retirement-date objective times the positive constant $e^{-rT}(1-\lambda)/(1-\lambda')$, at the remapped weight
-$$
-\lambda' = \frac{\lambda e^{-\delta_e T}}{\lambda e^{-\delta_e T} + (1-\lambda) e^{-rT}}.
-$$
-The argmax is unchanged. This is checked to $5\times10^{-10}$ in `tests/test_numeraire.py`.
-
-<!-- gen:lambda_prime -->
-With the legacy defaults ($\lambda$ = 0.5, $\delta_f$ = 0.05, $\delta_e$ = 0.03, $T$ = 45) the inception-date objective equals the retirement-date one at $\lambda'$ = 0.7109 with $r = \delta_f$.
-<!-- /gen -->
-
-## 4. One year of a career (`dynamics.step`)
-
-For every path, with $a_t = 0$ once the member has left:
-
-| | in force | paid-up (after leaving) |
-|---|---|---|
-| premium | $c_t = a_t\Gamma S_t$ | 0 |
-| reserve | $R_{t+1} = (R_t + c_t)\,e^{\mu_t - \sigma^2/2 + \sigma z_R}$ | $R_{t+1} = R_t\,e^{\mu_t}$ (no shock) |
-| liability | see the ledgers | frozen: $L_{t+1}=L_t$ |
-| salary | $S_{t+1} = (1+W)S_t$ | same |
-| churn | leaves with probability $h(t)$: $u_t < h(t)$ | – |
-
-$\sigma$ is `SIGMA_R` at constant rates and `SIGMA_R_RATES` under a rate model. The $-\sigma^2/2$ (`DRIFT_CORRECTION`, default) makes $\mu$ the mean growth of $R$ both in force and paid-up: $\mathbb E[e^{\mu - \sigma^2/2 + \sigma z}] = e^{\mu}$. With `DRIFT_CORRECTION = False` (legacy) the in-force mean is $\mu + \sigma^2/2$.
-
-**Ledgers.**
-- **Vertical** (constant rates): $L_{t+1} = (L_t + c_t)\,e^{G - \sigma_L^2/2 + \sigma_L z_L}$ (mean growth $e^G$; legacy without the $-\sigma_L^2/2$).
-- **Horizontal** (rate models, the Branch-21 method): each premium is a vintage locked at the $G_t$ of its year. The opening liability is locked at $G_0$.
-$$
-L_{t+1} = \sum_{v\le t} L^{(v)}_t e^{G_v} + c_t e^{G_t},\qquad L = \sum_v L^{(v)}.
-$$
-- **At retirement** (`dynamics.settle`): payout $\max(R_T, L_T)$, shortfall $(L_T-R_T)^+$, service $\min(\tau/T, 1)$.
-
-## 5. The reduced state $(t, F, \rho)$
-
-**When it suffices.** Dividing the vertical, constant-rate year by $L$, with $l = a\Gamma\rho$:
-$$
-F' = \frac{F + l}{1+l}\,e^{(\mu-\sigma_R^2/2) - (G-\sigma_L^2/2) + \sigma_R z_R - \sigma_L z_L},
-\qquad
-\rho' = \frac{(1+W)\rho}{(1+l)\,e^{G-\sigma_L^2/2+\sigma_L z_L}}
-$$
-(`dp.F_next`, `dp.rho_next`; contract C2).
-- The premium cost $a\Gamma(1+W)^{-(T-t)}A(t,T)$ depends only on $(a,t)$.
-- The terminal value depends only on $(F_T,\rho_T)$, because $\max(R,L)/S_T = \max(F,1)/\rho$ and $(L-R)^+/S_T = \max(1-F,0)/\rho$.
-
-So the problem is homogeneous of degree 0 in $(R,L,S)$, and $(t,F,\rho)$ is a Markov state (`checks.scale_invariance`).
-
-**Where it stops.** Under the horizontal ledger, $L'/L = \sum_v w_v e^{G_v} + l\,e^{G_t}$ with $w_v = L^{(v)}/L$. The growth of $L$ depends on the vintage mix, which $(F,\rho)$ cannot see. A counterexample is in `paper/explanations/model-walkthrough.md` §5.
-- **Rate memory.** $G_{t+1}$ needs the trailing 24 months of the 10Y, $\mu_{t+1}$ the trailing 8 years, and $A$ needs $r_t$.
-- **The ledger compresses exactly.** $G$ lives on a 25 bp grid in $[1.75\%, 3.75\%]$, so 9 buckets "liability locked at $g$" suffice (`tests/test_dynamics.py`).
-
-## 6. The RL environment (`envs/pension_env.py`)
-
-**Observation** (float64, 6): $(t/T,\ F,\ \log\rho,\ G_t,\ \mu_t,\ r_t)$, where $r_t = y_t - \text{spread}$ under vasicek and `SHORT_RATE` at constant rates. `DPPolicyAgent` reads components 0–2.
-
-**Action:** $a\in[0,1]$, clipped to `band`.
-
-**Reward per step:**
-- each year in force: $-(1-\lambda)\,a\Gamma(1+W)^{-(T-t)}A(t,T;r_t)$;
-- at $T$, or immediately when the member leaves (the remaining paid-up years are rolled forward inside the step): $\lambda\,\text{employee}(\cdot) - (1-\lambda)\,\text{shortfall}(\cdot)$.
-
-$\gamma = 1$. The mean episode return equals `simulate(...)["joint"]` (contract C1). The observation does not contain the vintage mix or the rate history, so the problem is partially observed under rates.
-
-## 7. The DP (`dp.solve`)
-
-**Grids:** $F\in[0,3]$ linear (`make_F_grid`; $F=1$ is a node), $\rho\in[0.01,35]$ log-spaced, $a$ on a grid (or a band). **Backward induction from** $V_T = $ `terminal`:
-$$
-V_t(F,\rho) = \max_a\Big\{-w_{er}\,a\Gamma(1+W)^{-(T-t)}\,\pi_t
-\;+\;\sum_q \omega_q\,\bar V_{t+1}\big(F'(z_q),\rho'(z_q)\big)\Big\},
-\qquad
-\bar V_{t+1} = (1-h(t))\,V_{t+1} + h(t)\,\Phi_{t+1}.
-$$
-- **Premium factor:** $\pi_t$ comes from `numeraire.premium_schedule`: $e^{(r+s)(T-t)}$ at constant rates.
-- **Churn blend:** a leaver still pays year $t$; the freeze applies from $t+1$.
-- **Paid-up value:** $\Phi_\tau(F,\rho)$ (`paidup_service`) is closed-form, since nothing random remains: $F\to Fe^{\mu m}$, $\rho\to\rho(1+W)^m$ with $m = T-\tau$, valued against $\text{target}_\tau$.
-- **Quadrature:** a tensor-product Gauss-Hermite rule over $(z_R,z_L)$ (`gauss_hermite_2d`, default 5×5; converged, REVIEW m11).
-- **Interpolation:** `bilinear` over $(F,\log\rho)$; off-grid points are clipped to the edge; `simulate()["clipped"]` reports the share of in-force look-ups that were.
-- **Policy extraction:** the argmax, or with `BETA > 0` a softmax over actions with temperature relative to the local Q-range (`_soft_readout`). $V$ is $\max_a Q$ either way.
-
-**Rate mode: certainty equivalent.** The state cannot carry $r_t$, the WAP window or the vintage mix. `solve` draws `RATE_CE_PATHS` scenarios and solves the constant-rate DP with:
-- $G, \mu$ = the scenario means;
-- $\sigma_L = 0$ and $\sigma_R = \sigma_{R,rates}$ (`CE_MOMENTS = "conditional"`, default): $G_t$ is fixed on 1 January and $\mu_t$ is the book yield up to then, so neither is a shock within the year. (`"levels"`, legacy: $\sigma_L$ = the std of the levels of $G_t$, $\sigma_R = \sqrt{\sigma_{R,rates}^2 + \text{var}(\mu_t)}$);
-- a vertical ledger;
-- $\pi_t$ = the scenario mean of $A(t,T;r_t)$.
-
-The resulting policy is scored by `simulate` on the true paths.

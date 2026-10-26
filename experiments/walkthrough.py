@@ -454,27 +454,28 @@ def api_reference():
 
 
 def model_blocks():
-    p = P_V
-    vp = economy.vasicek_params(p)
-    lp = checks.lambda_prime(DEFAULT.LAMBDA, DEFAULT.DISC_ER, DEFAULT.DISC_EMP, DEFAULT.T)
+    """docs/MODEL.md documents the baseline (pension/baseline.py)."""
+    from pension.baseline import BASELINE as q
+    vp = economy.vasicek_params(q)
+    rows = [["$T$", "`T`", q.T], ["$W$", "`W`", q.W], ["$c$", "`C`", q.C],
+            ["$i^{\\text{tariff}}$", "`I_TARIFF`", q.I_TARIFF], ["$m$", "`M`", q.M],
+            ["$w$ (per month)", "`BOOK_WEIGHT`", f"{q.BOOK_WEIGHT:.5f} (1/48)"],
+            ["$\\lambda$", "`LAMBDA`", q.LAMBDA], ["$\\eta$", "`ETA`", q.ETA],
+            ["$\\ddot a$", "`ANNUITY`", q.ANNUITY], ["$\\text{RR}_{\\text{LEGAL}}$", "`RR_LEGAL`", q.RR_LEGAL],
+            ["$\\text{RR}_{\\text{TARGET}}$", "`RR_TARGET`", q.RR_TARGET],
+            ["$h_0$, $h_\\infty$, $\\tau_h$", "`H0`, `HINF`, `HTAU`", f"{q.H0}, {q.HINF}, {q.HTAU}"],
+            ["long-run short rate", "`LONG_RATE_P`", q.LONG_RATE_P],
+            ["$s_{\\text{term}}$", "`SPREAD_10Y_SHORT`", q.SPREAD_10Y_SHORT],
+            ["seeds", "`TRAIN_SEED`, `EVAL_SEED`", f"{q.TRAIN_SEED}, {q.EVAL_SEED}"]]
+    cal = economy.rate_calibration()
     return {
-        "defaults": table(["symbol", "Params field", "default"],
-                          [["$T$", "`T`", DEFAULT.T], ["$\\Gamma$", "`GAMMA`", DEFAULT.GAMMA],
-                           ["$W$", "`W`", DEFAULT.W], ["$\\lambda$", "`LAMBDA`", DEFAULT.LAMBDA],
-                           ["$\\eta$", "`ETA`", DEFAULT.ETA], ["$\\ddot a$", "`ANNUITY`", DEFAULT.ANNUITY],
-                           ["$\\text{RR}_{legal}$", "`RR_LEGAL`", DEFAULT.RR_LEGAL],
-                           ["$\\text{RR}^*$", "`RR_TARGET`", DEFAULT.RR_TARGET],
-                           ["$\\mu$, $G$ (constant)", "`MU`, `G`", f"{DEFAULT.MU}, {DEFAULT.G}"],
-                           ["$r$ (constant)", "`SHORT_RATE`", DEFAULT.SHORT_RATE],
-                           ["$s$", "`FINANCING_SPREAD`", DEFAULT.FINANCING_SPREAD],
-                           ["$\\sigma_R$, $\\sigma_L$", "`SIGMA_R`, `SIGMA_L`", f"{DEFAULT.SIGMA_R}, {DEFAULT.SIGMA_L}"],
-                           ["$\\sigma_R$ (rate mode)", "`SIGMA_R_RATES`", DEFAULT.SIGMA_R_RATES]]),
-        "lambda_prime": (f"With the legacy defaults ($\\lambda$ = {DEFAULT.LAMBDA}, $\\delta_f$ = {DEFAULT.DISC_ER}, "
-                         f"$\\delta_e$ = {DEFAULT.DISC_EMP}, $T$ = {DEFAULT.T}) the inception-date objective "
-                         f"equals the retirement-date one at $\\lambda'$ = {lp:.4f} with $r = \\delta_f$."),
-        "vasicek_params": (f"Canonical vasicek: $\\kappa$ = {vp['kappa']:.4f}, $\\theta$ = {pct(vp['theta'])} "
-                           f"(OLS; `LONG_RATE_P` = {p.LONG_RATE_P}), $\\sigma$ = {pct(vp['sigma'])}, "
-                           f"$y_0$ = {pct(vp['y0'])}, spread = {vp['spread'] * 1e4:.1f} bp."),
+        "defaults": table(["symbol", "field", "default"], rows),
+        "vasicek_params": (f"Calibration (OLS on {len(cal['hist10Y'])} monthly 10Y observations up to "
+                           f"{cal['t0']:%b %Y}): $\\kappa$ = {vp['kappa']:.4f}, $\\theta$ = {pct(vp['theta'])} "
+                           f"(`LONG_RATE_P` = None: the OLS estimate; long-run short rate "
+                           f"{pct(vp['theta'] - vp['spread'])}), $\\sigma$ = {pct(vp['sigma'])}, "
+                           f"$y_0$ = {pct(vp['y0'])}; $s_{{\\text{{term}}}}$ = {vp['spread'] * 1e4:.1f} bp "
+                           f"(mean 10Y - 1Y over the same months)."),
     }
 
 
