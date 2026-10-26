@@ -89,7 +89,7 @@ def _cross_matrix(names=NAMES):
 @c.restores
 def checks(tol=0.01):
     Fg, rg, ag, nq = _grids()
-    dp, P = c.dp, c.P.replace(EMPLOYER_NUMERAIRE="discounted")   # the hand formula is the discounted one
+    dp, P = c.dp, c.P.replace(VALUATION_DATE="discounted")   # the hand formula is the discounted one
 
     # baseline == the committed formulas, written out by hand
     Fc, rc = Fg[:, None], rg[None, :]

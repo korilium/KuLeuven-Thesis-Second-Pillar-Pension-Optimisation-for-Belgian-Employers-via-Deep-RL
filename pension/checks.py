@@ -45,7 +45,7 @@ def lambda_reparam(p, Fg, rg, ag, nq, lam=0.5, de_new=0.02, objective=None):
     equivalent at the reference DISC_EMP -- must be ~0. Returns (gap, lam_eq).
     A statement about the DISCOUNTED objective (DISC_EMP does not enter the
     retirement numeraire), so it is evaluated there."""
-    p = p.replace(EMPLOYER_NUMERAIRE="discounted")
+    p = p.replace(VALUATION_DATE="discounted")
     lam_eq = lambda_equivalent(p, de_new, lam=lam)
     pa = dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq, objective=objective,
                   p=p.replace(LAMBDA=lam, DISC_EMP=de_new))["policy"]
@@ -88,7 +88,7 @@ def timing_neutrality(p, Fg, rg, nq, entry, n_paths, seed, band_pct=(0.02, 0.15)
     MU, i.e. DRIFT_CORRECTION (REVIEW M6; without it the mean is MU + SIGMA_R^2/2
     and early funding pays). Constant rates only."""
     lo, hi = band_pct[0] / p.GAMMA, band_pct[1] / p.GAMMA
-    q = p.replace(SHORT_RATE=p.MU, G=p.MU) if p.EMPLOYER_NUMERAIRE == "retirement" \
+    q = p.replace(SHORT_RATE=p.MU, G=p.MU) if p.VALUATION_DATE == "retirement" \
         else p.replace(DISC_ER=p.MU, DISC_EMP=p.MU)
     pol = dp.solve(Fg=Fg, rg=rg, ag=np.linspace(lo, hi, na), n_quad=nq, p=q)["policy"]
     r = dp.simulate(pol, Fg, rg, **entry, band=(lo, hi), n_paths=n_paths, seed=seed, p=q)
@@ -322,6 +322,16 @@ def accrual_accuracy(p, n=4000, years=(0, 5, 10, 20, 30, 40, 44)):
 
 
 # --- the employer's numeraire (stage 3) ---------------------------------------------------
+def legacy_params(p):
+    """p as pension.legacy_v1 parameters (the one renamed field: VALUATION_DATE was
+    EMPLOYER_NUMERAIRE), so the frozen environment can run next to pension.dp."""
+    import dataclasses
+    from pension.legacy_v1.params import Params as LegacyParams
+    f = dataclasses.asdict(p)
+    f["EMPLOYER_NUMERAIRE"] = f.pop("VALUATION_DATE")
+    return LegacyParams(**f)
+
+
 def env_contract(p, Fg, rg, ag, nq, entry, n_paths, seed, objective=None):
     """(a) |mean PensionEnv episode return - simulate()["joint"]| on the same paths,
     with the solved policy (0 up to floating point)."""
@@ -332,7 +342,7 @@ def env_contract(p, Fg, rg, ag, nq, entry, n_paths, seed, objective=None):
     sim = dp.simulate(pol, Fg, rg, **entry, n_paths=n_paths, seed=seed, rates=rates,
                       objective=objective, p=p)
     exo = Exogenous.draw(p, n_paths, seed, rates)
-    env, agent = PensionEnv(p=p, objective=objective), DPPolicyAgent(pol, Fg, rg, p.T)
+    env, agent = PensionEnv(p=legacy_params(p), objective=objective), DPPolicyAgent(pol, Fg, rg, p.T)
     R0, L0, S0 = (np.broadcast_to(np.asarray(entry[k], float), (n_paths,)) for k in ("R0", "L0", "S0"))
     rets = []
     for i in range(n_paths):
@@ -376,9 +386,9 @@ def numeraire_equivalence(p, Fg, rg, ag, nq, lam, r, de):
     lp = lambda_prime(lam, r, de, p.T)
     q = p.replace(RATE_MODEL="constant")
     new = dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq, p=q.replace(
-        EMPLOYER_NUMERAIRE="retirement", SHORT_RATE=r, FINANCING_SPREAD=0.0, LAMBDA=lp))
+        VALUATION_DATE="retirement", SHORT_RATE=r, FINANCING_SPREAD=0.0, LAMBDA=lp))
     old = dp.solve(Fg=Fg, rg=rg, ag=ag, n_quad=nq, p=q.replace(
-        EMPLOYER_NUMERAIRE="discounted", DISC_ER=r, DISC_EMP=de, LAMBDA=lam))
+        VALUATION_DATE="discounted", DISC_ER=r, DISC_EMP=de, LAMBDA=lam))
     factor = np.exp(-r * p.T) * (1 - lam) / (1 - lp)
     ratio = old["V"] / (factor * new["V"])
     return (float(np.abs(new["policy"] - old["policy"]).max()),
@@ -393,8 +403,8 @@ def face_value_premiums(p, Fg, rg, entry, n_paths, seed, a=0.4):
     |difference| in cost and joint)."""
     from pension import numeraire
     q = p.replace(RATE_MODEL="constant", SHORT_RATE=0.0, FINANCING_SPREAD=0.0)
-    ret = q.replace(EMPLOYER_NUMERAIRE="retirement")
-    disc = q.replace(EMPLOYER_NUMERAIRE="discounted", DISC_ER=0.0, DISC_EMP=0.0)
+    ret = q.replace(VALUATION_DATE="retirement")
+    disc = q.replace(VALUATION_DATE="discounted", DISC_ER=0.0, DISC_EMP=0.0)
     f = np.array(numeraire.premium_schedule(ret) + list(numeraire.terminal_factors(ret)))
     pol = dp.const_policy(a, q.T, len(Fg), len(rg))
     kw = dict(**entry, n_paths=n_paths, seed=seed)

@@ -81,7 +81,7 @@ def inert(*params):
     hit = [p for p in params if p in INERT]
     if hit:
         print(f"  skipped: {', '.join(hit)} {'is' if len(hit) == 1 else 'are'} inert by construction "
-              f"under EMPLOYER_NUMERAIRE='retirement' (the objective has no discount rate)")
+              f"under VALUATION_DATE='retirement' (the objective has no discount rate)")
     return bool(hit)
 
 
@@ -99,7 +99,7 @@ PARAMS = ["LAMBDA", "RR_TARGET", "RR_LEGAL", "ANNUITY", "GAMMA", "ETA", "G", "MU
           "SIGMA_R", "DISC_ER"]
 # Under the retirement numeraire (the default) the discount rates do not enter the
 # objective at all: sweeps over them are inert by construction (see inert()).
-INERT = ("DISC_ER", "DISC_EMP") if dp.DEFAULT.EMPLOYER_NUMERAIRE == "retirement" else ()
+INERT = ("DISC_ER", "DISC_EMP") if dp.DEFAULT.VALUATION_DATE == "retirement" else ()
 PARAMS = [p for p in PARAMS if p not in INERT]
 if RATES != "constant":     # the tornado sweeps what the regime leaves free
     PARAMS = [p for p in PARAMS if p not in RATE_OWNED] + ["SIGMA_R_RATES"]

@@ -2,7 +2,7 @@
 numeraire.py -- when the employer's money is valued: the timing around the objective.
 
 The Objective (pension/objective.py) says WHAT each leg is worth; this module says
-in which money. Two choices, set by p.EMPLOYER_NUMERAIRE:
+in which money. Two choices, set by p.VALUATION_DATE:
 
 "retirement" (default) -- both legs in retirement-date money, under P:
 
@@ -29,13 +29,13 @@ _NUMERAIRES = ("retirement", "discounted")
 
 
 def _check(p):
-    if p.EMPLOYER_NUMERAIRE not in _NUMERAIRES:
-        raise ValueError(f"EMPLOYER_NUMERAIRE must be one of {_NUMERAIRES}, got {p.EMPLOYER_NUMERAIRE!r}")
+    if p.VALUATION_DATE not in _NUMERAIRES:
+        raise ValueError(f"VALUATION_DATE must be one of {_NUMERAIRES}, got {p.VALUATION_DATE!r}")
 
 
 def retirement(p):
     _check(p)
-    return p.EMPLOYER_NUMERAIRE == "retirement"
+    return p.VALUATION_DATE == "retirement"
 
 
 def terminal_factors(p):
@@ -56,7 +56,7 @@ def premium_factor(t, r_t, p):
         raise ValueError("hull_white's short rate is risk-neutral: it has no place in the "
                          "'retirement' numeraire. Use RATE_MODEL='vasicek' (canonical) or "
                          "'hull_white_p' (LONG_RATE_P=None is hull_white's phi = 0 case), or "
-                         "EMPLOYER_NUMERAIRE='discounted'.")
+                         "VALUATION_DATE='discounted'.")
     from pension.rates.accrual import closed_form_accrual
     return closed_form_accrual(t, r_t, p, s=p.FINANCING_SPREAD)
 

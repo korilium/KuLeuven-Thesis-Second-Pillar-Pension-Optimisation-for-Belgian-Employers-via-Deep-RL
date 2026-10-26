@@ -16,7 +16,7 @@ Employer leg: linear WAP shortfall  max(1-F,0)/rho.  (This is the "baseline" obj
 every leg is swappable -- see objective.py and the OBJECTIVE switch.)  Asset (z_R) and guarantee (z_L)
 shocks; Gauss-Hermite quadrature; reduced state (t, F, rho).
 
-Numeraire (pension/numeraire.py, p.EMPLOYER_NUMERAIRE). Default "retirement": both
+Numeraire (pension/numeraire.py, p.VALUATION_DATE). Default "retirement": both
 legs in retirement-date money under P,
     J = lambda E[ employee(RR_tot, target) ]
       - (1 - lambda) E[ sum_t contribution(a_t, t) A(t,T) + shortfall((L - R)^+ / S_T) ],
@@ -471,7 +471,7 @@ def simulate(policy, Fg, rg, R0=1.0, L0=1.0, S0=None, band=None, n_paths=30000,
     `objective` scores the outcome (None follows the OBJECTIVE switch; see
     objective.py): `benefit` is the employee leg, `cost` the employer leg
     (contributions + terminal shortfall, in the objective's cost units), both in
-    the numeraire of p.EMPLOYER_NUMERAIRE -- retirement-date money (premiums times
+    the numeraire of p.VALUATION_DATE -- retirement-date money (premiums times
     their path's A(t,T; r_t), terminal legs undiscounted) or discounted to t = 0 --
     and `joint` their weighted difference, the quantity solve() maximises.
 

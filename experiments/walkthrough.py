@@ -9,7 +9,7 @@ listed in DOCS; each document has its own block producers.
 
 DOC is a key of DOCS (walkthrough, review, architecture, model, reference, debugging).
 
-Canonical configuration: RATE_MODEL = "vasicek", EMPLOYER_NUMERAIRE = "retirement".
+Canonical configuration: RATE_MODEL = "vasicek", VALUATION_DATE = "retirement".
 The walkthrough (Part A) follows one vasicek scenario from the NBB CSV to
 simulate()["joint"]; Part B follows one member by hand, constant vs vasicek.
 """
@@ -200,7 +200,7 @@ def part_a():
 
     # --- whole careers: environment returns vs simulate()["joint"] ---
     sim = dp.simulate(pol, Fg, rg, R0=R0, L0=L0, S0=S0, n_paths=N, seed=SEED, rates=scen, p=p)
-    env, agent = PensionEnv(p=p), DPPolicyAgent(pol, Fg, rg, p.T)
+    env, agent = PensionEnv(p=checks.legacy_params(p)), DPPolicyAgent(pol, Fg, rg, p.T)
     rets, info_j, contrib_j, obs_j = [], None, 0.0, None
     for i in range(N):
         obs, _ = env.reset(options=dict(exogenous=exo.paths(i), entry=(R0[i], L0[i], S0[i])))
@@ -348,7 +348,7 @@ PARAM_DOC = {   # unit, meaning, used by, inert under the canonical configuratio
     "DRIFT_CORRECTION": ("bool", "shocked growth e^{m - s^2/2 + s z} (mean e^m); False: legacy e^{m + s z} (REVIEW M6)", "dynamics.step, dp.F_next/rho_next", "no"),
     "CE_MOMENTS": ("name", "CE shocks: 'conditional' (SIGMA_L = 0, SIGMA_R = SIGMA_R_RATES) | 'levels' (legacy, REVIEW M10)", "dp.certainty_equivalent", "constant: yes"),
     "YEAR_START": ("name", "'january': model years are calendar years | 't0' (legacy, REVIEW C1)", "economy, accrual (hull_white_p)", "constant: yes"),
-    "EMPLOYER_NUMERAIRE": ("name", "valuation date: 'retirement' | 'discounted' (REVIEW m9)", "numeraire", "no"),
+    "VALUATION_DATE": ("name", "valuation date: 'retirement' | 'discounted' (REVIEW m9)", "numeraire", "no"),
     "SHORT_RATE": ("1/yr", "short rate of the constant model", "numeraire, dynamics.Exogenous", "vasicek: yes"),
     "FINANCING_SPREAD": ("1/yr", "s: financing spread over the short rate", "numeraire, accrual", "no"),
     "N_EVAL": ("-", "tabular rung's SAA batch size (legacy copy)", "nothing (tabular reads economy.N_EVAL)", "yes"),

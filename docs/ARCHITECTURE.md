@@ -17,7 +17,7 @@ Three rungs, each validating the next:
 | 3 | `pension/envs/pension_env.py` | a gymnasium environment on the same dynamics and objective | that a learned policy is scored on exactly the DP's scale (the episode-return contract); RL can use the information the DP cannot carry (rate history, ledger mix) |
 
 The canonical configuration:
-- `EMPLOYER_NUMERAIRE = "retirement"`; the name misdescribes it, it is a valuation date (`docs/REVIEW.md` m9);
+- `VALUATION_DATE = "retirement"`; the name misdescribes it, it is a valuation date (`docs/REVIEW.md` m9);
 - `RATE_MODEL = "vasicek"`, with the constant-rate model as the DP-verifiable rung;
 - `hull_white_p` is for robustness only;
 - `vasicek_short`, `hull_white` (Q) and "discounted" are legacy/regression only.

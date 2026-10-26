@@ -132,7 +132,7 @@ def stage3(n_paths=15000, n_env=300, n_acc=20000):
     R0, L0, S0 = dp.new_plan_init(n_paths, np.random.default_rng(7))
     entry = dict(R0=R0, L0=L0, S0=S0)
     small = {k: v[:n_env] for k, v in entry.items()}
-    new, old = DEFAULT, DEFAULT.replace(EMPLOYER_NUMERAIRE="discounted")
+    new, old = DEFAULT, DEFAULT.replace(VALUATION_DATE="discounted")
 
     print("(a) contracts\n")
     print("| check | result |\n|---|---|")

@@ -14,7 +14,7 @@ can key a cache directly.
 Field names are the historical global names, so objective.py (which reads
 p.ETA, p.LAMBDA, ...) and the thesis notation carry over unchanged.
 
-The objective (default EMPLOYER_NUMERAIRE = "retirement"), per unit of final salary,
+The objective (default VALUATION_DATE = "retirement"), per unit of final salary,
 in retirement-date money under the real-world measure P:
 
     J = LAMBDA * E[ target * ANNUITY * u(RR_tot / target) ]
@@ -106,13 +106,14 @@ class Params:
                                    # observation (REVIEW C1)
     RATE_CE_PATHS: int = 5000      # scenarios behind the certainty-equivalent moments of solve()
 
-    # --- the employer's numeraire ----------------------------------------------
+    # --- valuation date (named EMPLOYER_NUMERAIRE in legacy_v1) ------------------
+    # It selects WHEN money is valued, not a numeraire: both legs are in euros either way.
     # "retirement" (default): both legs in retirement-date money under P -- terminal
     # legs undiscounted, each premium accrued to T at the short rate plus
     # FINANCING_SPREAD, A(t,T) = E^P_t[exp(int_t^T (r_u + s) du)] (pension/numeraire.py).
     # "discounted": the previous specification -- premiums discounted at DISC_ER,
     # terminal legs at DISC_EMP / DISC_ER -- reproduced bit for bit.
-    EMPLOYER_NUMERAIRE: str = "retirement"   # "retirement" | "discounted"
+    VALUATION_DATE: str = "retirement"   # "retirement" | "discounted"
     SHORT_RATE: float = 0.03       # short rate of the constant-rate model (= MU = G)
     FINANCING_SPREAD: float = 0.0  # s: the employer's financing spread over the short rate
 

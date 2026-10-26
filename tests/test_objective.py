@@ -8,7 +8,7 @@ from pension.objective import OBJECTIVES
 
 
 def test_baseline_is_the_committed_formula(p, grid):
-    p = p.replace(EMPLOYER_NUMERAIRE="discounted")          # the formula below is the discounted one
+    p = p.replace(VALUATION_DATE="discounted")          # the formula below is the discounted one
     Fg, rg = grid["Fg"], grid["rg"]
     Fc, rc = Fg[:, None], rg[None, :]
     rr = p.RR_LEGAL + np.maximum(Fc, 1.0) / (rc * p.ANNUITY)

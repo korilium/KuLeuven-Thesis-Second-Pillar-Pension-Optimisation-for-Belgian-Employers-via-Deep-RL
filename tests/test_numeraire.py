@@ -8,7 +8,7 @@ from pension import checks
 def test_env_contract_both_numeraires(p, grid, entry):
     small = {k: v[:200] for k, v in entry.items()}
     for num in ("retirement", "discounted"):
-        assert checks.env_contract(p.replace(EMPLOYER_NUMERAIRE=num), grid["Fg"], grid["rg"],
+        assert checks.env_contract(p.replace(VALUATION_DATE=num), grid["Fg"], grid["rg"],
                                    grid["ag"], grid["nq"], small, 200, 7) < 1e-12
 
 
@@ -36,7 +36,7 @@ def test_timing_neutral_at_short_rate_equal_mu(p, entry):
     """(d) SHORT_RATE = MU = G: a roughly level schedule."""
     import pension.dp as dp
     Fg, rg = dp.make_F_grid(n=73), dp.make_rho_grid(n=71)
-    early, late = checks.timing_neutrality(p.replace(EMPLOYER_NUMERAIRE="retirement"),
+    early, late = checks.timing_neutrality(p.replace(VALUATION_DATE="retirement"),
                                            Fg, rg, 5, entry, 2000, 3)
     assert abs(early - late) / max(early, late) < 0.08, (early, late)   # measured 1.7% (REVIEW M6)
 
@@ -48,7 +48,7 @@ def test_legacy_drift_tilts_towards_early_funding(p, entry):
     import pension.dp as dp
     Fg, rg = dp.make_F_grid(n=73), dp.make_rho_grid(n=71)
     early, late = checks.timing_neutrality(
-        p.replace(EMPLOYER_NUMERAIRE="retirement", DRIFT_CORRECTION=False), Fg, rg, 5, entry, 2000, 3)
+        p.replace(VALUATION_DATE="retirement", DRIFT_CORRECTION=False), Fg, rg, 5, entry, 2000, 3)
     assert (early - late) / early > 0.10, (early, late)
 
 
