@@ -31,7 +31,7 @@ class Params:
     T: int = 45                  # career length (years)
     W: float = 0.025             # salary growth
     C: float = 0.05              # contribution rate: premium P_t = C * S_t
-    I_TARIFF: float = 0.01       # Branch 21 tariff floor i^tariff
+    I_TARIFF: float = 0.00     # Branch 21 tariff floor i^tariff
     M: float = 0.0               # insurer margin m below the book yield
     BOOK_WEIGHT: float = 1 / 48  # monthly weight w of the book-yield filter (mean age ~4 years)
     LAMBDA: float = 0.5          # employee weight
