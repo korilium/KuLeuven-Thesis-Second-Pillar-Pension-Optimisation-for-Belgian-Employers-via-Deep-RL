@@ -21,7 +21,7 @@ def calibrate_vasicek(y, dt=1 / 12):
     return dict(kappa=-b / dt, theta=-a / b, sigma=np.std(eps, ddof=2) / np.sqrt(dt), y0=y[-1])
 
 
-@functools.lru_cache(maxsize=1)
+# @functools.lru_cache(maxsize=1) - this caches the function 
 def calibration():
     """Once per process: the Vasicek parameters of the 10Y, s_term, the monthly 10Y
     history (oldest first; the last value is model t0) and the date of t0."""

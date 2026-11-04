@@ -16,7 +16,7 @@ from pension import baseline_dp as bdp
 
 N = 20000
 
-
+#alway same action 50% 21 
 def const(a):
     return lambda obs: np.full(len(obs), a)
 
