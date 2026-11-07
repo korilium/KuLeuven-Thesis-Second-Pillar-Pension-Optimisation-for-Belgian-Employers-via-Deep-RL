@@ -39,7 +39,7 @@ class Params:
     W: float = 0.025             # salary growth
     C: float = 0.05              # contribution rate: premium P_t = C * S_t
     TARIFF_STEP: float = 0.0025  # Branch 21 tariffs are floored to this grid step (Eq. 5a)
-    TARIFF_MARGIN: float = 0.005  # PLACEHOLDER: tariff = July 10Y minus this margin (Eq. 5a)
+    TARIFF_MARGIN: float = 0.010  # PLACEHOLDER: tariff = July book yield mu minus this margin (Eq. 5a)
     PS_MARGIN: float = 0.005     # PLACEHOLDER: profit-sharing pays mu_t minus this margin (Eq. 5b)
     BOOK_WEIGHT: float = 1 / 48  # monthly weight w of the book-yield filter (mean age ~4 years)
     LAMBDA: float = 0.5          # employee weight
@@ -117,12 +117,14 @@ def tariff_grid(p):
     return np.round(p.TARIFF_STEP * np.arange(n), 10)
 
 
-def tariff(y, p):
+def tariff(mu, p):
     """Eq. (5a), MODEL.md: the tariff locked to retirement for a premium paid when the
-    10Y is y: i = floor_to_grid( min(3.75%, max(0, y - TARIFF_MARGIN)) ). The ratio is
-    rounded to 9 decimals before the floor, so a value on a grid point (the cap) is
-    not floored one step down by rounding."""
-    x = np.minimum(TARIFF_CAP, np.maximum(0.0, y - p.TARIFF_MARGIN))
+    insurer's book yield is mu (the filter of Eq. 4, read in July):
+    i = floor_to_grid( min(3.75%, max(0, mu - TARIFF_MARGIN)) ). Based on the book
+    yield, not the 10Y, because observed group tariffs lag the market the way a
+    smoothed portfolio yield does. The ratio is rounded to 9 decimals before the
+    floor, so a value on a grid point (the cap) is not floored one step down by rounding."""
+    x = np.minimum(TARIFF_CAP, np.maximum(0.0, mu - p.TARIFF_MARGIN))
     return np.round(np.floor(np.round(x / p.TARIFF_STEP, 9)) * p.TARIFF_STEP, 10)
 
 
@@ -133,10 +135,10 @@ def bucket_rate(i_k, mu, p):
     return np.maximum(i_k, mu - p.PS_MARGIN)
 
 
-def new_premium_rate(y, mu, p):
+def new_premium_rate(mu, p):
     """January proxy for what this year's premium would earn in Branch 21:
-    bucket_rate(tariff(y_Jan), mu_t). The real tariff is set at the July 10Y."""
-    return bucket_rate(tariff(y, p), mu, p)
+    bucket_rate(tariff(mu_Jan), mu_t). The real tariff is set at the July book yield."""
+    return bucket_rate(tariff(mu, p), mu, p)
 
 
 # --- balances ------------------------------------------------------------------------
@@ -264,6 +266,14 @@ def premium_accrual(y, t, vp, p):
     return np.exp(mean + var / 2 - vp["spread"] * tau)
 
 
+def july_premium_accrual(y, t, vp, p):
+    """Eq. (11), MODEL.md: the accrual to T of a premium paid in July of year t,
+    approximated as A(t, T) e^{-r_t / 2}: the January factor less half a year at
+    the January short rate. An approximation: it ignores the drift of r over the
+    half year (relative error of order (theta_r - r_t)(1/2 - B(1/2)), about 1e-4)."""
+    return premium_accrual(y, t, vp, p) * np.exp(-short_rate(y, vp) / 2)
+
+
 # --- state and one year ------------------------------------------------------------------
 @dataclass
 class State:
@@ -324,20 +334,21 @@ def step(s, alpha, eps, u, p):
     """One year for every path: twelve months of rates (eps: (12, n)); the premium is
     paid in July. The liability buckets accrue at their g, the Branch 21 buckets at
     their bucket rates (tariff, and profit-sharing on mu_t read in January); the
-    July premium's Branch 21 share gets the tariff of the July 10Y, and the rest goes
-    into the bond fund after its July return; then exit with probability h(t)
-    (u: (n,) uniforms). Out of force: no premium, liability buckets fixed (rate 0),
-    the fund and the Branch 21 buckets keep earning."""
+    July premium's Branch 21 share gets the tariff of the July book yield, and the
+    rest goes into the bond fund after its July return; then exit with probability
+    h(t) (u: (n,) uniforms). Out of force: no premium, liability buckets fixed
+    (rate 0), the fund and the Branch 21 buckets keep earning."""
     vp = vasicek_params(p)
-    y, mu, months = s.y, s.mu, []
+    y, mu, months, mus = s.y, s.mu, [], []
     for e in eps:                                         # February .. next January
         y = vasicek_month(y, e, vp)
         mu = book_yield(mu, y, p)
         months.append(y)
+        mus.append(mu)
     m = np.array(months)
     P = p.C * s.inforce
     Lg = accrue_liability(s.Lg, P, s.G, s.inforce, p)
-    R21k = accrue_branch21(s.R21k, alpha * P, tariff(m[JULY], p), s.mu, p)
+    R21k = accrue_branch21(s.R21k, alpha * P, tariff(mus[JULY], p), s.mu, p)
     R23 = accrue_fund(s.R23, s.y, m, (1 - alpha) * P, vp, p)
     leave = s.inforce & (u < hazard(s.t, p))
     return State(s.t + 1, y, wap_rate(s.H + m[:4].sum(0)), s.K + m.sum(0), m[4:].sum(0), mu,
@@ -368,7 +379,8 @@ def draw_noise(n, seed, p=BASELINE):
 def simulate(policy, n=10000, seed=None, p=BASELINE, noise=None):
     """Monte Carlo of a policy obs (n, 32) -> alpha (n,) over n careers (seed: EVAL_SEED).
     "joint" is the objective J (A5) and "reward" the per-path reward; the premium cost
-    sum_{t<tau} C (1+W)^-(T-t) A(t,T), which no policy changes, is reported apart.
+    sum_{t<tau} C (1+W)^-(T-t) A(t,T) e^{-r_t/2} (July premiums, Eq. 11), which no
+    policy changes, is reported apart.
     by_year: rate diagnostics; "i_minus_G" uses the January proxy new_premium_rate;
     "ps" is the profit-sharing rate mu_t - PS_MARGIN - i_k, floored at 0, weighted by
     the Branch 21 reserve over all buckets and paths; "ps_share" the share of that
@@ -380,7 +392,7 @@ def simulate(policy, n=10000, seed=None, p=BASELINE, noise=None):
     grid = tariff_grid(p)
     diag = {k: np.zeros(p.T) for k in ("G", "G_floor", "mu", "i_minus_G", "r", "ps", "ps_share")}
     for t in range(p.T):
-        i = new_premium_rate(s.y, s.mu, p)
+        i = new_premium_rate(s.mu, p)
         for k, v in (("G", s.G), ("G_floor", s.G <= WAP_FLOOR + 1e-12), ("mu", s.mu),
                      ("i_minus_G", i - s.G), ("r", short_rate(s.y, vp))):
             diag[k][t] = v.mean()
@@ -390,7 +402,7 @@ def simulate(policy, n=10000, seed=None, p=BASELINE, noise=None):
             diag["ps"][t] = (ps * s.R21k).sum() / reserve
             diag["ps_share"][t] = s.R21k[ps > 0].sum() / reserve
         alpha = np.clip(policy(s.obs(p)), 0.0, 1.0)
-        cost += s.inforce * p.C * (1 + p.W) ** -(p.T - t) * premium_accrual(s.y, t, vp, p)
+        cost += s.inforce * p.C * (1 + p.W) ** -(p.T - t) * july_premium_accrual(s.y, t, vp, p)
         s = step(s, alpha, *noise.year(t), p)
     emp, short = reward_legs(s.L, s.R21 + s.R23, s.tau, p)
     reward = p.LAMBDA * emp - (1 - p.LAMBDA) * short
@@ -417,10 +429,10 @@ def fifty_fifty(obs):
 
 def market_practice_rule(p=BASELINE):
     """alpha = 1{ i_new >= G_t }: Branch 21 when the tariff a new premium would get
-    covers this year's WAP rate. i_new is the tariff at the January 10Y, a proxy:
-    the real tariff is set at the July 10Y."""
+    covers this year's WAP rate. i_new is the tariff at the January book yield
+    mu_Jan, a proxy: the real tariff is set at the July book yield."""
     def act(obs):
-        return (tariff(obs[:, 1], p) >= obs[:, 2]).astype(float)
+        return (tariff(obs[:, 5], p) >= obs[:, 2]).astype(float)
     return act
 
 

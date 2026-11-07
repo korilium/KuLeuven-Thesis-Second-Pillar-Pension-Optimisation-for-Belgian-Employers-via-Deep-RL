@@ -9,7 +9,7 @@ The baseline's DP reference is `pension/baseline_dp.py` (Sec. 7). Also kept: the
 - Model year $t = 0,\dots,T-1$ is a calendar year. Year 0 starts in the first January after the last OLO observation. The 10Y is simulated monthly. A year's state is read in January, with that month's yield observed.
 - Money is in units of the **current salary** $S_t$, and $S_{t+1} = (1+W)S_t$. The reward is in units of $S_T$, in retirement-date money under $P$. Terminal legs are undiscounted. A market price of risk $\lambda_r$ enters only the bond prices behind the fund's return (Eqs. 7–8); by default it is calibrated (Eq. 7a).
 - Premium $P_t = c\,S_t$, split as $P^{21}_t = \alpha_t P_t$ and $P^{23}_t = (1-\alpha_t)P_t$.
-- Within year $t$: $\alpha_t$ is chosen in January, on the January state; twelve months of rates follow (February to next January); the premium is paid **mid-year (July)**. Each liability bucket and each Branch 21 bucket accrue at their rates for the year: $g$, and $r_{k,t}$ from the tariff and from $\mu_t$ read in January. That is a full year on the January balance and half a year on the July premium. The July premium's Branch 21 share gets the tariff of the July 10Y. The rest is added to the bond fund after the fund's July return; the fund earns its return month by month all year. Then the member leaves with probability $h(t)$, at service $\tau = t+1$.
+- Within year $t$: $\alpha_t$ is chosen in January, on the January state; twelve months of rates follow (February to next January); the premium is paid **mid-year (July)**. Each liability bucket and each Branch 21 bucket accrue at their rates for the year: $g$, and $r_{k,t}$ from the tariff and from $\mu_t$ read in January. That is a full year on the January balance and half a year on the July premium. The July premium's Branch 21 share gets the tariff of the July book yield $\mu_{\text{Jul}}$. The rest is added to the bond fund after the fund's July return; the fund earns its return month by month all year. Then the member leaves with probability $h(t)$, at service $\tau = t+1$.
 - After exit, premiums stop and every liability bucket is fixed in money at its value at $\tau$ (0% after exit), but the reserves accrue until $T$: every Branch 21 bucket at its tariff plus profit-sharing, and $R^{23}$ by staying in the fund, with its monthly returns net of the fee. This asymmetry is intended. The guarantee is frozen when the member leaves, but the assets are not liquidated.
 - New member: $L^{(g)}_0 = R^{21,(k)}_0 = N_0 = 0$.
 
@@ -39,7 +39,7 @@ $\mathcal G = \{1.75\%, 2.00\%, \dots, 3.75\%\}$ is the statutory WAP grid (9 ra
 | (2) | $r_t = y_t - s_{\text{term}}$ | `short_rate` |
 | (3) | $G_{t+1} = \mathrm{clip}\big(\mathrm{round}_{25\text{bp}}(0.85\cdot\tfrac{1}{24}\textstyle\sum_{\text{Jun }t-2}^{\text{May }t} y),\ 1.75\%,\ 3.75\%\big)$, i.e. $\tfrac{1}{24}(H_t + \sum_{\text{Feb}}^{\text{May}} y)$; then $H_{t+1} = K_t + \sum_{\text{Feb }t}^{\text{Jan }t+1} y$, $K_{t+1} = \sum_{\text{Jun }t}^{\text{Jan }t+1} y$. Hence $G_t \in \mathcal G$ | `wap_rate`, `wap_grid`, `step` |
 | (4) | $\mu \leftarrow \mu + w\,(y - \mu)$ every month | `book_yield` |
-| (5a) | Tariff of a July premium: $i = \mathrm{floor}_{\mathcal I}\big(\min(3.75\%,\ \max(0,\ y_{\text{Jul}} - m_{\text{tar}}))\big)$, floored to the grid step | `tariff_grid`, `tariff` |
+| (5a) | Tariff of a July premium: $i = \mathrm{floor}_{\mathcal I}\big(\min(3.75\%,\ \max(0,\ \mu_{\text{Jul}} - m_{\text{tar}}))\big)$, floored to the grid step; $\mu_{\text{Jul}}$ is the book yield (4) after the July month | `tariff_grid`, `tariff` |
 | (5b) | Bucket rate: $r_{k,t} = \max(i_k,\ \mu_t - m_{\text{ps}})$; profit-sharing $r_{k,t} - i_k \ge 0$ | `bucket_rate` |
 | (6a) | $X_{t+1} = X_t\,e^{r} + P_t\,e^{r/2}$: a balance at rate $r$ with a July premium | `accrue` |
 | (6c) | $R^{21,(k)}_{t+1} = R^{21,(k)}_t\,e^{r_{k,t}} + P^{21}_t\,\mathbf 1\{i = i_k\}\,e^{r_{k,t}/2}$ for each $i_k \in \mathcal I$; $R^{21}_t = \sum_k R^{21,(k)}_t$. Each bucket is (6a) at its rate | `accrue_branch21`, `State.R21` |
@@ -49,7 +49,7 @@ $\mathcal G = \{1.75\%, 2.00\%, \dots, 3.75\%\}$ is the statutory WAP grid (9 ra
 | (8) | Bond fund: a zero-coupon of maturity $D$ rolled every month, with monthly gross return $\dfrac{P(D - \tfrac1{12};\, r_{m+1})}{P(D;\, r_m)}\,(1-c_{\text{fee}})^{1/12}$, $r_m = y_m - s_{\text{term}}$ (from the January 10Y to the next January's). Then $R^{23} \leftarrow R^{23}\cdot$ return each month, $+\,P^{23}_t$ right after the July return | `fund_return`, `accrue_fund` |
 | (9) | $h(t) = h_\infty + (h_0 - h_\infty)\,e^{-t/\tau_h}$ | `hazard` |
 | (10) | reward at $T$ (Sec. 4) | `reward_legs` |
-| (11) | $A(t,T) = \mathbb E^P_t[e^{\int_t^T r_u du}] = \exp\!\big(\theta\tau + (y_t-\theta)B + \tfrac12 V - s_{\text{term}}\tau\big)$, with $\tau = T-t$, $B = \tfrac{1-e^{-\kappa\tau}}{\kappa}$, $V = \tfrac{\sigma^2}{\kappa^2}(\tau - B) - \tfrac{\sigma^2}{2\kappa}B^2$ | `premium_accrual` |
+| (11) | $A(t,T) = \mathbb E^P_t[e^{\int_t^T r_u du}] = \exp\!\big(\theta\tau + (y_t-\theta)B + \tfrac12 V - s_{\text{term}}\tau\big)$, with $\tau = T-t$, $B = \tfrac{1-e^{-\kappa\tau}}{\kappa}$, $V = \tfrac{\sigma^2}{\kappa^2}(\tau - B) - \tfrac{\sigma^2}{2\kappa}B^2$. A July premium accrues $A(t,T)\,e^{-r_t/2}$ (an approximation, Sec. 4) | `premium_accrual`, `july_premium_accrual` |
 | (12) | DP: $Q_t(s,\alpha_k) = \mathbb E\big[(1-h(t))\,V_{t+1}(s') + h(t)\,\Phi_{t+1}(s')\big]$, $V_t = \max_k Q_t$, $V_T$ = reward (Sec. 7) | `baseline_dp.solve` |
 
 In salary units, (6a)–(6c) and (8) are divided by $1+W$. Out of force, $P_t = 0$, every liability bucket accrues at rate 0, every Branch 21 bucket still accrues at $r_{k,t}$, and the fund keeps its monthly returns, net of the fee. The year (12 months, July premium, accrual, exit) is `step`; January of year 0 comes from the observed history plus the pre-roll months (`initial_state`).
@@ -58,7 +58,11 @@ In salary units, (6a)–(6c) and (8) are divided by $1+W$. Out of force, $P_t = 
 
 **Why $\lambda_r$ is calibrated (7a).** With $\lambda_r = 0$, the model's long yield tends to $\theta - s_{\text{term}} - \sigma^2/(2\kappa^2)$, below the long-run mean $\theta$ of the simulated 10Y by the term spread plus convexity. Branch 21 credits a smoothed 10Y with mean near $\theta$. So $\lambda_r = 0$ would make bonds lose to Branch 21 almost always, an artefact of the calibration that also contradicts the observed curve, where the 30Y trades above the 10Y. The default fixes $\lambda_r$ by one condition: the model's 10Y zero yield at $r = \theta_r$ equals $\theta$. With the calibration of Sec. 6 this gives $\lambda_r = -0.606$ and $\theta_Q = 4.28\%$. *Validation, not a fitting target:* at $r = \theta_r$ the model's 20Y−10Y, 25Y−10Y and 30Y−10Y spreads are 0.64%, 0.84% and 0.99%. The 2000–2026 OLO means are 0.50%, 0.61% and 0.64% (30Y on the 304 valid months). The model's long end is therefore somewhat too steep, by about 0.15–0.35 pp at 20–30 years. At the fund's $D = 7$ the term premium matters less than at the long end. The fee is charged monthly: a premium added in July is worth $(1-c_{\text{fee}})^{(12(T-t)-6)/12}$ times its fee-free value at $T$.
 
-**Branch 21 (5a)–(6c)** is horizontal. Each premium gets a tariff $i$ from the July 10Y, locked to retirement (the guaranteed floor). On top, every bucket shares in the insurer's book yield: profit-sharing $\max(0,\ \mu_t - m_{\text{ps}} - i_k)$. A premium is therefore locked at its tariff and floating above it. The previous scalar crediting $i_t = \max(i^{\text{tariff}}, \mu_t - m)$ maps onto this: `I_TARIFF` becomes the per-premium tariff (5a), with its margin `TARIFF_MARGIN`, and `M` becomes `PS_MARGIN` (5b). Both old parameters are removed. The tariff is set in July, so a January decision only sees its proxy `new_premium_rate` $= r(\text{tariff}(y_{\text{Jan}}), \mu_t)$. That proxy is used by the $i - G$ diagnostic and the DP features. The market-practice rule uses the tariff proxy $\text{tariff}(y_{\text{Jan}})$ alone. `simulate()` reports per year the reserve-weighted profit-sharing rate (`ps`) and the share of the reserve earning profit-sharing (`ps_share`).
+**Branch 21 (5a)–(6c)** is horizontal. Each premium gets a tariff $i$ from the insurer's book yield in July, locked to retirement (the guaranteed floor).
+
+*Why the book yield, not the 10Y.* A tariff of the July 10Y minus a margin, locked for up to 45 years with profit-sharing on top, made Branch 21 far more generous than any insurer. Observed group tariffs lag the market instead. AG Insurance's tariffs on new group premiums, against the 10Y OLO annual average, were 2.25% vs 2.41% (2013), 1.50% vs 0.84% (2015), 1.25% vs 3.09% (2023) and 1.75% vs 2.93% (2024). A tariff based on the smoothed book yield $\mu$ reproduces that lag.
+
+The same filter run on the observed 10Y (from $\mu = y_{\text{Jan 2000}}$), with the default margin, gives July tariffs of 2.50%, 1.75%, 0.25% and 0.50% for those years. Those values are printed by `tests/test_baseline.py`; the comparison is not a fitting target. The model gets the 2013–2015 direction right: in 2015 the tariff sits above the 10Y. In 2023–2024 it is about 1 pp below AG, because the filter's July $\mu$ is only 1.26–1.67% there. `TARIFF_MARGIN` and `BOOK_WEIGHT` are left for calibration. On top, every bucket shares in the insurer's book yield: profit-sharing $\max(0,\ \mu_t - m_{\text{ps}} - i_k)$. A premium is therefore locked at its tariff and floating above it. The previous scalar crediting $i_t = \max(i^{\text{tariff}}, \mu_t - m)$ maps onto this: `I_TARIFF` becomes the per-premium tariff (5a), with its margin `TARIFF_MARGIN`, and `M` becomes `PS_MARGIN` (5b). Both old parameters are removed. The tariff is set in July, so a January decision only sees its proxy `new_premium_rate` $= r(\text{tariff}(\mu_{\text{Jan}}), \mu_t)$. That proxy is used by the $i - G$ diagnostic. The market-practice rule uses the tariff proxy $\text{tariff}(\mu_{\text{Jan}})$ alone. `simulate()` reports per year the reserve-weighted profit-sharing rate (`ps`) and the share of the reserve earning profit-sharing (`ps_share`).
 
 **Limitation.** The 10Y is the simulated factor (1), and the short rate is derived from it by a constant spread (2). The fund's bonds are priced as if that short rate were the Vasicek factor (7). The 10Y yield implied by (7) is therefore not the simulated $y_t$: the curve is not internally consistent. The baseline accepts this, keeping the calibrated 10Y for the WAP rate and the book yield. The calibrated $\lambda_r$ (7a) closes the gap on average at the 10Y point, not path by path.
 
@@ -78,7 +82,7 @@ $$
 
 - The shortfall $(L_\tau - R_T)^+$ is borne by the employer and settled at $T$.
 - The reward is paid once, at $T$; it is zero before. $\gamma = 1$.
-- The premium cost $\sum_{t<\tau} c\,(1+W)^{-(T-t)}A(t,T)$ does not depend on $\alpha$. It is left out of the reward and reported by `simulate()` as `premium_cost`. Eq. (11) still compounds each premium from January, while premiums are paid in July (Sec. 1). The reported cost is therefore overstated by about half a year of accrual per premium. This is reporting only: neither the reward nor any policy uses it.
+- The premium cost $\sum_{t<\tau} c\,(1+W)^{-(T-t)}A(t,T)\,e^{-r_t/2}$ does not depend on $\alpha$. It is left out of the reward and reported by `simulate()` as `premium_cost`. Premiums are paid in July, so each accrues from July. $A(t,T)\,e^{-r_t/2}$ is an *approximation*: it removes half a year at the January short rate and ignores the drift of $r$ over that half year. With $\sigma \to 0$ it differs from the exact $e^{\int_{t+1/2}^T r}$ by a relative $-6.5\cdot10^{-4}$ to $+3.0\cdot10^{-4}$ for $y_t$ between 0% and 7%. This is reporting only: neither the reward nor any policy uses it.
 - The WAP minimum, the 80% rule and non-discrimination are not part of the optimisation.
 
 ## 5. Environment and evaluation
@@ -87,7 +91,7 @@ $$
   - When the member leaves, the remaining years are rolled forward on the episode's own noise, and the reward at $T$ is paid in that step.
   - Training episodes draw their noise from a pool seeded by `TRAIN_SEED`. `reset(options={"noise": ..., "state": ...})` replays given noise, optionally from a snapshot.
 - `simulate(policy)`: the same `step` over many careers on noise seeded by `EVAL_SEED`. It returns `joint` $= J$, the two legs, the mean shortfall and its frequency, `premium_cost`, the per-path `reward`, and per-year rate diagnostics (including the locked yield $y^{\text{long}}_t$).
-- Benchmark policies (`baseline.py`): `all_branch21` ($\alpha = 1$), `all_fund` ($\alpha = 0$), `fifty_fifty` ($\alpha = \tfrac12$), and `market_practice_rule`, $\alpha_t = \mathbf 1\{i^{\text{new}}_t \ge G_t\}$. Here $i^{\text{new}}_t$ is the tariff a premium would get at the January 10Y, a proxy, since the real tariff is set at the July 10Y. These are benchmarks, not the optimum: a gap between them and the DP is the value of optimising, not an error.
+- Benchmark policies (`baseline.py`): `all_branch21` ($\alpha = 1$), `all_fund` ($\alpha = 0$), `fifty_fifty` ($\alpha = \tfrac12$), and `market_practice_rule`, $\alpha_t = \mathbf 1\{i^{\text{new}}_t \ge G_t\}$. Here $i^{\text{new}}_t = \text{tariff}(\mu_{\text{Jan}})$ is the tariff a premium would get at the January book yield, a proxy, since the real tariff is set at the July book yield. These are benchmarks, not the optimum: a gap between them and the DP is the value of optimising, not an error.
 
 ## 6. Parameters
 
@@ -99,7 +103,7 @@ All parameters are in `baseline.Params`; the default is `BASELINE`. The statutor
 | $W$ | `W` | 0.025 |
 | $c$ | `C` | 0.05 |
 | tariff grid step | `TARIFF_STEP` | 0.0025 |
-| $m_{\text{tar}}$ (tariff margin below the July 10Y) | `TARIFF_MARGIN` | 0.005 (PLACEHOLDER) |
+| $m_{\text{tar}}$ (tariff margin below the July book yield) | `TARIFF_MARGIN` | 0.010 (PLACEHOLDER) |
 | $m_{\text{ps}}$ (profit-sharing margin below $\mu_t$) | `PS_MARGIN` | 0.005 (PLACEHOLDER) |
 | $w$ (per month) | `BOOK_WEIGHT` | 0.02083 (1/48) |
 | $\lambda$ | `LAMBDA` | 0.5 |
@@ -151,7 +155,7 @@ $$
 
 This is the MDP itself: no state variable is dropped. The only error is the fit of $Q$, through the actions it ranks. The policy is scored out of sample by `simulate()`, which gives a lower bound on the optimum. The in-sample $V_0$ (the realised target of the greedy action at $t = 0$) is reported next to it. `solve` also returns `timings` (forward simulation, rollouts, fits).
 
-**Known-answer check** (`tests/test_baseline_dp.py`). With $\sigma \to 0$ and the monthly normals set to 0, the rate path is deterministic and the same on every path; only exits differ. Each premium's choice is then separate: the reward rises with $R_T$, and both assets keep accruing after exit. So the optimal $\alpha_t$ puts the year-$t$ premium where it is worth more at $T$. That is Branch 21 at $\tfrac12 r_t + \sum_{s>t} r_s$ in logs, with $r_s = \max(\text{tariff}(y_{\text{Jul},t}), \mu_s - m_{\text{ps}})$, against the fund's log monthly returns after its July return. The DP must match that on at least 95% of in-force evaluation states.
+**Known-answer check** (`tests/test_baseline_dp.py`). With $\sigma \to 0$ and the monthly normals set to 0, the rate path is deterministic and the same on every path; only exits differ. Each premium's choice is then separate: the reward rises with $R_T$, and both assets keep accruing after exit. So the optimal $\alpha_t$ puts the year-$t$ premium where it is worth more at $T$. That is Branch 21 at $\tfrac12 r_t + \sum_{s>t} r_s$ in logs, with $r_s = \max(\text{tariff}(\mu_{\text{Jul},t}), \mu_s - m_{\text{ps}})$, against the fund's log monthly returns after its July return. The DP must match that on at least 95% of in-force evaluation states. The test sets `TARIFF_MARGIN` = 0 for itself only: with the default margin, Branch 21 never wins on the deterministic path, and an answer that never switches would not test the DP.
 
 ## 8. Changelog
 
@@ -187,6 +191,15 @@ This is the MDP itself: no state variable is dropped. The only error is the fit 
   - Features: the rate state plus the summaries of Sec. 7. That adds the Branch 21 floor at $T$, the projection at the current crediting and the reserve-weighted tariff. The January proxy $i_t$ is dropped, and no derived column is affine in $y$ at fixed $t$.
   - Clipping guard on every fitted $Q_t(\cdot,\alpha_k)$, with `clip_stats`.
   - DP tests run at $n = 2000$. They add the clipping-guard test and the $\sigma \to 0$ known-answer test (per-premium comparison).
+- **2026-11 — book-yield tariff** (tag `pre-booktariff` holds the 10Y-based tariff).
+  - (5a): the tariff of a July premium is floored from the July book yield $\mu_{\text{Jul}}$, no longer from the July 10Y, with `TARIFF_MARGIN` = 0.010 (PLACEHOLDER). Reason: observed group tariffs lag the market (AG Insurance, Sec. 3).
+  - The market-practice rule and the January proxy `new_premium_rate` use $\text{tariff}(\mu_{\text{Jan}})$.
+  - (11): the reported premium cost accrues from July, $A(t,T)\,e^{-r_t/2}$ (an approximation; Sec. 4).
+  - Tests:
+    - New: the tariff follows $\mu_{\text{Jul}}$, the printed historical comparison, and the July premium accrual in closed form.
+    - The tariff-grid and vintage tests now take the tariff from $\mu_{\text{Jul}}$.
+    - The known-answer test uses `TARIFF_MARGIN` = 0 (see Sec. 7).
+    - `test_policy_beats_every_constant_policy` now fails at $n = 2000$ (DP −0.30740 vs best constant −0.30718) and is left failing on purpose, pending a decision.
 
 ## 9. Verify by hand (one path)
 
@@ -196,10 +209,11 @@ These are `EVAL_SEED` path 4 under $\alpha = \tfrac12$ every year, at year $t = 
 - **(1) Liability bucket $g = G_t = 2.50\%$** (Eq. 6b): $L_t^{(g)} = 0.049470044753$, so
   $L_{t+1}^{(g)} = (0.049470044753\cdot e^{0.025} + 0.05\cdot e^{0.0125})/1.025 = (0.049470044753\cdot 1.025315120524 + 0.05\cdot 1.012578451541)/1.025 = 0.098879324366$.
   A bucket that gets no premium, $g = 2.00\%$: $0.049040073002\cdot e^{0.02}/1.025 = 0.048810486041$.
-- **(2) Branch 21 bucket with profit-sharing** (Eqs. 5a–6c):
-  - The July 10Y is $0.0270406985$, so the tariff is $\mathrm{floor}_{25\text{bp}}(0.0270406985 - 0.005) = 2.00\%$.
-  - The bucket $i_k = 2.00\%$ earns $r_k = \max(0.02,\ 0.0265879593 - 0.005) = 0.0215879593$, of which profit-sharing is $0.0015879593$.
-  - $R^{21,(k)}_{t+1} = (0.024422303802\cdot e^{r_k} + 0.025\cdot e^{r_k/2})/1.025 = (0.024422303802\cdot 1.021822665219 + 0.025\cdot 1.010852444830)/1.025 = 0.049001536276$.
+- **(2) Branch 21 bucket with profit-sharing** (Eqs. 4, 5a–6c):
+  - The book yield is filtered from February to July ($\mu \leftarrow \mu + w(y-\mu)$, $w = 1/48$), giving $\mu_{\text{Jul}} = 0.0266423859$. The July 10Y is $0.0270406985$ and is not used.
+  - The tariff is $\mathrm{floor}_{25\text{bp}}(0.0266423859 - 0.010) = 1.50\%$.
+  - The bucket $i_k = 1.50\%$ earns $r_k = \max(0.015,\ 0.0265879593 - 0.005) = 0.0215879593$, of which profit-sharing is $0.0065879593$.
+  - $R^{21,(k)}_{t+1} = (0.097964703662\cdot e^{r_k} + 0.025\cdot e^{r_k/2})/1.025 = (0.097964703662\cdot 1.021822665219 + 0.025\cdot 1.010852444830)/1.025 = 0.122315966550$.
 - **(3) One month of the fund** (Eqs. 7–8), April:
   - The 10Y goes from $0.0287225959$ to $0.0272843256$. With $s_{\text{term}} = 0.0128385047$, that gives $r_{\text{now}} = 0.0158840912$ and $r_{\text{next}} = 0.0144458209$.
   - Inputs: $\kappa = 0.1104185098$, $\sigma = 0.0060601606$, $\theta_Q = 0.0427692751$, $D = 7$.

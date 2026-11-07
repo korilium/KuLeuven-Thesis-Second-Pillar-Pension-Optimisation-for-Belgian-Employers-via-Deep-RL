@@ -3,6 +3,8 @@ environment's own roll-forward, its clipping guard holds, its greedy policy beat
 every constant policy out of sample and runs inside PensionEnv, and with
 deterministic rates it recovers the known per-premium answer. Small n (2000) so
 the suite stays fast; the full-size numbers are in the stage reports."""
+import dataclasses
+
 import numpy as np
 import pytest
 
@@ -81,27 +83,30 @@ def per_premium_answer(p):
     with R_T, and both assets keep accruing after exit, so the year-t premium should
     go where it is worth more at T. Returns alpha*_t = 1{Branch 21 multiple >= fund
     multiple} for t = 0 .. T-1, both multiples in money from July of year t to T, as logs:
-      Branch 21: r_t / 2 + sum_{s > t} r_s, r_s = bucket_rate(tariff(y_Jul,t), mu_s);
+      Branch 21: r_t / 2 + sum_{s > t} r_s, r_s = bucket_rate(tariff(mu_Jul,t), mu_s);
       fund:      the sum of the log monthly returns after the July return of year t."""
     vp = b.vasicek_params(p)
     noise = b.draw_noise(1, 0, p)
     s = b.initial_state(noise.eps[:b.premonths()], p)
-    years = []                                  # (January state, the 13 month-end 10Ys)
+    years = []                                  # (January state, the 13 month-end 10Ys, July mu)
     for t in range(p.T):
-        y, ys = s.y, [s.y]
-        for e in noise.year(t)[0]:
+        y, mu, ys = s.y, s.mu, [s.y]
+        for k, e in enumerate(noise.year(t)[0]):
             y = b.vasicek_month(y, e, vp)
+            mu = b.book_yield(mu, y, p)
             ys.append(y)
-        years.append((s, ys))
+            if k == b.JULY:
+                mu_jul = mu
+        years.append((s, ys, mu_jul))
         s = b.step(s, np.ones(1), *noise.year(t), p)
     alpha = np.zeros(p.T)
-    for t, (s, ys) in enumerate(years):
-        i_new = b.tariff(ys[b.JULY + 1], p)     # ys[0] is January, ys[6] July
+    for t, (s, ys, mu_jul) in enumerate(years):
+        i_new = b.tariff(mu_jul, p)             # ys[0] is January, ys[6] July
         r21 = b.bucket_rate(i_new, s.mu, p) / 2 + sum(
             b.bucket_rate(i_new, years[u][0].mu, p) for u in range(t + 1, p.T))
         r23 = sum(np.log(b.fund_return(ys[k], ys[k + 1], vp, p)) for k in range(b.JULY + 1, 12))
         r23 = r23 + sum(np.log(b.fund_return(yu[k], yu[k + 1], vp, p))
-                        for _, yu in years[t + 1:] for k in range(12))
+                        for _, yu, _ in years[t + 1:] for k in range(12))
         alpha[t] = float((r21 >= r23)[0])
     return alpha
 
@@ -110,20 +115,23 @@ def per_premium_answer(p):
 def test_dp_matches_the_per_premium_answer_when_rates_are_deterministic(monkeypatch):
     """sigma -> 0 and the monthly normals set to 0: the rate path is deterministic and
     the same on every path (only exits differ). The DP policy matches the per-premium
-    comparison on >= 95% of the in-force evaluation states."""
+    comparison on >= 95% of the in-force evaluation states. TARIFF_MARGIN = 0 for this
+    test only: with the default margin Branch 21 never wins on the deterministic path,
+    and a test whose answer never switches would not test the DP."""
+    q = dataclasses.replace(p, TARIFF_MARGIN=0.0)
     real_vp, real_noise = b.vasicek_params, b.draw_noise
-    monkeypatch.setattr(b, "vasicek_params", lambda q: dict(real_vp(q), sigma=1e-9))
-    monkeypatch.setattr(b, "draw_noise", lambda n, seed, q=p: b.Noise(np.zeros_like(real_noise(n, seed, q).eps),
-                                                                    real_noise(n, seed, q).u))
-    best = per_premium_answer(p)
-    assert 0 < best.sum() < p.T                          # the answer switches: not a trivial test
-    sol = bdp.solve(n=N_DP, actions=np.linspace(0, 1, 6))
-    noise = b.draw_noise(N_DP, p.EVAL_SEED)
-    s, agree, decisions = b.initial_state(noise.eps[:b.premonths()], p), 0, 0
-    act = bdp.policy(sol)
-    for t in range(p.T):
-        a = act(s.obs(p))
+    monkeypatch.setattr(b, "vasicek_params", lambda r: dict(real_vp(r), sigma=1e-9))
+    monkeypatch.setattr(b, "draw_noise", lambda n, seed, r=q: b.Noise(np.zeros_like(real_noise(n, seed, r).eps),
+                                                                    real_noise(n, seed, r).u))
+    best = per_premium_answer(q)
+    assert 0 < best.sum() < q.T                          # the answer switches: not a trivial test
+    sol = bdp.solve(q, n=N_DP, actions=np.linspace(0, 1, 6))
+    noise = b.draw_noise(N_DP, q.EVAL_SEED, q)
+    s, agree, decisions = b.initial_state(noise.eps[:b.premonths()], q), 0, 0
+    act = bdp.policy(sol, q)
+    for t in range(q.T):
+        a = act(s.obs(q))
         agree += int(((a == best[t]) & s.inforce).sum())
         decisions += int(s.inforce.sum())
-        s = b.step(s, a, *noise.year(t), p)
+        s = b.step(s, a, *noise.year(t), q)
     assert agree / decisions >= 0.95, (agree / decisions, best)

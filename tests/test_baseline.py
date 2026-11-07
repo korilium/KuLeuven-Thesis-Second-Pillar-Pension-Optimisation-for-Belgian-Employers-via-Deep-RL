@@ -185,12 +185,14 @@ def test_liability_buckets_are_the_premiums_at_their_own_rate():
         np.testing.assert_array_equal(s.L, s.Lg.sum(axis=0))
 
 
-def july_10Y(s, eps, vp):
-    """The July 10Y of the year starting in state s (the months run February .. January)."""
-    y = s.y
+def july_10Y_and_mu(s, eps, vp, q):
+    """The July 10Y and the July book yield (Eq. 4 after the July month) of the year
+    starting in state s (the months run February .. January)."""
+    y, mu = s.y, s.mu
     for e in eps[:b.JULY + 1]:
         y = b.vasicek_month(y, e, vp)
-    return y
+        mu = b.book_yield(mu, y, q)
+    return y, mu
 
 
 def test_tariffs_on_grid_buckets_sum_and_profit_sharing_nonnegative(noise):
@@ -199,13 +201,13 @@ def test_tariffs_on_grid_buckets_sum_and_profit_sharing_nonnegative(noise):
     bucket's profit-sharing is negative."""
     grid = b.tariff_grid(p)
     assert len(grid) == 16 and grid[0] == 0.0 and grid[-1] == 0.0375
-    y = np.linspace(-0.03, 0.10, 2001)
-    i = b.tariff(y, p)
+    mu = np.linspace(-0.03, 0.10, 2001)
+    i = b.tariff(mu, p)
     assert np.isin(i, grid).all() and i.min() == 0.0 and i.max() == 0.0375
-    assert np.all(i <= np.maximum(y - p.TARIFF_MARGIN, 0) + 1e-15)    # floored, never rounded up
+    assert np.all(i <= np.maximum(mu - p.TARIFF_MARGIN, 0) + 1e-15)  # floored, never rounded up
     vp, states = b.vasicek_params(p), run(noise, 0.5)
     for t, s in enumerate(states[:-1]):
-        assert np.isin(b.tariff(july_10Y(s, noise.year(t)[0], vp), p), grid).all()
+        assert np.isin(b.tariff(july_10Y_and_mu(s, noise.year(t)[0], vp, p)[1], p), grid).all()
         np.testing.assert_array_equal(s.R21, s.R21k.sum(axis=0))
         for i_k in grid:
             assert np.all(b.bucket_rate(i_k, s.mu, p) >= i_k)
@@ -214,17 +216,75 @@ def test_tariffs_on_grid_buckets_sum_and_profit_sharing_nonnegative(noise):
 def test_branch21_vintages_without_profit_sharing_are_closed_form():
     """PS_MARGIN very large (no profit-sharing): every bucket is the sum of its
     vintages, each premium of year j worth C (1 + W)^-(t - j) e^{i_j (t - j - 1/2)} in
-    units of S_t, with i_j the tariff at year j's July 10Y."""
+    units of S_t, with i_j the tariff at year j's July book yield."""
     q, n = dataclasses.replace(b.BASELINE, PS_MARGIN=1.0), 50
     noise = b.draw_noise(n, 12, q)
     states = run(b.Noise(noise.eps, np.ones_like(noise.u)), 1.0, q)   # all in force, all Branch 21
     vp, grid = b.vasicek_params(q), b.tariff_grid(q)
-    i = [b.tariff(july_10Y(s, noise.year(j)[0], vp), q) for j, s in enumerate(states[:-1])]
+    i = [b.tariff(july_10Y_and_mu(s, noise.year(j)[0], vp, q)[1], q) for j, s in enumerate(states[:-1])]
     for t, s in enumerate(states):
         for k, i_k in enumerate(grid):
             by_hand = sum(q.C * (i[j] == i_k) * np.exp(i_k * (t - j - 0.5)) * (1 + q.W) ** -(t - j)
                           for j in range(t))
             np.testing.assert_allclose(s.R21k[k], by_hand, rtol=1e-12, atol=1e-300)
+
+
+def test_tariff_uses_the_july_book_yield(noise):
+    """Eq. (5a): the July premium lands in the bucket of tariff(mu_Jul), not of the
+    tariff the July 10Y would give, on the paths and years where the two differ."""
+    vp, grid, states = b.vasicek_params(p), b.tariff_grid(p), run(noise, 1.0)
+    differ = 0
+    for t, (s0, s1) in enumerate(zip(states[:-1], states[1:])):
+        y_jul, mu_jul = july_10Y_and_mu(s0, noise.year(t)[0], vp, p)
+        rates = np.array([b.bucket_rate(i_k, s0.mu, p) for i_k in grid])
+        landed = s1.R21k > s0.R21k * np.exp(rates) / (1 + p.W) * (1 + 1e-12)
+        m = s0.inforce & (b.tariff(mu_jul, p) != b.tariff(y_jul, p))
+        differ += int(m.sum())
+        for j in np.flatnonzero(m):
+            assert grid[landed[:, j]].tolist() == [b.tariff(mu_jul[j], p)]
+    assert differ > 100                                   # the test is not vacuous
+
+
+def test_book_yield_tariff_on_the_observed_history():
+    """Printed comparison, not a target: the filter of Eq. (4) run on the observed 10Y
+    (from mu = y(Jan 2000), as initial_state), and the tariff (Eq. 5a, default margin)
+    of each year's July book yield, next to AG Insurance's tariff on new group
+    premiums and the 10Y annual average it was compared with."""
+    from pension.rates.data import load_olo
+    df = load_olo()[0]
+    y = df["YIELD"].values / 100.0
+    mu = np.empty_like(y)
+    mu[0] = y[0]
+    for m in range(1, len(y)):
+        mu[m] = b.book_yield(mu[m - 1], y[m], p)
+    ag = {2013: (2.25, 2.41), 2015: (1.50, 0.84), 2023: (1.25, 3.09), 2024: (1.75, 2.93)}
+    print(f"\nyear  model tariff  (mu_Jul)   AG tariff   10Y avg   (TARIFF_MARGIN = {p.TARIFF_MARGIN})")
+    for yr, (ag_tariff, ag_10y) in ag.items():
+        jul = np.flatnonzero((df["DATE"].dt.year == yr) & (df["DATE"].dt.month == 7).values)
+        assert len(jul) == 1, f"the history does not cover July {yr}"
+        k = jul[0]
+        print(f"{yr}  {100 * b.tariff(mu[k], p):6.2f}%      ({100 * mu[k]:.2f}%)    {ag_tariff:.2f}%     {ag_10y:.2f}%")
+    assert np.isin(b.tariff(mu, p), b.tariff_grid(p)).all()
+
+
+def test_july_premium_accrual_closed_form():
+    """Eq. (11): with sigma -> 0 the July factor A(t, T) e^{-r_t/2} equals its closed
+    form exp(theta_r tau + (r_t - theta_r) B(tau) - r_t / 2), tau = T - t. Also prints
+    its gap to the exact July accrual exp(int_{t+1/2}^T r) (the approximation's error)."""
+    vp = b.vasicek_params(p)
+    calm, k = dict(vp, sigma=1e-9), vp["kappa"]
+    theta_r = vp["theta"] - vp["spread"]
+    y = np.array([0.0, 0.02, 0.0412, 0.07])
+    r = b.short_rate(y, calm)
+    for t in (0, 20, 44):
+        tau = p.T - t
+        B = (1 - np.exp(-k * tau)) / k
+        closed = np.exp(theta_r * tau + (r - theta_r) * B - r / 2)
+        np.testing.assert_allclose(b.july_premium_accrual(y, t, calm, p), closed, rtol=1e-12)
+        r_jul = theta_r + (r - theta_r) * np.exp(-k / 2)
+        Bj = (1 - np.exp(-k * (tau - 0.5))) / k
+        exact = np.exp(theta_r * (tau - 0.5) + (r_jul - theta_r) * Bj)
+        print(f"t = {t}: July approximation / exact - 1 = {np.round(closed / exact - 1, 6)} for y = {y}")
 
 
 def test_horizontal_equals_single_rate_when_G_is_constant(noise, monkeypatch):
