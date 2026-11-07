@@ -10,9 +10,9 @@ Q is fitted instead (regression Monte Carlo, Longstaff-Schwartz style):
 
 - s' is the state after year t, from baseline.step itself.
 - Phi_j is the value of leaving at tau = j. Nothing is decided after leaving, so
-  it is rolled forward exactly: the liability buckets are fixed in money, the
-  units decay by the fund fee, and each Branch 21 bucket accrues at its bucket
-  rate on the path's mu_s (tariff plus profit-sharing).
+  it is rolled forward exactly along the path's own rates: the liability buckets
+  are fixed in money, each Branch 21 bucket accrues at its bucket rate on the
+  path's mu_s (tariff plus profit-sharing), and the fund keeps its monthly returns.
 - The regression target is NOT the fitted V_{t+1}: it is what the path actually
   earns from t + 1 on under the already-fitted policy pi_{t+1}, ..., pi_{T-1}.
   Unrolling Eq. (12), that is the survival-weighted mix of the leaver values along
@@ -45,12 +45,10 @@ def features(obs, t, p):
     basis small: the total L_t; its weighted rate Gbar_t; the projected terminal
     liability Lp_t if the member stays (each bucket at its own g, future mid-year
     premiums at the current G_t); the total R21_t; the projected reserve Rp_t (each
-    Branch 21 bucket at its current bucket rate, units net of the fee); and the two
-    spreads that drive the choice, y_long - c_fee - i_t (ladder vs Branch 21, i_t the
-    January proxy new_premium_rate) and y_long - G_t (ladder vs new guarantee), with
-    their positive parts. Then the reward legs at (Lp, Rp) and all products of pairs
-    of the base list."""
-    y, G, Hm, Km, mu, N = obs[:, 1:7].T
+    Branch 21 bucket at its current bucket rate, plus the fund value R23_t, which
+    has no fixed rate to project at); and the January proxy i_t = new_premium_rate.
+    Then the reward legs at (Lp, Rp) and all products of pairs of the base list."""
+    y, G, Hm, Km, mu, R23 = obs[:, 1:7].T
     Lg = obs[:, 7:16].T                                   # (9, n), order of wap_grid()
     R21k = obs[:, 16:].T                                  # (16, n), order of tariff_grid()
     grid = b.wap_grid()
@@ -63,13 +61,10 @@ def features(obs, t, p):
     R21 = R21k.sum(axis=0)
     Rp = sum(R21k[k] * (np.exp(b.bucket_rate(i_k, mu, p)) / (1 + p.W)) ** m
              for k, i_k in enumerate(b.tariff_grid(p)))
-    Rp = Rp + N * (1 - p.FUND_FEE) ** m * (1 + p.W) ** -m
+    Rp = Rp + R23 * (1 + p.W) ** -m
     i = b.new_premium_rate(y, mu, p)
-    y_long = b.locked_yield(y, t, b.vasicek_params(p), p)
-    s21, sG = y_long - p.FUND_FEE - i, y_long - G
     emp, short = b.reward_legs(Lp, Rp, p.T, p)
-    base = np.stack([y, G, Hm, Km, mu, L, R21, N, Gbar, Lp, Rp,
-                     s21, sG, np.maximum(s21, 0), np.maximum(sG, 0)], axis=1)
+    base = np.stack([y, G, Hm, Km, mu, L, R21, R23, Gbar, Lp, Rp, i], axis=1)
     iu = np.triu_indices(base.shape[1])
     quad = (base[:, :, None] * base[:, None, :])[:, iu[0], iu[1]]
     return np.column_stack([np.ones(len(obs)), base, emp, short, quad])
@@ -84,6 +79,25 @@ def paidup_growth(states, p):
     r = np.array([[b.bucket_rate(i_k, s.mu, p) for i_k in grid] for s in states[:p.T]])  # (T, 16, n)
     g = np.exp(np.cumsum(r[::-1], axis=0)[::-1]) / (1 + p.W) ** (p.T - np.arange(p.T))[:, None, None]
     return np.concatenate([g, np.ones((1,) + r.shape[1:])])
+
+
+def paidup_fund_growth(states, noise, p):
+    """Per path, the growth of the fund value (in units of S_T) from January of year
+    tau to T after leaving at tau, along the path's own months: accrue_fund with no
+    premium, one year at a time. (T + 1, n); row T is 1. There is no closed form,
+    but the fund is linear in R23 and its returns are exogenous, so replaying each
+    path's months once gives every tau's factor exactly."""
+    vp = b.vasicek_params(p)
+    annual = []
+    for t, s in enumerate(states[:p.T]):
+        y, f = s.y, np.ones_like(s.y)
+        for e in noise.year(t)[0]:
+            y_next = b.vasicek_month(y, e, vp)
+            f = f * b.fund_return(y, y_next, vp, p)
+            y = y_next
+        annual.append(f / (1 + p.W))
+    g = np.cumprod(np.array(annual)[::-1], axis=0)[::-1]
+    return np.vstack([g, np.ones(len(states[0].y))])
 
 
 def _fit(X, target):
@@ -102,18 +116,18 @@ def _reward(L, R, tau, p):
     return p.LAMBDA * emp - (1 - p.LAMBDA) * short
 
 
-def leaver_value(s, grow21, p):
+def leaver_value(s, grow21, grow23, p):
     """Phi_tau, Eq. (12): the reward at T of leaving at tau = s.t, rolled forward
-    exactly from the January state s: liability buckets fixed in money, units net of
-    the fee, each Branch 21 bucket by its paid-up growth (grow21 = paidup_growth,
-    row tau)."""
+    exactly from the January state s along the path's own rates: liability buckets
+    fixed in money, each Branch 21 bucket by its paid-up growth (grow21 =
+    paidup_growth), the fund by its paid-up growth (grow23 = paidup_fund_growth)."""
     tau = s.t
     d = (1 + p.W) ** -(p.T - tau)
-    units = s.N * (1 - p.FUND_FEE) ** (p.T - tau) * d
-    return _reward(s.L * d, (s.R21k * grow21[tau]).sum(axis=0) + units, tau, p)
+    R_T = (s.R21k * grow21[tau]).sum(axis=0) + s.R23 * grow23[tau]
+    return _reward(s.L * d, R_T, tau, p)
 
 
-def rollout_target(s2, t, fits, actions, noise, grow21, p):
+def rollout_target(s2, t, fits, actions, noise, grow21, grow23, p):
     """The regression target of Q_t, Eq. (12) unrolled: from s2 = the state after
     year t, follow the fitted greedy policy of years t+1 .. T-1 on the training
     noise, in force, and weight each year's leaver value by its exit probability:
@@ -121,15 +135,15 @@ def rollout_target(s2, t, fits, actions, noise, grow21, p):
                        + prod_{m=t}^{T-1}(1 - h(m)) reward_T.
     Leaving at T is staying (tau = T), so the last two terms are one reward."""
     n = len(s2.y)
-    target = b.hazard(t, p) * leaver_value(s2, grow21, p)
+    target = b.hazard(t, p) * leaver_value(s2, grow21, grow23, p)
     surv, s = 1 - b.hazard(t, p), s2
     for j in range(t + 1, p.T):
         a = actions[q_values(fits[j], s.obs(p), j, p).argmax(axis=1)]
         s = b.step(s, a, noise.year(j)[0], np.ones(n), p)
         h = b.hazard(j, p)
-        target = target + surv * h * leaver_value(s, grow21, p)
+        target = target + surv * h * leaver_value(s, grow21, grow23, p)
         surv = surv * (1 - h)
-    return target + surv * _reward(s.L, s.R21 + s.N, p.T, p)
+    return target + surv * _reward(s.L, s.R21 + s.R23, p.T, p)
 
 
 def solve(p=b.BASELINE, n=10000, actions=np.linspace(0.0, 1.0, 11), seed=None):
@@ -151,7 +165,7 @@ def solve(p=b.BASELINE, n=10000, actions=np.linspace(0.0, 1.0, 11), seed=None):
         a = rng.choice(actions, size=n)
         states.append(b.step(states[-1], a, noise.year(t)[0], stay[t], p))
 
-    grow21 = paidup_growth(states, p)
+    grow21, grow23 = paidup_growth(states, p), paidup_fund_growth(states, noise, p)
     timings["forward"] = time.perf_counter() - clock
 
     actions = np.asarray(actions, float)
@@ -162,7 +176,7 @@ def solve(p=b.BASELINE, n=10000, actions=np.linspace(0.0, 1.0, 11), seed=None):
         targets = []
         for a in actions:                                 # common noise across the actions
             s2 = b.step(s, np.full(n, a), noise.year(t)[0], stay[t], p)
-            targets.append(rollout_target(s2, t, fits, actions, noise, grow21, p))
+            targets.append(rollout_target(s2, t, fits, actions, noise, grow21, grow23, p))
         timings["rollouts"] += time.perf_counter() - clock
         clock = time.perf_counter()
         X = features(s.obs(p), t, p)

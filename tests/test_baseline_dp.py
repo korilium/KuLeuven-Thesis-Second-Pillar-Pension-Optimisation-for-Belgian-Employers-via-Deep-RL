@@ -25,16 +25,16 @@ def test_paidup_growth_is_the_step_roll_forward():
     for t in range(p.T):
         states.append(b.step(states[-1], np.full(n, 0.5), noise.year(t)[0], stay[t], p))
     s = states[tau]
-    left = b.State(s.t, s.y, s.G, s.H, s.K, s.mu, s.Lg, s.R21k, s.N, np.zeros(n, bool), np.full(n, tau))
+    left = b.State(s.t, s.y, s.G, s.H, s.K, s.mu, s.Lg, s.R21k, s.R23, np.zeros(n, bool), np.full(n, tau))
     for t in range(tau, p.T):
         left = b.step(left, np.zeros(n), noise.year(t)[0], stay[t], p)
     d = (1 + p.W) ** -(p.T - tau)
+    grow21, grow23 = bdp.paidup_growth(states, p), bdp.paidup_fund_growth(states, noise, p)
     np.testing.assert_allclose(left.L, s.L * d, rtol=1e-12)
-    np.testing.assert_allclose(left.N, s.N * (1 - p.FUND_FEE) ** (p.T - tau) * d, rtol=1e-12)
-    np.testing.assert_allclose(left.R21k, s.R21k * bdp.paidup_growth(states, p)[tau], rtol=1e-12)
-    grow = bdp.paidup_growth(states, p)
-    np.testing.assert_allclose(bdp.leaver_value(s, grow, p), bdp._reward(left.L, left.R21 + left.N, tau, p),
-                               rtol=1e-12)
+    np.testing.assert_allclose(left.R23, s.R23 * grow23[tau], rtol=1e-12)
+    np.testing.assert_allclose(left.R21k, s.R21k * grow21[tau], rtol=1e-12)
+    np.testing.assert_allclose(bdp.leaver_value(s, grow21, grow23, p),
+                               bdp._reward(left.L, left.R21 + left.R23, tau, p), rtol=1e-12)
 
 
 def test_policy_beats_every_constant_policy(sol):

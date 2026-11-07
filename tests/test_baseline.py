@@ -81,7 +81,7 @@ def test_liability_does_not_depend_on_the_policy(noise):
         assert all(np.array_equal(states[0].L, s.L) for s in states[1:])
 
 
-def test_branch21_never_decreases_and_branch23_pays_its_units(noise):
+def test_branch21_never_decreases(noise):
     """In money, no Branch 21 bucket ever falls (every bucket rate is >= 0), and the
     year's Branch 21 premium lands in exactly one bucket. Checked bucket by bucket in
     units of S_{t+1}, where a rate of 0 gives equality exactly (e^0 = 1)."""
@@ -91,15 +91,13 @@ def test_branch21_never_decreases_and_branch23_pays_its_units(noise):
         grew = (s1.R21k > s0.R21k * np.exp(np.array([b.bucket_rate(i_k, s0.mu, p) for i_k in b.tariff_grid(p)]))
                 / (1 + p.W) * (1 + 1e-12))                # buckets that received the premium
         assert np.array_equal(grew.sum(axis=0), s0.inforce.astype(int))
-    sT = states[-1]
-    assert np.all(b.bond_price(sT.y, p.T, b.vasicek_params(p), p) == 1.0)   # R23_T = N_T P(T,T) = N_T
 
 
 def test_scale_free_in_salary(noise):
     """Money is in salary units: the starting salary appears nowhere, and doubling
     the premium doubles every balance (all three recursions are linear in P)."""
     s1, s2 = run(noise, 0.4)[-1], run(noise, 0.4, dataclasses.replace(p, C=2 * p.C))[-1]
-    for k in ("L", "R21", "N"):
+    for k in ("L", "R21", "R23"):
         assert np.allclose(getattr(s2, k), 2 * getattr(s1, k), rtol=1e-13)
 
 
@@ -242,34 +240,54 @@ def test_horizontal_equals_single_rate_when_G_is_constant(noise, monkeypatch):
         np.testing.assert_array_equal(s1.L, L)
 
 
-def test_bond_price_closed_form():
-    """Eq. (7): P(T, T) = 1; sigma -> 0 with lambda_r = 0 is the deterministic-rate
+def test_zero_price_closed_form():
+    """Eq. (7): P(0; r) = 1; sigma -> 0 with lambda_r = 0 is the deterministic-rate
     price; and with lambda_r != 0 the closed form is E^Q[exp(-int r)] by Monte Carlo
     (within 4 standard errors plus 0.1% for the monthly trapezoid)."""
     vp = b.vasicek_params(p)
     y = np.array([0.0, 0.02, 0.0412, 0.07])
-    assert np.all(b.bond_price(y, p.T, vp, p) == 1.0)
+    r, theta_r, k = b.short_rate(y, vp), vp["theta"] - vp["spread"], vp["kappa"]
+    assert np.all(b.zero_price(r, 0.0, b.theta_q(vp, p), vp) == 1.0)
 
-    t = 20.5
-    tau, k = p.T - t, vp["kappa"]
+    tau = 24.5
     calm, p0 = dict(vp, sigma=1e-9), dataclasses.replace(p, MPR=0.0)
-    r, theta_r = b.short_rate(y, vp), vp["theta"] - vp["spread"]
     B = (1 - np.exp(-k * tau)) / k
-    np.testing.assert_allclose(b.bond_price(y, t, calm, p0), np.exp(-(theta_r * tau + (r - theta_r) * B)),
-                               rtol=1e-12)
+    np.testing.assert_allclose(b.zero_price(r, tau, b.theta_q(calm, p0), calm),
+                               np.exp(-(theta_r * tau + (r - theta_r) * B)), rtol=1e-12)
 
     q = dataclasses.replace(p, MPR=-0.3)
-    theta_q = theta_r - q.MPR * vp["sigma"] / k
-    vq = dict(vp, theta=theta_q + vp["spread"])           # the 10Y step simulates r + s_term
+    tq = b.theta_q(vp, q)
+    vq = dict(vp, theta=tq + vp["spread"])                # the 10Y step simulates r + s_term
     n, rng = 40000, np.random.default_rng(4)
     ym, integral = np.full(n, vp["y0"]), np.zeros(n)
-    months = int(round(12 * tau))
-    for _ in range(months):
+    for _ in range(int(round(12 * tau))):
         y1 = b.vasicek_month(ym, rng.standard_normal(n), vq)
         integral += (b.short_rate(ym, vp) + b.short_rate(y1, vp)) / 2 / 12
         ym = y1
-    mc, P = np.exp(-integral), b.bond_price(vp["y0"], t, vp, q)
+    mc, P = np.exp(-integral), b.zero_price(b.short_rate(vp["y0"], vp), tau, tq, vp)
     assert abs(mc.mean() / P - 1) < 4 * mc.std() / np.sqrt(n) / P + 1e-3
+
+
+def test_fund_return_deterministic_and_composes():
+    """Eq. (8): with sigma -> 0 and lambda_r = 0 the rolled zero-coupon earns exactly
+    the short rate, exp(int r) with r_s = theta_r + (r_0 - theta_r) e^{-kappa s}: per
+    month theta_r / 12 + (r_0 - theta_r)(1 - e^{-kappa/12}) / kappa, whatever D; and
+    twelve monthly factors compose to the annual exp(theta_r + (r_0 - theta_r)(1 - e^{-kappa}) / kappa)."""
+    vp = b.vasicek_params(p)
+    calm, k = dict(vp, sigma=1e-9), vp["kappa"]
+    theta_r = vp["theta"] - vp["spread"]
+    y0 = np.array([0.0, 0.02, 0.0412, 0.07])
+    for D in (2.0, 7.0, 15.0):
+        q = dataclasses.replace(p, MPR=0.0, FUND_DURATION=D)
+        y, gross = y0, np.ones_like(y0)
+        for _ in range(12):
+            y1 = b.vasicek_month(y, np.zeros_like(y), calm)
+            month = b.fund_return(y, y1, calm, q)
+            int_r = theta_r / 12 + (b.short_rate(y, calm) - theta_r) * (1 - np.exp(-k / 12)) / k
+            np.testing.assert_allclose(month, np.exp(int_r), rtol=1e-12)
+            gross, y = gross * month, y1
+        r0 = b.short_rate(y0, calm)
+        np.testing.assert_allclose(gross, np.exp(theta_r + (r0 - theta_r) * (1 - np.exp(-k)) / k), rtol=1e-12)
 
 
 def test_calibrated_mpr_matches_the_10Y_mean():
@@ -282,29 +300,44 @@ def test_calibrated_mpr_matches_the_10Y_mean():
     assert -np.log(b.zero_price(theta_r, 10.0, theta_q, vp)) / 10 == pytest.approx(vp["theta"], abs=1e-14)
     assert lam < 0
     assert b.market_price_of_risk(vp, dataclasses.replace(p, MPR=0.2)) == 0.2
-    y = np.array([vp["theta"]])
-    assert b.locked_yield(y, 0, vp, p) > b.locked_yield(y, 0, vp, dataclasses.replace(p, MPR=0.0))
+    r = np.array([theta_r])
+    assert b.theta_q(vp, p) > b.theta_q(vp, dataclasses.replace(p, MPR=0.0))
+    assert (b.zero_price(r, 30.0, b.theta_q(vp, p), vp)
+            < b.zero_price(r, 30.0, b.theta_q(vp, dataclasses.replace(p, MPR=0.0)), vp))
 
 
-def test_zero_fee_is_the_no_fee_unit_path(noise):
-    """Eq. (8): with c_fee = 0 the units follow N_{t+1} = (N_t + P23_t / P(t+1/2, T)) / (1 + W)
-    exactly; with c_fee > 0 a single July purchase of year 0 holds (1 - c_fee)^{t - 1/2}
-    times as many units in January of year t."""
-    vp = b.vasicek_params(p)
-    states, Nn = run(noise, 0.3), np.zeros(N)
+def fund_path_by_hand(noise, states, alpha, q):
+    """R23 recomputed month by month without the fee factor: P(D - 1/12; r_next) / P(D; r_now),
+    the July premium (1 - alpha) C added after the July return, / (1 + W) each year."""
+    vp, D = b.vasicek_params(q), q.FUND_DURATION
+    tq, R, out = b.theta_q(vp, q), np.zeros(len(states[0].y)), []
     for t, s in enumerate(states[:-1]):
         y = s.y
-        for e in noise.year(t)[0][:b.JULY + 1]:           # February .. July
-            y = b.vasicek_month(y, e, vp)
-        Nn = (Nn + 0.7 * p.C * s.inforce / b.bond_price(y, t + 0.5, vp, p)) / (1 + p.W)
-        np.testing.assert_array_equal(states[t + 1].N, Nn)
+        for k, e in enumerate(noise.year(t)[0]):
+            y1 = b.vasicek_month(y, e, vp)
+            R = R * (b.zero_price(b.short_rate(y1, vp), D - 1 / 12, tq, vp) / b.zero_price(b.short_rate(y, vp), D, tq, vp))
+            if k == b.JULY:
+                R = R + (1 - alpha) * q.C * s.inforce
+            y = y1
+        R = R / (1 + q.W)
+        out.append(R)
+    return out
+
+
+def test_zero_fee_is_the_no_fee_fund_path(noise):
+    """Eq. (8): with c_fee = 0 the fund follows the fee-free monthly recursion exactly;
+    with c_fee > 0 a single July premium of year 0 is worth (1 - c_fee)^{t - 1/2} times
+    its fee-free value in January of year t (held 6 + 12 (t - 1) months)."""
+    states = run(noise, 0.3)
+    for s1, R in zip(states[1:], fund_path_by_hand(noise, states, 0.3, p)):
+        np.testing.assert_array_equal(s1.R23, R)
 
     c = 0.01
     def first_year_only(q):
         s, out = b.initial_state(noise.eps[:b.premonths()], q), []
         for t in range(q.T):
             s = b.step(s, np.full(N, 0.0 if t == 0 else 1.0), *noise.year(t), q)
-            out.append(s.N)
+            out.append(s.R23)
         return out
     plain, fee = first_year_only(p), first_year_only(dataclasses.replace(p, FUND_FEE=c))
     for t in range(1, p.T + 1):
@@ -312,24 +345,36 @@ def test_zero_fee_is_the_no_fee_unit_path(noise):
 
 
 def test_leaver_keeps_frozen_buckets_and_is_settled_at_T(noise):
-    """A member who leaves at tau keeps every bucket fixed in money and the units net
-    of the fee; the shortfall is (L_tau - R_T)^+ at T, R_T having accrued after exit."""
+    """A member who leaves at tau keeps every liability bucket fixed in money; each
+    Branch 21 bucket keeps its tariff plus profit-sharing and the fund keeps its
+    monthly returns, both on the path's own rates; the shortfall is (L_tau - R_T)^+ at T."""
     q = dataclasses.replace(p, FUND_FEE=0.01)
     states = run(noise, 0.4, q)
     sT = states[-1]
     left = ~sT.inforce
     assert left.sum() > 0
+    vp, grid = b.vasicek_params(q), b.tariff_grid(q)
     for j in np.flatnonzero(left):
         tau = int(sT.tau[j])
         d = (1 + q.W) ** -(q.T - tau)
         np.testing.assert_allclose(sT.Lg[:, j], states[tau].Lg[:, j] * d, rtol=1e-12)
-        np.testing.assert_allclose(sT.N[j], states[tau].N[j] * (1 - q.FUND_FEE) ** (q.T - tau) * d, rtol=1e-12)
-        assert sT.R21[j] >= states[tau].R21[j] * d
+        grow21, grow23 = np.ones(len(grid)), 1.0
+        for t in range(tau, q.T):
+            mu = states[t].mu[j]
+            grow21 = grow21 * np.exp([b.bucket_rate(i_k, mu, q) for i_k in grid]) / (1 + q.W)
+            y = states[t].y[j]
+            for e in noise.year(t)[0][:, j]:
+                y1 = b.vasicek_month(y, e, vp)
+                grow23 = grow23 * b.fund_return(y, y1, vp, q)
+                y = y1
+            grow23 = grow23 / (1 + q.W)
+        np.testing.assert_allclose(sT.R21k[:, j], states[tau].R21k[:, j] * grow21, rtol=1e-12)
+        np.testing.assert_allclose(sT.R23[j], states[tau].R23[j] * grow23, rtol=1e-12)
     sim = b.simulate(const(0.4), noise=noise, p=q)
-    emp, short = b.reward_legs(sT.L, sT.R21 + sT.N, sT.tau, q)
+    emp, short = b.reward_legs(sT.L, sT.R21 + sT.R23, sT.tau, q)
     np.testing.assert_array_equal(sim["reward"], q.LAMBDA * emp - (1 - q.LAMBDA) * short)
     L_tau = np.array([states[int(sT.tau[j])].L[j] for j in range(N)]) * (1 + q.W) ** -(q.T - sT.tau)
-    np.testing.assert_allclose(short[left], np.maximum(L_tau - (sT.R21 + sT.N), 0)[left], rtol=1e-12, atol=1e-15)
+    np.testing.assert_allclose(short[left], np.maximum(L_tau - (sT.R21 + sT.R23), 0)[left], rtol=1e-12, atol=1e-15)
 
 
 @pytest.mark.filterwarnings("ignore:.*observation space (minimum|maximum) value is:UserWarning")
