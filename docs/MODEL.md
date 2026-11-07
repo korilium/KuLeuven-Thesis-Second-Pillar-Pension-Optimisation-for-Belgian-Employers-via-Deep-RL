@@ -149,4 +149,7 @@ This is the MDP itself: no state variable is dropped. The only error is the fit 
   - The observation has 17 values, and the benchmark policies are added.
   - (12) The DP uses realised (Longstaff–Schwartz) targets instead of the fitted $\hat V_{t+1}$, and bucket summaries as features.
   - The `I_TARIFF` default in Sec. 6 is corrected to 0.0, matching the code since commit 9080c3b.
+- **2026-11 — Stage 0 of the bond-fund model** (tag `pre-bondfund` holds the horizontal-WAP baseline above).
+  - `rates/calibration.py`: the `lru_cache` on `calibration()` is restored. Commit ff86184 ("check calibration") had commented it out without a stated reason. Every caller only reads the returned dict and its arrays. Without the cache, each `step()` reread the CSV (about 10 ms per call), which dominated the DP's run time.
+  - `baseline_dp.solve` reports `timings` (forward simulation, rollouts, fits).
 

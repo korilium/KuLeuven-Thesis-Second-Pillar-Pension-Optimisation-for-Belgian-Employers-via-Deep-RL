@@ -30,6 +30,8 @@ does not depend on the state, so the training states are simulated in force
 (u = 1) and exit enters through h(t) only, as exact weights, never sampled.
 """
 
+import time
+
 import numpy as np
 
 from pension import baseline as b
@@ -124,10 +126,13 @@ def rollout_target(s2, t, fits, actions, noise, grow21, p):
 
 def solve(p=b.BASELINE, n=10000, actions=np.linspace(0.0, 1.0, 11), seed=None):
     """Backward induction, Eq. (12), with realised rollout targets. Returns the
-    fitted Q per year and action, the action grid, and V0: the in-sample mean, over
-    the starting states, of the realised target of the greedy action at t = 0.
+    fitted Q per year and action, the action grid, V0 (the in-sample mean, over
+    the starting states, of the realised target of the greedy action at t = 0), and
+    timings: seconds spent on the forward simulation, the rollouts and the fits.
     Training noise: seed (default p.TRAIN_SEED), never p.EVAL_SEED."""
     seed = p.TRAIN_SEED if seed is None else seed
+    timings = dict(forward=0.0, rollouts=0.0, fits=0.0)  # seconds per phase
+    clock = time.perf_counter()
     noise = b.draw_noise(n, seed, p)
     stay = np.ones_like(noise.u)                          # train in force; exit via h(t)
     rng = np.random.default_rng(seed + 1)
@@ -139,21 +144,26 @@ def solve(p=b.BASELINE, n=10000, actions=np.linspace(0.0, 1.0, 11), seed=None):
         states.append(b.step(states[-1], a, noise.year(t)[0], stay[t], p))
 
     grow21 = paidup_growth(states, p)
+    timings["forward"] = time.perf_counter() - clock
 
     actions = np.asarray(actions, float)
     fits = [None] * p.T
     for t in range(p.T - 1, -1, -1):
         s = states[t]
-        X = features(s.obs(p), t, p)
+        clock = time.perf_counter()
         targets = []
         for a in actions:                                 # common noise across the actions
             s2 = b.step(s, np.full(n, a), noise.year(t)[0], stay[t], p)
             targets.append(rollout_target(s2, t, fits, actions, noise, grow21, p))
+        timings["rollouts"] += time.perf_counter() - clock
+        clock = time.perf_counter()
+        X = features(s.obs(p), t, p)
         betas = [_fit(X, tg) for tg in targets]
         fits[t] = dict(beta=np.array([bt for bt, _ in betas]), scale=np.array([sc for _, sc in betas]))
+        timings["fits"] += time.perf_counter() - clock
     greedy = q_values(fits[0], states[0].obs(p), 0, p).argmax(axis=1)
     V0 = float(np.array(targets)[greedy, np.arange(n)].mean())
-    return dict(fits=fits, actions=actions, V0=V0)
+    return dict(fits=fits, actions=actions, V0=V0, timings=timings)
 
 
 def q_values(fit, obs, t, p):
