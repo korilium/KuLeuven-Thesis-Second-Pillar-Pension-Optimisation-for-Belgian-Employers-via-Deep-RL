@@ -183,4 +183,32 @@ This is the MDP itself: no state variable is dropped. The only error is the fit 
   - Benchmarks: `all_branch21`, `all_fund`, `fifty_fifty`, `market_practice_rule`.
   - New parameter `FUND_DURATION` (PLACEHOLDER); `FUND_FEE` is now charged monthly (PLACEHOLDER).
   - DP: `paidup_fund_growth`. The two ladder spreads leave the features (both used $y^{\text{long}}$), and the January proxy $i_t$ is added; Stage 3 finalises the basis.
+- **2026-11 — Stage 3: the DP.**
+  - Features: the rate state plus the summaries of Sec. 7. That adds the Branch 21 floor at $T$, the projection at the current crediting and the reserve-weighted tariff. The January proxy $i_t$ is dropped, and no derived column is affine in $y$ at fixed $t$.
+  - Clipping guard on every fitted $Q_t(\cdot,\alpha_k)$, with `clip_stats`.
+  - DP tests run at $n = 2000$. They add the clipping-guard test and the $\sigma \to 0$ known-answer test (per-premium comparison).
+
+## 9. Verify by hand (one path)
+
+These are `EVAL_SEED` path 4 under $\alpha = \tfrac12$ every year, at year $t = 10$ (January 2037, in force), with default parameters. Each line can be recomputed on paper from the numbers given, and matches the code to all printed digits.
+
+- **State in January:** $y_t = 0.0260657571$, $G_t = 2.50\%$, $\mu_t = 0.0265879593$. Premium $P_t = 0.05$, with $P^{21} = P^{23} = 0.025$ (units of $S_t$), and $W = 0.025$.
+- **(1) Liability bucket $g = G_t = 2.50\%$** (Eq. 6b): $L_t^{(g)} = 0.049470044753$, so
+  $L_{t+1}^{(g)} = (0.049470044753\cdot e^{0.025} + 0.05\cdot e^{0.0125})/1.025 = (0.049470044753\cdot 1.025315120524 + 0.05\cdot 1.012578451541)/1.025 = 0.098879324366$.
+  A bucket that gets no premium, $g = 2.00\%$: $0.049040073002\cdot e^{0.02}/1.025 = 0.048810486041$.
+- **(2) Branch 21 bucket with profit-sharing** (Eqs. 5a–6c):
+  - The July 10Y is $0.0270406985$, so the tariff is $\mathrm{floor}_{25\text{bp}}(0.0270406985 - 0.005) = 2.00\%$.
+  - The bucket $i_k = 2.00\%$ earns $r_k = \max(0.02,\ 0.0265879593 - 0.005) = 0.0215879593$, of which profit-sharing is $0.0015879593$.
+  - $R^{21,(k)}_{t+1} = (0.024422303802\cdot e^{r_k} + 0.025\cdot e^{r_k/2})/1.025 = (0.024422303802\cdot 1.021822665219 + 0.025\cdot 1.010852444830)/1.025 = 0.049001536276$.
+- **(3) One month of the fund** (Eqs. 7–8), April:
+  - The 10Y goes from $0.0287225959$ to $0.0272843256$. With $s_{\text{term}} = 0.0128385047$, that gives $r_{\text{now}} = 0.0158840912$ and $r_{\text{next}} = 0.0144458209$.
+  - Inputs: $\kappa = 0.1104185098$, $\sigma = 0.0060601606$, $\theta_Q = 0.0427692751$, $D = 7$.
+  - $B(7) = (1-e^{-7\kappa})/\kappa = 4.8754631475$, so $\ln P(7; r_{\text{now}}) = (\theta_Q - \tfrac{\sigma^2}{2\kappa^2})(B - 7) - \tfrac{\sigma^2 B^2}{4\kappa} - B\,r_{\text{now}} = -0.1670839385$.
+  - $B(7 - \tfrac1{12}) = 4.8368140525$, so $\ln P(7-\tfrac1{12}; r_{\text{next}}) = -0.1576383607$.
+  - Gross return: $e^{-0.1576383607 + 0.1670839385} = 1.009490327998$ (no fee).
+- **(4) Calibrated $\lambda_r$** (Eq. 7a):
+  - Inputs: $\theta = 0.0223352927$, $s_{\text{term}} = 0.0128385047$, so $\theta_r = 0.0094967880$; and $B(10) = 6.0544115711$.
+  - $\theta_Q = \tfrac{\sigma^2}{2\kappa^2} + \dfrac{B\theta_r + \sigma^2B^2/(4\kappa) - 10\,\theta}{B - 10} = 0.0427692751$.
+  - $\lambda_r = (\theta_r - \theta_Q)\,\kappa/\sigma = -0.6062378058$.
+  - Check: the model 10Y at $r = \theta_r$ is $-\ln P(10;\theta_r)/10 = 2.2335\% = \theta$.
 
