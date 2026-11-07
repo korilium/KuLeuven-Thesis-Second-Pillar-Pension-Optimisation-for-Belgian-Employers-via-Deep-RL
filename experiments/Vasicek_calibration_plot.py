@@ -41,7 +41,7 @@ def plot_vasicek_calibration(y, dates=None, dt=1 / 12, pct=True, title=None):
     pct    : display in percent (True) or decimals (False); estimation is unaffected
     """
     c = ols_components(y, dt)
-    p, a, b = c["params"], c["a"], c["b"]
+    p, a, b = c["params"], c["a"], c["b"] # 
     s = 100.0 if pct else 1.0
     unit = "%" if pct else "decimal"
     t = np.arange(len(c["y"])) if dates is None else np.asarray(dates)

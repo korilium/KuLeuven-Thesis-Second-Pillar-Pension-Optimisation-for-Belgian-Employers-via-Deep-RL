@@ -2,7 +2,7 @@
 baseline_dp.py -- dynamic programming for the baseline MDP (pension/baseline.py) on
 its FULL exact state, with the action values fitted by regression.
 
-A grid over the state (eight variables and nine liability buckets) cannot run, so
+A grid over the state (seven variables, nine liability and 16 Branch 21 buckets) cannot run, so
 Q is fitted instead (regression Monte Carlo, Longstaff-Schwartz style):
 
     Q_t(s, a_k) = E[ (1 - h(t)) V_{t+1}(s') + h(t) Phi_{t+1}(s') | s, a_k ]       Eq. (12), MODEL.md
@@ -23,7 +23,8 @@ Q is fitted instead (regression Monte Carlo, Longstaff-Schwartz style):
   passes the overshoot back year by year; with realised targets the error stays in
   the ranking, and a suboptimal policy is a lower bound, not an overshoot.
 - Q_t(., a_k) is a least-squares fit, on features of s, of that target realised on
-  simulated states with common noise across the actions.
+  simulated states with common noise across the actions, clipped to the range of
+  those targets (the guard; clip_stats reports how often it binds).
 
 The state is exact, so this is a true MDP: the only error is the fit of Q, and
 evaluating the policy with baseline.simulate on fresh noise measures it. Exit
@@ -41,30 +42,36 @@ from pension import baseline as b
 def features(obs, t, p):
     """Regression basis at year t, from the observation (the exact state) only.
 
-    The buckets enter through summaries, not one by one, to keep the quadratic
-    basis small: the total L_t; its weighted rate Gbar_t; the projected terminal
-    liability Lp_t if the member stays (each bucket at its own g, future mid-year
-    premiums at the current G_t); the total R21_t; the projected reserve Rp_t (each
-    Branch 21 bucket at its current bucket rate, plus the fund value R23_t, which
-    has no fixed rate to project at); and the January proxy i_t = new_premium_rate.
-    Then the reward legs at (Lp, Rp) and all products of pairs of the base list."""
+    The buckets never enter one by one, only through summaries, which keeps the
+    quadratic basis small. No column is a derived affine function of y at fixed t
+    (such a column only duplicates y and the products with it).
+      rate state: y_t, G_t, H_t / 20, K_t / 8, mu_t;
+      liability:  L_t, the projection Lp_t if the member stays (each bucket at its
+                  own g, future July premiums at the current G_t), the weighted rate Gbar_t;
+      Branch 21:  R21_t; the guaranteed floor at T, sum_k R21^(k) (e^{i_k} / (1+W))^{T-t};
+                  the projection at the current crediting,
+                  sum_k R21^(k) (e^{max(i_k, mu_t - PS_MARGIN)} / (1+W))^{T-t};
+                  the reserve-weighted tariff ibar_t;
+      Branch 23:  R23_t.
+    Then the reward legs at (Lp, Branch 21 projection + R23 (1+W)^-(T-t); the fund
+    has no fixed rate to project at), and all products of pairs of the base list."""
     y, G, Hm, Km, mu, R23 = obs[:, 1:7].T
     Lg = obs[:, 7:16].T                                   # (9, n), order of wap_grid()
     R21k = obs[:, 16:].T                                  # (16, n), order of tariff_grid()
-    grid = b.wap_grid()
     m = p.T - t
     L = Lg.sum(axis=0)
-    gL = sum(g * Lg[k] for k, g in enumerate(grid))
+    gL = sum(g * Lg[k] for k, g in enumerate(b.wap_grid()))
     Gbar = np.divide(gL, L, out=np.zeros_like(L), where=L > 0)
-    Lp = sum(Lg[k] * (np.exp(g) / (1 + p.W)) ** m for k, g in enumerate(grid))
+    Lp = sum(Lg[k] * (np.exp(g) / (1 + p.W)) ** m for k, g in enumerate(b.wap_grid()))
     Lp = Lp + p.C * sum(np.exp(G * (k - 0.5)) / (1 + p.W) ** k for k in range(1, m + 1))
+    tariffs = b.tariff_grid(p)
     R21 = R21k.sum(axis=0)
-    Rp = sum(R21k[k] * (np.exp(b.bucket_rate(i_k, mu, p)) / (1 + p.W)) ** m
-             for k, i_k in enumerate(b.tariff_grid(p)))
-    Rp = Rp + R23 * (1 + p.W) ** -m
-    i = b.new_premium_rate(y, mu, p)
-    emp, short = b.reward_legs(Lp, Rp, p.T, p)
-    base = np.stack([y, G, Hm, Km, mu, L, R21, R23, Gbar, Lp, Rp, i], axis=1)
+    floor21 = sum(R21k[k] * (np.exp(i_k) / (1 + p.W)) ** m for k, i_k in enumerate(tariffs))
+    proj21 = sum(R21k[k] * (np.exp(b.bucket_rate(i_k, mu, p)) / (1 + p.W)) ** m for k, i_k in enumerate(tariffs))
+    iR = sum(i_k * R21k[k] for k, i_k in enumerate(tariffs))
+    ibar = np.divide(iR, R21, out=np.zeros_like(R21), where=R21 > 0)
+    emp, short = b.reward_legs(Lp, proj21 + R23 * (1 + p.W) ** -m, p.T, p)
+    base = np.stack([y, G, Hm, Km, mu, L, Lp, Gbar, R21, floor21, proj21, ibar, R23], axis=1)
     iu = np.triu_indices(base.shape[1])
     quad = (base[:, :, None] * base[:, None, :])[:, iu[0], iu[1]]
     return np.column_stack([np.ones(len(obs)), base, emp, short, quad])
@@ -181,17 +188,26 @@ def solve(p=b.BASELINE, n=10000, actions=np.linspace(0.0, 1.0, 11), seed=None):
         clock = time.perf_counter()
         X = features(s.obs(p), t, p)
         betas = [_fit(X, tg) for tg in targets]
-        fits[t] = dict(beta=np.array([bt for bt, _ in betas]), scale=np.array([sc for _, sc in betas]))
+        # clipping guard: a fitted Q never leaves the range of the targets it was
+        # fitted on, so an extrapolating fit in a tail state cannot win the argmax
+        fits[t] = dict(beta=np.array([bt for bt, _ in betas]), scale=np.array([sc for _, sc in betas]),
+                       lo=np.array([tg.min() for tg in targets]), hi=np.array([tg.max() for tg in targets]))
         timings["fits"] += time.perf_counter() - clock
     greedy = q_values(fits[0], states[0].obs(p), 0, p).argmax(axis=1)
     V0 = float(np.array(targets)[greedy, np.arange(n)].mean())
     return dict(fits=fits, actions=actions, V0=V0, timings=timings)
 
 
-def q_values(fit, obs, t, p):
-    """Q_t(s, a_k) for every action, (n, K)."""
+def raw_q_values(fit, obs, t, p):
+    """The least-squares Q_t(s, a_k) for every action, before the guard, (n, K)."""
     X = features(obs, t, p)
     return np.stack([(X / sc) @ bt for bt, sc in zip(fit["beta"], fit["scale"])], axis=1)
+
+
+def q_values(fit, obs, t, p):
+    """Q_t(s, a_k) for every action, (n, K), each clipped to [min, max] of the
+    targets its action was fitted on."""
+    return np.clip(raw_q_values(fit, obs, t, p), fit["lo"], fit["hi"])
 
 
 def value(fit, obs, t, p):
@@ -220,3 +236,24 @@ def interior_share(sol, p=b.BASELINE, n=10000, seed=None):
         decisions += int(s.inforce.sum())
         s = b.step(s, a, *noise.year(t), p)
     return interior / decisions
+
+
+def clip_stats(sol, p=b.BASELINE, n=10000, seed=None):
+    """How often the clipping guard binds, per year, on the in-force evaluation states
+    of the greedy policy (seed: EVAL_SEED): "any" is the share of states where it
+    binds for at least one action, "chosen" where it binds for the action taken, and
+    "changed" where it changes the greedy action. Arrays of length T."""
+    noise = b.draw_noise(n, p.EVAL_SEED if seed is None else seed, p)
+    s = b.initial_state(noise.eps[:b.premonths()], p)
+    out = {k: np.zeros(p.T) for k in ("any", "chosen", "changed")}
+    for t in range(p.T):
+        fit, obs, m = sol["fits"][t], s.obs(p), s.inforce
+        raw = raw_q_values(fit, obs, t, p)
+        q = np.clip(raw, fit["lo"], fit["hi"])
+        k = q.argmax(axis=1)
+        binds = raw != q
+        out["any"][t] = binds.any(axis=1)[m].mean()
+        out["chosen"][t] = binds[np.arange(len(k)), k][m].mean()
+        out["changed"][t] = (raw.argmax(axis=1) != k)[m].mean()
+        s = b.step(s, sol["actions"][k], *noise.year(t), p)
+    return out

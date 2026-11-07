@@ -119,7 +119,7 @@ Calibration (OLS on 321 monthly 10Y observations up to Sep 2026): $\kappa$ = 0.1
 
 ## 7. DP reference (`pension/baseline_dp.py`)
 
-Backward induction on the **exact** state (eight variables and nine liability buckets). A grid cannot run, so $Q$ is fitted by regression on simulated states (regression Monte Carlo, Longstaff–Schwartz style):
+Backward induction on the **exact** state (seven variables, nine liability buckets and 16 Branch 21 buckets). A grid cannot run, so $Q$ is fitted by regression on simulated states (regression Monte Carlo, Longstaff–Schwartz style):
 
 $$
 Q_t(s,\alpha_k) = \mathbb E\big[(1-h(t))\,V_{t+1}(s') + h(t)\,\Phi_{t+1}(s') \,\big|\, s, \alpha_k\big],\qquad V_t(s) = Q_t(s,\pi_t(s)),\quad \pi_t = \arg\max_k \hat Q_t,\qquad V_T = \text{reward at } T. \tag{12}
@@ -132,16 +132,26 @@ $$
   *Why:* regressing on $\hat V_{t+1} = \max_k \hat Q_{t+1}$ selects the upward errors, since $\mathbb E[\max_k \hat Q_k] \ge \max_k \mathbb E[Q_k]$, and backward induction passes the overshoot back year by year. Under this baseline that blew up, with in-sample $V_0 = +12.5$ against $-0.42$ out of sample. Clipping bounds the values but keeps the selection bias. With realised targets the regression only ranks actions, so the estimate is a lower bound (the value of a possibly suboptimal policy), not an overshoot. The cost is about $K\,T^2/2$ steps.
 - **Training states.** Paths are simulated in force with exploratory actions on the action grid (11 points). The exit hazard depends on $t$ only, so the in-force state distribution is the same with or without exit.
 - **Fit.** For each year, every action's target is realised on the same noise, at $t$ and in the roll-forward. $Q_t(\cdot,\alpha_k)$ is its least-squares fit on `features(s)`.
-- **Features.** The nine buckets enter only through summaries, which keeps the quadratic basis small:
-  - the total $L_t$ and its weighted rate $\bar G_t = \sum_g g L^{(g)}_t / L_t$ (0 if $L_t = 0$);
-  - the projected terminal liability $L^p_t = \sum_g L^{(g)}_t\big(\tfrac{e^g}{1+W}\big)^{T-t} + c\sum_{k=1}^{T-t}\tfrac{e^{G_t(k-1/2)}}{(1+W)^k}$ (future premiums paid in July at today's $G_t$);
-  - the total $R^{21}_t$, the fund value $R^{23}_t$, and the projected reserve $R^p_t = \sum_k R^{21,(k)}_t\big(\tfrac{e^{r_{k,t}}}{1+W}\big)^{T-t} + R^{23}_t(1+W)^{-(T-t)}$ (the fund has no fixed rate to project at);
-  - the January proxy $i_t$ = `new_premium_rate`.
-  
-  The base list is $(y, G, H/20, K/8, \mu, L, R^{21}, R^{23}, \bar G, L^p, R^p, i_t)$. The basis is a constant, that list, the reward legs at $(L^p, R^p)$, and all pairwise products of the list.
+- **Clipping guard.** Each fitted $Q_t(\cdot,\alpha_k)$ is clipped to $[\min, \max]$ of the targets it was fitted on (`q_values`; `raw_q_values` gives the unclipped fit). An extrapolating fit in a tail state therefore cannot win the argmax. `clip_stats(sol)` reports, per year on the in-force evaluation states, how often the guard binds for some action, for the chosen action, and how often it changes the chosen action.
+- **Features.** The buckets enter only through summaries, which keeps the quadratic basis small. No column is a derived affine function of $y$ at fixed $t$; such a column would only duplicate $y$ and its products.
+  - rate state: $y_t$, $G_t$, $H_t/20$, $K_t/8$, $\mu_t$;
+  - liability:
+    - the total $L_t$;
+    - the projected terminal liability $L^p_t = \sum_g L^{(g)}_t\big(\tfrac{e^g}{1+W}\big)^{T-t} + c\sum_{k=1}^{T-t}\tfrac{e^{G_t(k-1/2)}}{(1+W)^k}$, with future premiums paid in July at today's $G_t$;
+    - the weighted rate $\bar G_t = \sum_g g L^{(g)}_t / L_t$ (0 if $L_t = 0$);
+  - Branch 21:
+    - the total $R^{21}_t$;
+    - the guaranteed floor at $T$, $\sum_k R^{21,(k)}_t\big(\tfrac{e^{i_k}}{1+W}\big)^{T-t}$;
+    - the projection at the current crediting, $\sum_k R^{21,(k)}_t\big(\tfrac{e^{\max(i_k,\,\mu_t - m_{\text{ps}})}}{1+W}\big)^{T-t}$;
+    - the reserve-weighted tariff $\bar\imath_t$ (0 if $R^{21}_t = 0$);
+  - Branch 23: $R^{23}_t$.
+
+  The basis is a constant, that list of 13, the reward legs at ($L^p$, the Branch 21 projection $+\,R^{23}_t(1+W)^{-(T-t)}$; the fund has no fixed rate to project at), and all pairwise products of the list: 107 columns.
 - **Policy.** `policy(sol)` is the greedy $\alpha$, a function of the observation (the exact state) only. `interior_share(sol)` reports the share of in-force evaluation decisions with $0 < \alpha < 1$.
 
-This is the MDP itself: no state variable is dropped. The only error is the fit of $Q$, through the actions it ranks. The policy is scored out of sample by `simulate()`, which gives a lower bound on the optimum. The in-sample $V_0$ (the realised target of the greedy action at $t = 0$) is reported next to it.
+This is the MDP itself: no state variable is dropped. The only error is the fit of $Q$, through the actions it ranks. The policy is scored out of sample by `simulate()`, which gives a lower bound on the optimum. The in-sample $V_0$ (the realised target of the greedy action at $t = 0$) is reported next to it. `solve` also returns `timings` (forward simulation, rollouts, fits).
+
+**Known-answer check** (`tests/test_baseline_dp.py`). With $\sigma \to 0$ and the monthly normals set to 0, the rate path is deterministic and the same on every path; only exits differ. Each premium's choice is then separate: the reward rises with $R_T$, and both assets keep accruing after exit. So the optimal $\alpha_t$ puts the year-$t$ premium where it is worth more at $T$. That is Branch 21 at $\tfrac12 r_t + \sum_{s>t} r_s$ in logs, with $r_s = \max(\text{tariff}(y_{\text{Jul},t}), \mu_s - m_{\text{ps}})$, against the fund's log monthly returns after its July return. The DP must match that on at least 95% of in-force evaluation states.
 
 ## 8. Changelog
 
