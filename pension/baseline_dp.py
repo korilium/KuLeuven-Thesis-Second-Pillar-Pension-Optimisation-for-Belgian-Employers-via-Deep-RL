@@ -11,7 +11,8 @@ Q is fitted instead (regression Monte Carlo, Longstaff-Schwartz style):
 - s' is the state after year t, from baseline.step itself.
 - Phi_j is the value of leaving at tau = j. Nothing is decided after leaving, so
   it is rolled forward exactly: the liability buckets are fixed in money, the
-  units decay by the fund fee, and R21 accrues at the path's i_s.
+  units decay by the fund fee, and each Branch 21 bucket accrues at its bucket
+  rate on the path's mu_s (tariff plus profit-sharing).
 - The regression target is NOT the fitted V_{t+1}: it is what the path actually
   earns from t + 1 on under the already-fitted policy pi_{t+1}, ..., pi_{T-1}.
   Unrolling Eq. (12), that is the survival-weighted mix of the leaver values along
@@ -40,16 +41,18 @@ from pension import baseline as b
 def features(obs, t, p):
     """Regression basis at year t, from the observation (the exact state) only.
 
-    The nine buckets enter through summaries, not one by one, to keep the quadratic
+    The buckets enter through summaries, not one by one, to keep the quadratic
     basis small: the total L_t; its weighted rate Gbar_t; the projected terminal
     liability Lp_t if the member stays (each bucket at its own g, future mid-year
-    premiums at the current G_t); the projected reserve Rp_t (current i_t held
-    fixed, units net of the fee); and the two spreads that drive the choice,
-    y_long - c_fee - i_t (ladder vs Branch 21) and y_long - G_t (ladder vs new
-    guarantee), with their positive parts. Then the reward legs at (Lp, Rp) and all
-    products of pairs of the base list."""
-    y, G, Hm, Km, mu, R21, N = obs[:, 1:8].T
-    Lg = obs[:, 8:].T                                     # (9, n), order of wap_grid()
+    premiums at the current G_t); the total R21_t; the projected reserve Rp_t (each
+    Branch 21 bucket at its current bucket rate, units net of the fee); and the two
+    spreads that drive the choice, y_long - c_fee - i_t (ladder vs Branch 21, i_t the
+    January proxy new_premium_rate) and y_long - G_t (ladder vs new guarantee), with
+    their positive parts. Then the reward legs at (Lp, Rp) and all products of pairs
+    of the base list."""
+    y, G, Hm, Km, mu, N = obs[:, 1:7].T
+    Lg = obs[:, 7:16].T                                   # (9, n), order of wap_grid()
+    R21k = obs[:, 16:].T                                  # (16, n), order of tariff_grid()
     grid = b.wap_grid()
     m = p.T - t
     L = Lg.sum(axis=0)
@@ -57,9 +60,11 @@ def features(obs, t, p):
     Gbar = np.divide(gL, L, out=np.zeros_like(L), where=L > 0)
     Lp = sum(Lg[k] * (np.exp(g) / (1 + p.W)) ** m for k, g in enumerate(grid))
     Lp = Lp + p.C * sum(np.exp(G * (k - 0.5)) / (1 + p.W) ** k for k in range(1, m + 1))
-    i = b.credited_rate(mu, p)
-    gi = np.exp(i) / (1 + p.W)
-    Rp = R21 * gi ** m + N * (1 - p.FUND_FEE) ** m * (1 + p.W) ** -m
+    R21 = R21k.sum(axis=0)
+    Rp = sum(R21k[k] * (np.exp(b.bucket_rate(i_k, mu, p)) / (1 + p.W)) ** m
+             for k, i_k in enumerate(b.tariff_grid(p)))
+    Rp = Rp + N * (1 - p.FUND_FEE) ** m * (1 + p.W) ** -m
+    i = b.new_premium_rate(y, mu, p)
     y_long = b.locked_yield(y, t, b.vasicek_params(p), p)
     s21, sG = y_long - p.FUND_FEE - i, y_long - G
     emp, short = b.reward_legs(Lp, Rp, p.T, p)
@@ -71,12 +76,14 @@ def features(obs, t, p):
 
 
 def paidup_growth(states, p):
-    """Per path, the growth of R21 (in units of S_T) from January of year tau to T
-    after leaving at tau: prod_{s >= tau} e^{i_s} / (1 + W). (T + 1, n); row T is 1.
-    The rates are exogenous, so the in-force training states supply i_s."""
-    i = np.array([b.credited_rate(s.mu, p) for s in states[:p.T]])
-    g = np.exp(np.cumsum(i[::-1], axis=0)[::-1]) / (1 + p.W) ** (p.T - np.arange(p.T))[:, None]
-    return np.vstack([g, np.ones(i.shape[1])])
+    """Per path and Branch 21 bucket, the growth (in units of S_T) from January of
+    year tau to T after leaving at tau: prod_{s >= tau} e^{r_k,s} / (1 + W), with
+    r_k,s = bucket_rate(i_k, mu_s). (T + 1, 16, n); row T is 1. The rates are
+    exogenous, so the in-force training states supply mu_s."""
+    grid = b.tariff_grid(p)
+    r = np.array([[b.bucket_rate(i_k, s.mu, p) for i_k in grid] for s in states[:p.T]])  # (T, 16, n)
+    g = np.exp(np.cumsum(r[::-1], axis=0)[::-1]) / (1 + p.W) ** (p.T - np.arange(p.T))[:, None, None]
+    return np.concatenate([g, np.ones((1,) + r.shape[1:])])
 
 
 def _fit(X, target):
@@ -97,12 +104,13 @@ def _reward(L, R, tau, p):
 
 def leaver_value(s, grow21, p):
     """Phi_tau, Eq. (12): the reward at T of leaving at tau = s.t, rolled forward
-    exactly from the January state s: buckets fixed in money, units net of the fee,
-    R21 by its paid-up growth (grow21 = paidup_growth, row tau)."""
+    exactly from the January state s: liability buckets fixed in money, units net of
+    the fee, each Branch 21 bucket by its paid-up growth (grow21 = paidup_growth,
+    row tau)."""
     tau = s.t
     d = (1 + p.W) ** -(p.T - tau)
     units = s.N * (1 - p.FUND_FEE) ** (p.T - tau) * d
-    return _reward(s.L * d, s.R21 * grow21[tau] + units, tau, p)
+    return _reward(s.L * d, (s.R21k * grow21[tau]).sum(axis=0) + units, tau, p)
 
 
 def rollout_target(s2, t, fits, actions, noise, grow21, p):

@@ -60,13 +60,14 @@ def test_markov_snapshot_restart(noise):
 
 
 def test_branch21_is_the_liability_when_credited_at_G(noise, monkeypatch):
-    """With G held constant (horizontal = vertical then), Branch 21 credited at G is
+    """With G and the tariff both held at 2.5% and no profit-sharing, Branch 21 is
     the liability in force; after exit L is fixed in money while R21 still accrues."""
+    q = dataclasses.replace(p, PS_MARGIN=1.0)             # mu - PS_MARGIN < every tariff
     monkeypatch.setattr(b, "wap_rate", lambda sum24: np.full(sum24.shape, 0.025))
-    monkeypatch.setattr(b, "credited_rate", lambda mu, q: np.full(mu.shape, 0.025))
-    s = b.initial_state(noise.eps[:b.premonths()], p)
-    for t in range(p.T):
-        prev, s = s, b.step(s, np.ones(N), *noise.year(t), p)
+    monkeypatch.setattr(b, "tariff", lambda y, q: np.full(y.shape, 0.025))
+    s = b.initial_state(noise.eps[:b.premonths()], q)
+    for t in range(q.T):
+        prev, s = s, b.step(s, np.ones(N), *noise.year(t), q)
         inf = prev.inforce
         assert np.allclose(s.R21[inf], s.L[inf], rtol=1e-13, atol=0)
         out = ~prev.inforce
@@ -81,11 +82,15 @@ def test_liability_does_not_depend_on_the_policy(noise):
 
 
 def test_branch21_never_decreases_and_branch23_pays_its_units(noise):
-    """In money, R21 never falls below last year's reserve plus the premium (i_t >= 0).
-    Checked in units of S_{t+1}, where i_t = 0 gives equality exactly (e^0 = 1)."""
+    """In money, no Branch 21 bucket ever falls (every bucket rate is >= 0), and the
+    year's Branch 21 premium lands in exactly one bucket. Checked bucket by bucket in
+    units of S_{t+1}, where a rate of 0 gives equality exactly (e^0 = 1)."""
     states = run(noise, 0.5)
     for s0, s1 in zip(states, states[1:]):
-        assert np.all(s1.R21 >= (s0.R21 + 0.5 * p.C * s0.inforce) / (1 + p.W))
+        assert np.all(s1.R21k >= s0.R21k / (1 + p.W))
+        grew = (s1.R21k > s0.R21k * np.exp(np.array([b.bucket_rate(i_k, s0.mu, p) for i_k in b.tariff_grid(p)]))
+                / (1 + p.W) * (1 + 1e-12))                # buckets that received the premium
+        assert np.array_equal(grew.sum(axis=0), s0.inforce.astype(int))
     sT = states[-1]
     assert np.all(b.bond_price(sT.y, p.T, b.vasicek_params(p), p) == 1.0)   # R23_T = N_T P(T,T) = N_T
 
@@ -180,6 +185,48 @@ def test_liability_buckets_are_the_premiums_at_their_own_rate():
                           for j in range(t))
             np.testing.assert_allclose(s.Lg[k], by_hand, rtol=1e-12, atol=1e-300)
         np.testing.assert_array_equal(s.L, s.Lg.sum(axis=0))
+
+
+def july_10Y(s, eps, vp):
+    """The July 10Y of the year starting in state s (the months run February .. January)."""
+    y = s.y
+    for e in eps[:b.JULY + 1]:
+        y = b.vasicek_month(y, e, vp)
+    return y
+
+
+def test_tariffs_on_grid_buckets_sum_and_profit_sharing_nonnegative(noise):
+    """Eq. (5a)-(6c): the tariff grid is 0, 0.25%, ..., 3.75% (16 levels); every
+    tariff a July premium gets lies on it; the Branch 21 buckets sum to R21; and no
+    bucket's profit-sharing is negative."""
+    grid = b.tariff_grid(p)
+    assert len(grid) == 16 and grid[0] == 0.0 and grid[-1] == 0.0375
+    y = np.linspace(-0.03, 0.10, 2001)
+    i = b.tariff(y, p)
+    assert np.isin(i, grid).all() and i.min() == 0.0 and i.max() == 0.0375
+    assert np.all(i <= np.maximum(y - p.TARIFF_MARGIN, 0) + 1e-15)    # floored, never rounded up
+    vp, states = b.vasicek_params(p), run(noise, 0.5)
+    for t, s in enumerate(states[:-1]):
+        assert np.isin(b.tariff(july_10Y(s, noise.year(t)[0], vp), p), grid).all()
+        np.testing.assert_array_equal(s.R21, s.R21k.sum(axis=0))
+        for i_k in grid:
+            assert np.all(b.bucket_rate(i_k, s.mu, p) >= i_k)
+
+
+def test_branch21_vintages_without_profit_sharing_are_closed_form():
+    """PS_MARGIN very large (no profit-sharing): every bucket is the sum of its
+    vintages, each premium of year j worth C (1 + W)^-(t - j) e^{i_j (t - j - 1/2)} in
+    units of S_t, with i_j the tariff at year j's July 10Y."""
+    q, n = dataclasses.replace(b.BASELINE, PS_MARGIN=1.0), 50
+    noise = b.draw_noise(n, 12, q)
+    states = run(b.Noise(noise.eps, np.ones_like(noise.u)), 1.0, q)   # all in force, all Branch 21
+    vp, grid = b.vasicek_params(q), b.tariff_grid(q)
+    i = [b.tariff(july_10Y(s, noise.year(j)[0], vp), q) for j, s in enumerate(states[:-1])]
+    for t, s in enumerate(states):
+        for k, i_k in enumerate(grid):
+            by_hand = sum(q.C * (i[j] == i_k) * np.exp(i_k * (t - j - 0.5)) * (1 + q.W) ** -(t - j)
+                          for j in range(t))
+            np.testing.assert_allclose(s.R21k[k], by_hand, rtol=1e-12, atol=1e-300)
 
 
 def test_horizontal_equals_single_rate_when_G_is_constant(noise, monkeypatch):

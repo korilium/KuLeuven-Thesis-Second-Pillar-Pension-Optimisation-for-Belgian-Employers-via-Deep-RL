@@ -2,16 +2,18 @@
 baseline.py -- the bare-bone baseline: one member, a fixed premium, and each year
 the share of it that goes to Branch 21; the rest buys a zero-coupon OLO maturing at
 retirement T (a duration-matched ladder in a Branch 23 fund). The liability follows
-the horizontal WAP method: each premium accrues at the rate G of its own year. A
-fully observed MDP.
+the horizontal WAP method: each premium accrues at the rate G of its own year.
+Branch 21 is horizontal too: each premium gets a tariff locked to retirement, plus
+profit-sharing on top. A fully observed MDP.
 
 Every equation is numbered as in docs/MODEL.md and implemented by one function
 below. Money is in units of the CURRENT salary S_t; one model year is a calendar
 year starting in January; the 10Y OLO is simulated monthly; the premium is paid
 mid-year (July).
 
-    state  s_t = (t, y_t, G_t, H_t, K_t, mu_t, R21_t, N_t, L^(g)_t for the 9 WAP rates g)
-           (docs/MODEL.md, Sec. 2); the liability is L_t = sum_g L^(g)_t
+    state  s_t = (t, y_t, G_t, H_t, K_t, mu_t, N_t, L^(g)_t for the 9 WAP rates g,
+                  R21^(k)_t for the 16 tariff levels i_k)       (docs/MODEL.md, Sec. 2)
+           the liability is L_t = sum_g L^(g)_t, the Branch 21 reserve R21_t = sum_k R21^(k)_t
     action alpha_t in [0, 1]: the Branch 21 share of the premium c S_t
     reward at T only: lambda target ann u(RR_tot / target) - (1 - lambda) (L_tau - R_T)^+ / S_T
 
@@ -36,8 +38,9 @@ class Params:
     T: int = 45                  # career length (years)
     W: float = 0.025             # salary growth
     C: float = 0.05              # contribution rate: premium P_t = C * S_t
-    I_TARIFF: float = 0.00     # Branch 21 tariff floor i^tariff
-    M: float = 0.0               # insurer margin m below the book yield
+    TARIFF_STEP: float = 0.0025  # Branch 21 tariffs are floored to this grid step (Eq. 5a)
+    TARIFF_MARGIN: float = 0.005  # PLACEHOLDER: tariff = July 10Y minus this margin (Eq. 5a)
+    PS_MARGIN: float = 0.005     # PLACEHOLDER: profit-sharing pays mu_t minus this margin (Eq. 5b)
     BOOK_WEIGHT: float = 1 / 48  # monthly weight w of the book-yield filter (mean age ~4 years)
     LAMBDA: float = 0.5          # employee weight
     ETA: float = 2.0             # CRRA curvature
@@ -103,17 +106,59 @@ def book_yield(mu, y, p):
     return mu + p.BOOK_WEIGHT * (y - mu)
 
 
-def credited_rate(mu, p):
-    """Eq. (5), MODEL.md: Branch 21 crediting i_t = max(i^tariff, mu_t - m)."""
-    return np.maximum(p.I_TARIFF, mu - p.M)
+TARIFF_CAP = 0.0375   # highest Branch 21 tariff (Eq. 5a)
+
+
+def tariff_grid(p):
+    """Eq. (5a), MODEL.md: the 16 tariff levels i_k = 0, 0.25%, ..., 3.75%, derived like
+    wap_grid() and rounded to 10 decimals, so i == i_k holds exactly on the grid."""
+    n = int(round(TARIFF_CAP / p.TARIFF_STEP)) + 1
+    return np.round(p.TARIFF_STEP * np.arange(n), 10)
+
+
+def tariff(y, p):
+    """Eq. (5a), MODEL.md: the tariff locked to retirement for a premium paid when the
+    10Y is y: i = floor_to_grid( min(3.75%, max(0, y - TARIFF_MARGIN)) ). The ratio is
+    rounded to 9 decimals before the floor, so a value on a grid point (the cap) is
+    not floored one step down by rounding."""
+    x = np.minimum(TARIFF_CAP, np.maximum(0.0, y - p.TARIFF_MARGIN))
+    return np.round(np.floor(np.round(x / p.TARIFF_STEP, 9)) * p.TARIFF_STEP, 10)
+
+
+def bucket_rate(i_k, mu, p):
+    """Eq. (5b), MODEL.md: the year's rate of a Branch 21 bucket with tariff i_k,
+    max(i_k, mu_t - PS_MARGIN), mu_t read in January: the tariff plus profit-sharing
+    (rate - i_k >= 0 by construction)."""
+    return np.maximum(i_k, mu - p.PS_MARGIN)
+
+
+def new_premium_rate(y, mu, p):
+    """January proxy for what this year's premium would earn in Branch 21:
+    bucket_rate(tariff(y_Jan), mu_t). The real tariff is set at the July 10Y."""
+    return bucket_rate(tariff(y, p), mu, p)
 
 
 # --- balances ------------------------------------------------------------------------
 def accrue(X, P, rate, p):
     """Eq. (6a), MODEL.md: X_{t+1} = X_t e^{rate} + P_t e^{rate / 2}, in units of S_{t+1}.
-    The premium is paid mid-year, so it earns half of the year's rate. The Branch 21
-    reserve at rate i_t, and each liability bucket (Eq. 6b) at its own rate g."""
+    The premium is paid mid-year, so it earns half of the year's rate. Each Branch 21
+    bucket (Eq. 6c) at its bucket rate, and each liability bucket (Eq. 6b) at its g."""
     return (X * np.exp(rate) + P * np.exp(rate / 2)) / (1 + p.W)
+
+
+def accrue_branch21(R21k, P21, i_new, mu, p):
+    """Eq. (6c), MODEL.md: horizontal Branch 21, one bucket per tariff level i_k,
+    R21^(k)_{t+1} = R21^(k)_t e^{r_k} + P21_t 1{i_new = i_k} e^{r_k / 2}, r_k = bucket_rate,
+    in units of S_{t+1}. R21k is (16, n); i_new is the tariff of this year's (July)
+    premium. In force and after exit alike: a paid-up reserve keeps its tariff and
+    its profit-sharing."""
+    grid = tariff_grid(p)
+    # an off-grid tariff would drop its premium from every bucket
+    assert np.isin(i_new, grid).all(), "tariff is not on the grid"
+    out = np.empty_like(R21k)
+    for k, i_k in enumerate(grid):
+        out[k] = accrue(R21k[k], P21 * (i_new == i_k), bucket_rate(i_k, mu, p), p)
+    return out
 
 
 def accrue_liability(Lg, P, G, inforce, p):
@@ -210,9 +255,10 @@ def premium_accrual(y, t, vp, p):
 # --- state and one year ------------------------------------------------------------------
 @dataclass
 class State:
-    """n careers in January of year t. y, G, H, K, mu, R21, N are (n,) arrays; Lg is
-    (9, n), the liability buckets L^(g) in the order of wap_grid(). H and K are the
-    sums of the observed months in the windows of G_{t+1} and G_{t+2}.
+    """n careers in January of year t. y, G, H, K, mu, N are (n,) arrays; Lg is (9, n),
+    the liability buckets L^(g) in the order of wap_grid(); R21k is (16, n), the
+    Branch 21 buckets R21^(k) in the order of tariff_grid(). H and K are the sums of
+    the observed months in the windows of G_{t+1} and G_{t+2}.
     inforce and tau only drive the roll-forward after exit: every decision state is
     in force, with tau = t."""
     t: int
@@ -222,7 +268,7 @@ class State:
     K: np.ndarray
     mu: np.ndarray
     Lg: np.ndarray
-    R21: np.ndarray
+    R21k: np.ndarray
     N: np.ndarray
     inforce: np.ndarray
     tau: np.ndarray
@@ -232,11 +278,16 @@ class State:
         """Eq. (6b), MODEL.md: the total liability L_t = sum_g L^(g)_t."""
         return self.Lg.sum(axis=0)
 
+    @property
+    def R21(self):
+        """Eq. (6c), MODEL.md: the Branch 21 reserve R21_t = sum_k R21^(k)_t."""
+        return self.R21k.sum(axis=0)
+
     def obs(self, p):
-        """The observation (17 values): the state, with t / T and H, K as means of
-        their months, then the 9 buckets."""
+        """The observation (32 values): t / T, y, G, H and K as means of their months,
+        mu, N, then the 9 liability buckets and the 16 Branch 21 buckets."""
         return np.column_stack([np.full_like(self.y, self.t / p.T), self.y, self.G, self.H / 20,
-                                self.K / 8, self.mu, self.R21, self.N, self.Lg.T])
+                                self.K / 8, self.mu, self.N, self.Lg.T, self.R21k.T])
 
 
 def initial_state(eps_pre, p):
@@ -253,7 +304,8 @@ def initial_state(eps_pre, p):
         mu = book_yield(mu, row, p)
     z = np.zeros(n)
     return State(0, y[-1], wap_rate(y[-32:-8].sum(0)), y[-20:].sum(0), y[-8:].sum(0), mu,
-                 np.zeros((len(wap_grid()), n)), z, z, np.ones(n, bool), z)
+                 np.zeros((len(wap_grid()), n)), np.zeros((len(tariff_grid(p)), n)), z,
+                 np.ones(n, bool), z)
 
 
 JULY = 5   # row of July in a year's months, which run February .. next January
@@ -261,10 +313,12 @@ JULY = 5   # row of July in a year's months, which run February .. next January
 
 def step(s, alpha, eps, u, p):
     """One year for every path: twelve months of rates (eps: (12, n)); the premium is
-    paid in July, the balances accrue at the rates fixed in January (G_t, i_t) and
-    the ladder units are bought at the July price; then exit with probability h(t)
-    (u: (n,) uniforms). Out of force: no premium, buckets fixed (rate 0), units held
-    (net of the fee), R21 still at i_t."""
+    paid in July. The liability buckets accrue at their g, the Branch 21 buckets at
+    their bucket rates (tariff, and profit-sharing on mu_t read in January); the
+    July premium gets the tariff of the July 10Y, and the ladder units are bought at
+    the July price; then exit with probability h(t) (u: (n,) uniforms). Out of
+    force: no premium, liability buckets fixed (rate 0), units held (net of the
+    fee), Branch 21 buckets still at their bucket rates."""
     vp = vasicek_params(p)
     y, mu, months = s.y, s.mu, []
     for e in eps:                                         # February .. next January
@@ -274,11 +328,11 @@ def step(s, alpha, eps, u, p):
     m = np.array(months)
     P = p.C * s.inforce
     Lg = accrue_liability(s.Lg, P, s.G, s.inforce, p)
-    R21 = accrue(s.R21, alpha * P, credited_rate(s.mu, p), p)
+    R21k = accrue_branch21(s.R21k, alpha * P, tariff(m[JULY], p), s.mu, p)
     N = buy_units(s.N, (1 - alpha) * P, bond_price(m[JULY], s.t + 0.5, vp, p), p)
     leave = s.inforce & (u < hazard(s.t, p))
     return State(s.t + 1, y, wap_rate(s.H + m[:4].sum(0)), s.K + m.sum(0), m[4:].sum(0), mu,
-                 Lg, R21, N, s.inforce & ~leave, np.where(s.inforce, s.t + 1, s.tau))
+                 Lg, R21k, N, s.inforce & ~leave, np.where(s.inforce, s.t + 1, s.tau))
 
 
 # --- noise, evaluation and the environment ------------------------------------------------
@@ -303,20 +357,30 @@ def draw_noise(n, seed, p=BASELINE):
 
 
 def simulate(policy, n=10000, seed=None, p=BASELINE, noise=None):
-    """Monte Carlo of a policy obs (n, 17) -> alpha (n,) over n careers (seed: EVAL_SEED).
+    """Monte Carlo of a policy obs (n, 32) -> alpha (n,) over n careers (seed: EVAL_SEED).
     "joint" is the objective J (A5) and "reward" the per-path reward; the premium cost
-    sum_{t<tau} C (1+W)^-(T-t) A(t,T), which no policy changes, is reported apart."""
+    sum_{t<tau} C (1+W)^-(T-t) A(t,T), which no policy changes, is reported apart.
+    by_year: rate diagnostics; "i_minus_G" uses the January proxy new_premium_rate;
+    "ps" is the profit-sharing rate mu_t - PS_MARGIN - i_k, floored at 0, weighted by
+    the Branch 21 reserve over all buckets and paths; "ps_share" the share of that
+    reserve whose profit-sharing is > 0 (both 0 in a year with no reserve yet)."""
     noise = draw_noise(n, p.EVAL_SEED if seed is None else seed, p) if noise is None else noise
     vp = vasicek_params(p)
     s = initial_state(noise.eps[:premonths()], p)
     cost = np.zeros(s.y.shape)
-    diag = {k: np.zeros(p.T) for k in ("G", "G_floor", "mu", "i_minus_G", "r", "y_long")}
+    grid = tariff_grid(p)
+    diag = {k: np.zeros(p.T) for k in ("G", "G_floor", "mu", "i_minus_G", "r", "y_long", "ps", "ps_share")}
     for t in range(p.T):
-        i = credited_rate(s.mu, p)
+        i = new_premium_rate(s.y, s.mu, p)
         for k, v in (("G", s.G), ("G_floor", s.G <= WAP_FLOOR + 1e-12), ("mu", s.mu),
                      ("i_minus_G", i - s.G), ("r", short_rate(s.y, vp)),
                      ("y_long", locked_yield(s.y, t, vp, p))):
             diag[k][t] = v.mean()
+        ps = np.array([bucket_rate(i_k, s.mu, p) - i_k for i_k in grid])      # (16, n)
+        reserve = s.R21k.sum()
+        if reserve > 0:
+            diag["ps"][t] = (ps * s.R21k).sum() / reserve
+            diag["ps_share"][t] = s.R21k[ps > 0].sum() / reserve
         alpha = np.clip(policy(s.obs(p)), 0.0, 1.0)
         cost += s.inforce * p.C * (1 + p.W) ** -(p.T - t) * premium_accrual(s.y, t, vp, p)
         s = step(s, alpha, *noise.year(t), p)
@@ -327,7 +391,7 @@ def simulate(policy, n=10000, seed=None, p=BASELINE, noise=None):
                 reward=reward, L=s.L, R21=s.R21, N=s.N, by_year=diag)
 
 
-# --- benchmark policies: obs (n, 17) -> alpha (n,) ----------------------------------------
+# --- benchmark policies: obs (n, 32) -> alpha (n,) ----------------------------------------
 def all_branch21(obs):
     """alpha = 1: the whole premium to Branch 21."""
     return np.ones(len(obs))
@@ -339,22 +403,23 @@ def all_ladder(obs):
 
 
 def threshold_rule(p=BASELINE):
-    """alpha = 1{ i_t >= y_long_t - c_fee }: Branch 21 when its crediting rate beats the
-    ladder's locked yield net of the fee. Both are read in January; the ladder is
-    bought at the July price, so y_long_t is the January proxy for it. Optimal only
-    when Branch 21 is locked too (BOOK_WEIGHT = 0); with floating crediting, a gap
-    to the DP is the value of optimising, not an error."""
+    """alpha = 1{ i_t >= y_long_t - c_fee }: Branch 21 when the rate a new premium would
+    earn this year beats the ladder's locked yield net of the fee. Both are January
+    proxies: i_t = new_premium_rate at the January 10Y (the tariff is set in July),
+    and y_long_t for the July ladder price. A benchmark, not the optimum: profit-
+    sharing makes Branch 21 partly floating, so a gap to the DP is the value of
+    optimising, not an error."""
     vp = vasicek_params(p)
 
     def act(obs):
         t = int(round(obs[0, 0] * p.T))
-        i, y_long = credited_rate(obs[:, 5], p), locked_yield(obs[:, 1], t, vp, p)
+        i, y_long = new_premium_rate(obs[:, 1], obs[:, 5], p), locked_yield(obs[:, 1], t, vp, p)
         return (i >= y_long - p.FUND_FEE).astype(float)
     return act
 
 
 class PensionEnv(gym.Env):
-    """One career per episode, gamma = 1. Observation = State.obs (17,), action =
+    """One career per episode, gamma = 1. Observation = State.obs (32,), action =
     alpha_t. The reward is 0 until T; when the member leaves, the remaining years are
     rolled forward on the episode's own noise and the reward at T is paid at once.
     reset(options={"noise": Noise of one path}) replays given noise; adding
@@ -363,7 +428,7 @@ class PensionEnv(gym.Env):
 
     def __init__(self, p=BASELINE, pool=2000):
         self.p, self.pool = p, pool
-        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(17,), dtype=np.float64)
+        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(32,), dtype=np.float64)
         self.action_space = spaces.Box(0.0, 1.0, shape=(1,), dtype=np.float64)
         self._train = None
 
