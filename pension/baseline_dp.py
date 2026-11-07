@@ -1,24 +1,33 @@
 """
 baseline_dp.py -- dynamic programming for the baseline MDP (pension/baseline.py) on
-its FULL exact state, with the value function fitted by regression.
+its FULL exact state, with the action values fitted by regression.
 
-A grid over the nine state variables cannot run (about 1e8 points per year), so
-the value function is fitted instead (regression Monte Carlo):
+A grid over the state (eight variables and nine liability buckets) cannot run, so
+Q is fitted instead (regression Monte Carlo, Longstaff-Schwartz style):
 
     Q_t(s, a_k) = E[ (1 - h(t)) V_{t+1}(s') + h(t) Phi_{t+1}(s') | s, a_k ]       Eq. (12), MODEL.md
-    V_t(s)      = max_k Q_t(s, a_k),   V_T = the reward at T (exact)
+    V_t(s)      = Q_t(s, pi_t(s)),  pi_t = argmax_k of the fitted Q_t,  V_T = the reward at T
 
 - s' is the state after year t, from baseline.step itself.
-- Phi_{t+1} is the value of leaving at tau = t + 1. Nothing is decided after
-  leaving, so it is rolled forward exactly: L and N are fixed in money, and R21
-  accrues at the path's i_s.
+- Phi_j is the value of leaving at tau = j. Nothing is decided after leaving, so
+  it is rolled forward exactly: the liability buckets are fixed in money, the
+  units decay by the fund fee, and R21 accrues at the path's i_s.
+- The regression target is NOT the fitted V_{t+1}: it is what the path actually
+  earns from t + 1 on under the already-fitted policy pi_{t+1}, ..., pi_{T-1}.
+  Unrolling Eq. (12), that is the survival-weighted mix of the leaver values along
+  the realised rate path plus the reward at T if the member stays,
+      sum_{j=t+1}^{T} P(exit at j) Phi_j + P(stay to T) reward_T.
+  The fit then only ranks actions. Fitting max_k of noisy fitted Q's instead
+  selects upward errors, E[max_k Q_hat] >= max_k E[Q], and backward induction
+  passes the overshoot back year by year; with realised targets the error stays in
+  the ranking, and a suboptimal policy is a lower bound, not an overshoot.
 - Q_t(., a_k) is a least-squares fit, on features of s, of that target realised on
   simulated states with common noise across the actions.
 
-The state is exact, so this is a true MDP: the only error is the fit of V, and
+The state is exact, so this is a true MDP: the only error is the fit of Q, and
 evaluating the policy with baseline.simulate on fresh noise measures it. Exit
 does not depend on the state, so the training states are simulated in force
-(u = 1) and exit enters through h(t) only.
+(u = 1) and exit enters through h(t) only, as exact weights, never sampled.
 """
 
 import numpy as np
@@ -29,18 +38,31 @@ from pension import baseline as b
 def features(obs, t, p):
     """Regression basis at year t, from the observation (the exact state) only.
 
-    The basis is the state; the projected terminal liability and reserve if
-    the member stays (current G_t and i_t held fixed, future premiums all to
-    Branch 21 for the projection only); the reward legs at those projections;
-    and all products of pairs of the state variables and the projections."""
-    y, G, Hm, Km, mu, L, R21, N = obs[:, 1:].T
+    The nine buckets enter through summaries, not one by one, to keep the quadratic
+    basis small: the total L_t; its weighted rate Gbar_t; the projected terminal
+    liability Lp_t if the member stays (each bucket at its own g, future mid-year
+    premiums at the current G_t); the projected reserve Rp_t (current i_t held
+    fixed, units net of the fee); and the two spreads that drive the choice,
+    y_long - c_fee - i_t (ladder vs Branch 21) and y_long - G_t (ladder vs new
+    guarantee), with their positive parts. Then the reward legs at (Lp, Rp) and all
+    products of pairs of the base list."""
+    y, G, Hm, Km, mu, R21, N = obs[:, 1:8].T
+    Lg = obs[:, 8:].T                                     # (9, n), order of wap_grid()
+    grid = b.wap_grid()
     m = p.T - t
-    gl = np.exp(G) / (1 + p.W)
-    gi = np.exp(b.credited_rate(mu, p)) / (1 + p.W)
-    Lp = L * gl ** m + p.C * sum(gl ** k for k in range(1, m + 1))
-    Rp = R21 * gi ** m + N * (1 + p.W) ** -m
+    L = Lg.sum(axis=0)
+    gL = sum(g * Lg[k] for k, g in enumerate(grid))
+    Gbar = np.divide(gL, L, out=np.zeros_like(L), where=L > 0)
+    Lp = sum(Lg[k] * (np.exp(g) / (1 + p.W)) ** m for k, g in enumerate(grid))
+    Lp = Lp + p.C * sum(np.exp(G * (k - 0.5)) / (1 + p.W) ** k for k in range(1, m + 1))
+    i = b.credited_rate(mu, p)
+    gi = np.exp(i) / (1 + p.W)
+    Rp = R21 * gi ** m + N * (1 - p.FUND_FEE) ** m * (1 + p.W) ** -m
+    y_long = b.locked_yield(y, t, b.vasicek_params(p), p)
+    s21, sG = y_long - p.FUND_FEE - i, y_long - G
     emp, short = b.reward_legs(Lp, Rp, p.T, p)
-    base = np.stack([y, G, Hm, Km, mu, L, R21, N, Lp, Rp], axis=1)
+    base = np.stack([y, G, Hm, Km, mu, L, R21, N, Gbar, Lp, Rp,
+                     s21, sG, np.maximum(s21, 0), np.maximum(sG, 0)], axis=1)
     iu = np.triu_indices(base.shape[1])
     quad = (base[:, :, None] * base[:, None, :])[:, iu[0], iu[1]]
     return np.column_stack([np.ones(len(obs)), base, emp, short, quad])
@@ -58,7 +80,9 @@ def paidup_growth(states, p):
 def _fit(X, target):
     """Least squares with columns scaled to unit spread; returns (beta, scale)."""
     scale = X.std(axis=0)
-    scale[scale == 0] = 1.0
+    # a constant column has a std of rounding noise (~1e-18), not 0; dividing by it
+    # would blow the column up to ~1e16 and lstsq would then drop every other column
+    scale[scale <= 1e-12 * np.abs(X).max(axis=0)] = 1.0
     scale[0] = 1.0
     beta = np.linalg.lstsq(X / scale, target, rcond=None)[0]
     return beta, scale
@@ -69,9 +93,39 @@ def _reward(L, R, tau, p):
     return p.LAMBDA * emp - (1 - p.LAMBDA) * short
 
 
+def leaver_value(s, grow21, p):
+    """Phi_tau, Eq. (12): the reward at T of leaving at tau = s.t, rolled forward
+    exactly from the January state s: buckets fixed in money, units net of the fee,
+    R21 by its paid-up growth (grow21 = paidup_growth, row tau)."""
+    tau = s.t
+    d = (1 + p.W) ** -(p.T - tau)
+    units = s.N * (1 - p.FUND_FEE) ** (p.T - tau) * d
+    return _reward(s.L * d, s.R21 * grow21[tau] + units, tau, p)
+
+
+def rollout_target(s2, t, fits, actions, noise, grow21, p):
+    """The regression target of Q_t, Eq. (12) unrolled: from s2 = the state after
+    year t, follow the fitted greedy policy of years t+1 .. T-1 on the training
+    noise, in force, and weight each year's leaver value by its exit probability:
+        h(t) Phi_{t+1} + sum_{j>t} prod_{m=t}^{j-1}(1 - h(m)) h(j) Phi_{j+1}
+                       + prod_{m=t}^{T-1}(1 - h(m)) reward_T.
+    Leaving at T is staying (tau = T), so the last two terms are one reward."""
+    n = len(s2.y)
+    target = b.hazard(t, p) * leaver_value(s2, grow21, p)
+    surv, s = 1 - b.hazard(t, p), s2
+    for j in range(t + 1, p.T):
+        a = actions[q_values(fits[j], s.obs(p), j, p).argmax(axis=1)]
+        s = b.step(s, a, noise.year(j)[0], np.ones(n), p)
+        h = b.hazard(j, p)
+        target = target + surv * h * leaver_value(s, grow21, p)
+        surv = surv * (1 - h)
+    return target + surv * _reward(s.L, s.R21 + s.N, p.T, p)
+
+
 def solve(p=b.BASELINE, n=10000, actions=np.linspace(0.0, 1.0, 11), seed=None):
-    """Backward induction, Eq. (12). Returns the fitted Q per year and action, the
-    action grid, and V0 (the in-sample mean of V_0 over the starting states).
+    """Backward induction, Eq. (12), with realised rollout targets. Returns the
+    fitted Q per year and action, the action grid, and V0: the in-sample mean, over
+    the starting states, of the realised target of the greedy action at t = 0.
     Training noise: seed (default p.TRAIN_SEED), never p.EVAL_SEED."""
     seed = p.TRAIN_SEED if seed is None else seed
     noise = b.draw_noise(n, seed, p)
@@ -86,25 +140,20 @@ def solve(p=b.BASELINE, n=10000, actions=np.linspace(0.0, 1.0, 11), seed=None):
 
     grow21 = paidup_growth(states, p)
 
+    actions = np.asarray(actions, float)
     fits = [None] * p.T
     for t in range(p.T - 1, -1, -1):
         s = states[t]
         X = features(s.obs(p), t, p)
-        eps, u = noise.year(t)[0], stay[t]
-        h = b.hazard(t, p)
-        betas = []
-        for a in actions:
-            s2 = b.step(s, np.full(n, a), eps, u, p)
-            if t + 1 == p.T:
-                v_next = _reward(s2.L, s2.R21 + s2.N, p.T, p)
-            else:
-                v_next = value(fits[t + 1], s2.obs(p), t + 1, p)
-            d = (1 + p.W) ** -(p.T - t - 1)
-            leave = _reward(s2.L * d, s2.R21 * grow21[t + 1] + s2.N * d, t + 1, p)
-            betas.append(_fit(X, (1 - h) * v_next + h * leave))
+        targets = []
+        for a in actions:                                 # common noise across the actions
+            s2 = b.step(s, np.full(n, a), noise.year(t)[0], stay[t], p)
+            targets.append(rollout_target(s2, t, fits, actions, noise, grow21, p))
+        betas = [_fit(X, tg) for tg in targets]
         fits[t] = dict(beta=np.array([bt for bt, _ in betas]), scale=np.array([sc for _, sc in betas]))
-    V0 = float(value(fits[0], states[0].obs(p), 0, p).mean())
-    return dict(fits=fits, actions=np.asarray(actions, float), V0=V0)
+    greedy = q_values(fits[0], states[0].obs(p), 0, p).argmax(axis=1)
+    V0 = float(np.array(targets)[greedy, np.arange(n)].mean())
+    return dict(fits=fits, actions=actions, V0=V0)
 
 
 def q_values(fit, obs, t, p):
@@ -124,3 +173,18 @@ def policy(sol, p=b.BASELINE):
         t = int(round(obs[0, 0] * p.T))
         return sol["actions"][q_values(sol["fits"][t], obs, t, p).argmax(axis=1)]
     return act
+
+
+def interior_share(sol, p=b.BASELINE, n=10000, seed=None):
+    """Share of the in-force decisions of the greedy policy with 0 < alpha < 1, on
+    evaluation noise (seed: EVAL_SEED). The share is 0 when the policy is bang-bang."""
+    noise = b.draw_noise(n, p.EVAL_SEED if seed is None else seed, p)
+    act = policy(sol, p)
+    s = b.initial_state(noise.eps[:b.premonths()], p)
+    interior = decisions = 0
+    for t in range(p.T):
+        a = act(s.obs(p))
+        interior += int(((a > 0) & (a < 1) & s.inforce).sum())
+        decisions += int(s.inforce.sum())
+        s = b.step(s, a, *noise.year(t), p)
+    return interior / decisions

@@ -1,12 +1,17 @@
 """
 baseline.py -- the bare-bone baseline: one member, a fixed premium, and each year
-the share of it that goes to Branch 21. A fully observed MDP.
+the share of it that goes to Branch 21; the rest buys a zero-coupon OLO maturing at
+retirement T (a duration-matched ladder in a Branch 23 fund). The liability follows
+the horizontal WAP method: each premium accrues at the rate G of its own year. A
+fully observed MDP.
 
 Every equation is numbered as in docs/MODEL.md and implemented by one function
 below. Money is in units of the CURRENT salary S_t; one model year is a calendar
-year starting in January; the 10Y OLO is simulated monthly.
+year starting in January; the 10Y OLO is simulated monthly; the premium is paid
+mid-year (July).
 
-    state  s_t = (t, y_t, G_t, H_t, K_t, mu_t, L_t, R21_t, N_t)     (docs/MODEL.md, Sec. 2)
+    state  s_t = (t, y_t, G_t, H_t, K_t, mu_t, R21_t, N_t, L^(g)_t for the 9 WAP rates g)
+           (docs/MODEL.md, Sec. 2); the liability is L_t = sum_g L^(g)_t
     action alpha_t in [0, 1]: the Branch 21 share of the premium c S_t
     reward at T only: lambda target ann u(RR_tot / target) - (1 - lambda) (L_tau - R_T)^+ / S_T
 
@@ -22,7 +27,7 @@ import numpy as np
 from gymnasium import spaces
 
 from pension.rates.calibration import calibration
-from pension.rates.wap import WAP_FLOOR, wap_formula
+from pension.rates.wap import WAP_CAP, WAP_FLOOR, WAP_STEP, wap_formula
 
 
 # --- parameters ----------------------------------------------------------------------
@@ -44,6 +49,8 @@ class Params:
     HTAU: float = 7.0            # decay of the exit hazard (years)
     LONG_RATE_P: Optional[float] = None       # long-run short rate; None: OLS theta of the 10Y
     SPREAD_10Y_SHORT: Optional[float] = None  # s_term; None: historical mean (10Y - 1Y)
+    MPR: Optional[float] = None  # market price of rate risk lambda_r (Eq. 7); None: model 10Y = theta at r = theta_r
+    FUND_FEE: float = 0.0        # Branch 23 fund fee c_fee: units decay by (1 - c_fee) a year
     TRAIN_SEED: int = 2026       # noise pool of the RL environment
     EVAL_SEED: int = 7           # noise of simulate() and of evaluation episodes
 
@@ -84,6 +91,13 @@ def wap_rate(sum24):
     return wap_formula(sum24 / 24)
 
 
+def wap_grid():
+    """Eq. (3), MODEL.md: the 9 values G can take, 1.75%, 2.00%, ..., 3.75%. Rounded to
+    10 decimals exactly as wap_formula rounds, so G == g holds exactly on the grid."""
+    n = int(round((WAP_CAP - WAP_FLOOR) / WAP_STEP)) + 1
+    return np.round(WAP_FLOOR + WAP_STEP * np.arange(n), 10)
+
+
 def book_yield(mu, y, p):
     """Eq. (4), MODEL.md: monthly exponential filter of the 10Y, mu <- mu + w (y - mu)."""
     return mu + p.BOOK_WEIGHT * (y - mu)
@@ -96,19 +110,73 @@ def credited_rate(mu, p):
 
 # --- balances ------------------------------------------------------------------------
 def accrue(X, P, rate, p):
-    """Eq. (6), MODEL.md: X_{t+1} = (X_t + P_t) e^{rate}, in units of S_{t+1}.
-    The ONE recursion of the liability (rate G_t) and the Branch 21 reserve (rate i_t)."""
-    return (X + P) * np.exp(rate) / (1 + p.W)
+    """Eq. (6a), MODEL.md: X_{t+1} = X_t e^{rate} + P_t e^{rate / 2}, in units of S_{t+1}.
+    The premium is paid mid-year, so it earns half of the year's rate. The Branch 21
+    reserve at rate i_t, and each liability bucket (Eq. 6b) at its own rate g."""
+    return (X * np.exp(rate) + P * np.exp(rate / 2)) / (1 + p.W)
 
 
-def bond_price(y, t, p):
-    """Eq. (7), MODEL.md: P(t, T) = exp(-y_t (T - t)), flat at the 10Y; P(T, T) = 1."""
-    return np.exp(-y * (p.T - t))
+def accrue_liability(Lg, P, G, inforce, p):
+    """Eq. (6b), MODEL.md: horizontal WAP liability, one bucket per statutory rate g,
+    L^(g)_{t+1} = L^(g)_t e^g + P_t 1{G_t = g} e^{g / 2}, in units of S_{t+1}.
+    Lg is (9, n). Each premium keeps the rate G of the year it was paid in; after
+    exit the buckets are frozen in money (rate 0)."""
+    grid = wap_grid()
+    # an off-grid G would drop its premium from every bucket
+    assert np.isin(G, grid).all(), "G is not on the statutory grid"
+    out = np.empty_like(Lg)
+    for k, g in enumerate(grid):
+        out[k] = accrue(Lg[k], P * (G == g), g * inforce, p)
+    return out
+
+
+def zero_price(r, tau, theta_q, vp):
+    """Eq. (7), MODEL.md: Vasicek zero-coupon price of maturity tau at short rate r,
+    A exp(-B r), B = (1 - e^{-kappa tau}) / kappa,
+    ln A = (theta_Q - sigma^2 / (2 kappa^2)) (B - tau) - sigma^2 B^2 / (4 kappa)."""
+    k, s = vp["kappa"], vp["sigma"]
+    B = (1 - np.exp(-k * tau)) / k
+    lnA = (theta_q - s ** 2 / (2 * k ** 2)) * (B - tau) - s ** 2 * B ** 2 / (4 * k)
+    return np.exp(lnA - B * r)
+
+
+def market_price_of_risk(vp, p):
+    """Eq. (7a), MODEL.md: lambda_r = MPR, or (None) the value at which the model's own
+    10Y zero yield at r = theta_r equals theta, the long-run mean of the simulated 10Y:
+    -ln P(10) / 10 = theta. ln P is linear in theta_Q, so
+    theta_Q = sigma^2 / (2 kappa^2) + (B theta_r + sigma^2 B^2 / (4 kappa) - 10 theta) / (B - 10),
+    B = B(10), and lambda_r = (theta_r - theta_Q) kappa / sigma. Without it (lambda_r = 0)
+    the model's long yields sit below the simulated 10Y by s_term plus convexity."""
+    if p.MPR is not None:
+        return p.MPR
+    k, s, tau = vp["kappa"], vp["sigma"], 10.0
+    theta_r = vp["theta"] - vp["spread"]
+    B = (1 - np.exp(-k * tau)) / k
+    theta_q = s ** 2 / (2 * k ** 2) + (B * theta_r + s ** 2 * B ** 2 / (4 * k) - tau * vp["theta"]) / (B - tau)
+    return (theta_r - theta_q) * k / s
+
+
+def bond_price(y, t, vp, p):
+    """Eq. (7), MODEL.md: zero-coupon OLO maturing at T, priced at time t (t may be
+    fractional) in the Vasicek model of the short rate r = y - s_term, which has the
+    10Y's kappa, sigma and theta_r = theta - s_term. Under Q, dW^Q = dW^P + lambda_r dt,
+    so theta_Q = theta_r - lambda_r sigma / kappa; a bond then earns r - lambda_r sigma B
+    under P, i.e. lambda_r < 0 is a positive term premium. P(T, T) = 1."""
+    theta_q = vp["theta"] - vp["spread"] - market_price_of_risk(vp, p) * vp["sigma"] / vp["kappa"]
+    return zero_price(short_rate(y, vp), p.T - t, theta_q, vp)
+
+
+def locked_yield(y, t, vp, p):
+    """Eq. (7), MODEL.md: the yield a ladder unit bought at t locks in to T,
+    y_long_t = -ln P(t, T) / (T - t), for t < T."""
+    return -np.log(bond_price(y, t, vp, p)) / (p.T - t)
 
 
 def buy_units(N, P23, price, p):
-    """Eq. (8), MODEL.md: N_{t+1} = N_t + P23_t / P(t, T), in units of S_{t+1}."""
-    return (N + P23 / price) / (1 + p.W)
+    """Eq. (8), MODEL.md: N_{t+1} = (1 - c_fee) N_t + (1 - c_fee)^{1/2} P23_t / P(t + 1/2, T),
+    in units of S_{t+1}. The fee runs over the time a unit is held: a full year for
+    the units held in January, half a year for those bought with the July premium."""
+    return ((1 - p.FUND_FEE) * N + (1 - p.FUND_FEE) ** 0.5 * P23 / price) / (1 + p.W)
 
 
 def hazard(t, p):
@@ -142,8 +210,9 @@ def premium_accrual(y, t, vp, p):
 # --- state and one year ------------------------------------------------------------------
 @dataclass
 class State:
-    """n careers in January of year t. y, G, H, K, mu, L, R21, N are (n,) arrays; H and K
-    are the sums of the observed months in the windows of G_{t+1} and G_{t+2}.
+    """n careers in January of year t. y, G, H, K, mu, R21, N are (n,) arrays; Lg is
+    (9, n), the liability buckets L^(g) in the order of wap_grid(). H and K are the
+    sums of the observed months in the windows of G_{t+1} and G_{t+2}.
     inforce and tau only drive the roll-forward after exit: every decision state is
     in force, with tau = t."""
     t: int
@@ -152,16 +221,22 @@ class State:
     H: np.ndarray
     K: np.ndarray
     mu: np.ndarray
-    L: np.ndarray
+    Lg: np.ndarray
     R21: np.ndarray
     N: np.ndarray
     inforce: np.ndarray
     tau: np.ndarray
 
+    @property
+    def L(self):
+        """Eq. (6b), MODEL.md: the total liability L_t = sum_g L^(g)_t."""
+        return self.Lg.sum(axis=0)
+
     def obs(self, p):
-        """The observation: the state, with t / T and H, K as means of their months."""
-        return np.stack([np.full_like(self.y, self.t / p.T), self.y, self.G, self.H / 20,
-                         self.K / 8, self.mu, self.L, self.R21, self.N], axis=1)
+        """The observation (17 values): the state, with t / T and H, K as means of
+        their months, then the 9 buckets."""
+        return np.column_stack([np.full_like(self.y, self.t / p.T), self.y, self.G, self.H / 20,
+                                self.K / 8, self.mu, self.R21, self.N, self.Lg.T])
 
 
 def initial_state(eps_pre, p):
@@ -178,27 +253,32 @@ def initial_state(eps_pre, p):
         mu = book_yield(mu, row, p)
     z = np.zeros(n)
     return State(0, y[-1], wap_rate(y[-32:-8].sum(0)), y[-20:].sum(0), y[-8:].sum(0), mu,
-                 z, z, z, np.ones(n, bool), z)
+                 np.zeros((len(wap_grid()), n)), z, z, np.ones(n, bool), z)
+
+
+JULY = 5   # row of July in a year's months, which run February .. next January
 
 
 def step(s, alpha, eps, u, p):
-    """One year for every path: premium at the start, accrual over the year, twelve
-    months of rates (eps: (12, n)), then exit with probability h(t) (u: (n,) uniforms).
-    Out of force: no premium, L fixed (rate 0), units held, R21 still at i_t."""
+    """One year for every path: twelve months of rates (eps: (12, n)); the premium is
+    paid in July, the balances accrue at the rates fixed in January (G_t, i_t) and
+    the ladder units are bought at the July price; then exit with probability h(t)
+    (u: (n,) uniforms). Out of force: no premium, buckets fixed (rate 0), units held
+    (net of the fee), R21 still at i_t."""
     vp = vasicek_params(p)
-    P = p.C * s.inforce
-    L = accrue(s.L, P, s.G * s.inforce, p)
-    R21 = accrue(s.R21, alpha * P, credited_rate(s.mu, p), p)
-    N = buy_units(s.N, (1 - alpha) * P, bond_price(s.y, s.t, p), p)
     y, mu, months = s.y, s.mu, []
     for e in eps:                                         # February .. next January
         y = vasicek_month(y, e, vp)
         mu = book_yield(mu, y, p)
         months.append(y)
     m = np.array(months)
+    P = p.C * s.inforce
+    Lg = accrue_liability(s.Lg, P, s.G, s.inforce, p)
+    R21 = accrue(s.R21, alpha * P, credited_rate(s.mu, p), p)
+    N = buy_units(s.N, (1 - alpha) * P, bond_price(m[JULY], s.t + 0.5, vp, p), p)
     leave = s.inforce & (u < hazard(s.t, p))
     return State(s.t + 1, y, wap_rate(s.H + m[:4].sum(0)), s.K + m.sum(0), m[4:].sum(0), mu,
-                 L, R21, N, s.inforce & ~leave, np.where(s.inforce, s.t + 1, s.tau))
+                 Lg, R21, N, s.inforce & ~leave, np.where(s.inforce, s.t + 1, s.tau))
 
 
 # --- noise, evaluation and the environment ------------------------------------------------
@@ -223,18 +303,19 @@ def draw_noise(n, seed, p=BASELINE):
 
 
 def simulate(policy, n=10000, seed=None, p=BASELINE, noise=None):
-    """Monte Carlo of a policy obs (n, 9) -> alpha (n,) over n careers (seed: EVAL_SEED).
+    """Monte Carlo of a policy obs (n, 17) -> alpha (n,) over n careers (seed: EVAL_SEED).
     "joint" is the objective J (A5) and "reward" the per-path reward; the premium cost
     sum_{t<tau} C (1+W)^-(T-t) A(t,T), which no policy changes, is reported apart."""
     noise = draw_noise(n, p.EVAL_SEED if seed is None else seed, p) if noise is None else noise
     vp = vasicek_params(p)
     s = initial_state(noise.eps[:premonths()], p)
     cost = np.zeros(s.y.shape)
-    diag = {k: np.zeros(p.T) for k in ("G", "G_floor", "mu", "i_minus_G", "r")}
+    diag = {k: np.zeros(p.T) for k in ("G", "G_floor", "mu", "i_minus_G", "r", "y_long")}
     for t in range(p.T):
         i = credited_rate(s.mu, p)
         for k, v in (("G", s.G), ("G_floor", s.G <= WAP_FLOOR + 1e-12), ("mu", s.mu),
-                     ("i_minus_G", i - s.G), ("r", short_rate(s.y, vp))):
+                     ("i_minus_G", i - s.G), ("r", short_rate(s.y, vp)),
+                     ("y_long", locked_yield(s.y, t, vp, p))):
             diag[k][t] = v.mean()
         alpha = np.clip(policy(s.obs(p)), 0.0, 1.0)
         cost += s.inforce * p.C * (1 + p.W) ** -(p.T - t) * premium_accrual(s.y, t, vp, p)
@@ -246,8 +327,34 @@ def simulate(policy, n=10000, seed=None, p=BASELINE, noise=None):
                 reward=reward, L=s.L, R21=s.R21, N=s.N, by_year=diag)
 
 
+# --- benchmark policies: obs (n, 17) -> alpha (n,) ----------------------------------------
+def all_branch21(obs):
+    """alpha = 1: the whole premium to Branch 21."""
+    return np.ones(len(obs))
+
+
+def all_ladder(obs):
+    """alpha = 0: the whole premium to the zero-coupon ladder."""
+    return np.zeros(len(obs))
+
+
+def threshold_rule(p=BASELINE):
+    """alpha = 1{ i_t >= y_long_t - c_fee }: Branch 21 when its crediting rate beats the
+    ladder's locked yield net of the fee. Both are read in January; the ladder is
+    bought at the July price, so y_long_t is the January proxy for it. Optimal only
+    when Branch 21 is locked too (BOOK_WEIGHT = 0); with floating crediting, a gap
+    to the DP is the value of optimising, not an error."""
+    vp = vasicek_params(p)
+
+    def act(obs):
+        t = int(round(obs[0, 0] * p.T))
+        i, y_long = credited_rate(obs[:, 5], p), locked_yield(obs[:, 1], t, vp, p)
+        return (i >= y_long - p.FUND_FEE).astype(float)
+    return act
+
+
 class PensionEnv(gym.Env):
-    """One career per episode, gamma = 1. Observation = State.obs (9,), action =
+    """One career per episode, gamma = 1. Observation = State.obs (17,), action =
     alpha_t. The reward is 0 until T; when the member leaves, the remaining years are
     rolled forward on the episode's own noise and the reward at T is paid at once.
     reset(options={"noise": Noise of one path}) replays given noise; adding
@@ -256,7 +363,7 @@ class PensionEnv(gym.Env):
 
     def __init__(self, p=BASELINE, pool=2000):
         self.p, self.pool = p, pool
-        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(9,), dtype=np.float64)
+        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(17,), dtype=np.float64)
         self.action_space = spaces.Box(0.0, 1.0, shape=(1,), dtype=np.float64)
         self._train = None
 
